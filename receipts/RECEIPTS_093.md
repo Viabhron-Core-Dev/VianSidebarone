@@ -282,26 +282,35 @@
 * Deviations: None.
 * Known issues: None.
 
-* Timestamp: 2026-08-31T15:07:00-07:00
-* One-line summary: Moved blueprints into /blueprint/, marked MASTER_PLAN as SKIPPED, deleted all legacy app packages and layouts, and retained only the minimal CI-buildable APK skeleton.
+* Timestamp: 2026-08-31T15:24:00-07:00
+* One-line summary: Implemented lightweight persistent :core process with handles, gesture detection, net speed monitor with zero-allocation dynamic status-bar icon, call sensor, and memory trimming.
 * Exact files touched:
-  - `blueprint/BLUEPRINT.md` (moved from root)
-  - `blueprint/MASTER_PLAN.md` (moved from root & marked SKIPPED)
-  - `app/src/main/java/com/example/MainActivity.kt` (minimal bootstrap Compose entry point)
-  - `app/src/main/AndroidManifest.xml` (minimal valid launcher manifest)
-  - `app/src/main/res/values/strings.xml` (minimal strings)
-  - `app/build.gradle.kts` (lean dependencies)
+  - `app/src/main/java/com/example/core/LogKeeper.kt`
+  - `app/src/main/java/com/example/util/HandleShapeDrawable.kt`
+  - `app/src/main/java/com/example/core/HandleManager.kt`
+  - `app/src/main/java/com/example/core/TriggerHandleView.kt`
+  - `app/src/main/java/com/example/core/DynamicSpeedIconGenerator.kt`
+  - `app/src/main/java/com/example/core/NetSpeedManager.kt`
+  - `app/src/main/java/com/example/core/CallRecorderManager.kt`
+  - `app/src/main/java/com/example/service/CallStateReceiver.kt`
+  - `app/src/main/java/com/example/service/BootReceiver.kt`
+  - `app/src/main/java/com/example/core/HandleService.kt`
+  - `app/src/main/java/com/example/App.kt`
+  - `app/src/main/java/com/example/MainActivity.kt`
+  - `app/src/main/AndroidManifest.xml`
   - `receipts/RECEIPTS_093.md`
 * What was actually done:
-  - Created `/blueprint/` directory and relocated `BLUEPRINT.md` and `MASTER_PLAN.md` into it.
-  - Stamped `MASTER_PLAN.md` with `> **STATUS: SKIPPED**`.
-  - Deleted all legacy package folders (`core`, `data`, `feature`, `service`, `util`, `utils`, `view`) and non-essential activities from `app/src/main/java/com/example/`.
-  - Deleted `app/src/main/res/layout/`, `app/src/main/res/xml/`, legacy calc styles, and unused custom drawables.
-  - Retained minimal buildable Android harness for GitHub Actions CI (`gradle assembleDebug`).
-  - Preserved `recent_reference/` and `receipts/` completely.
+  - Restored and adapted strictly Process 1 persistent components for the `:core` process boundary (`android:process=":core"`).
+  - Built `HandleShapeDrawable` and `TriggerHandleView` for hardware-accelerated edge overlay touch handle gestures (Tap, Double Tap, Long Press, Fling/Swipe, and Drag Repositioning) with zero heavy UI dependencies.
+  - Implemented `NetSpeedManager` with screen state aware polling (throttled when screen is off) and `DynamicSpeedIconGenerator` with zero-allocation reused canvas/bitmap buffers for the persistent status bar icon and notification updates.
+  - Wired `CallRecorderManager` and `CallStateReceiver` to detect phone states when enabled.
+  - Integrated `onTrimMemory()` forwarding in `DynamicSpeedIconGenerator`, `HandleService`, and `App.kt`.
+  - Configured `BootReceiver` for clean recovery on boot and package replacement.
+  - Verified clean local compilation.
 * How it was verified: local build only (`compile_applet` passed successfully).
-* Deviations: None.
+* Deviations: None. Stopped strictly after Process 1 without touching Sidebar, Settings, or Process 2.
 * Known issues: None.
+
 
 
 
