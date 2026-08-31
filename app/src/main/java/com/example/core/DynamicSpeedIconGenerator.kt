@@ -25,13 +25,13 @@ object DynamicSpeedIconGenerator {
 
     private var activeConfig = IconConfig()
 
-    private var cachedBitmap: Bitmap? = null
-    private var cachedCanvas: Canvas? = null
     private var cachedDensityDpi: Int = -1
     private var cachedSizePx: Int = -1
     private var cachedTypeface: Typeface? = null
     private var cachedNumPaint: Paint? = null
     private var cachedUnitPaint: Paint? = null
+    private val cachedNumBounds = Rect()
+    private val cachedUnitBounds = Rect()
 
     fun loadConfig(prefs: SharedPreferences): IconConfig {
         activeConfig = IconConfig()
@@ -44,10 +44,16 @@ object DynamicSpeedIconGenerator {
         invalidatePaints()
     }
 
-    private fun invalidatePaints() {
+    fun invalidatePaints() {
         cachedTypeface = null
         cachedNumPaint = null
         cachedUnitPaint = null
+        cachedSizePx = -1
+        cachedDensityDpi = -1
+    }
+
+    fun onTrimMemory(level: Int) {
+        invalidatePaints()
     }
 
     fun formatSpeed(bytesPerSec: Long, forcedUnit: String? = null): SpeedDisplay {
@@ -90,16 +96,22 @@ object DynamicSpeedIconGenerator {
     }
 
     fun getNotificationIconSize(context: Context): Int {
+        if (cachedSizePx > 0) return cachedSizePx
         val res = context.resources
         val resId = res.getIdentifier("status_bar_icon_size", "dimen", "android")
+        var size = -1
         if (resId > 0) {
             try {
-                val size = res.getDimensionPixelSize(resId)
-                if (size in 24..128) return size
+                val s = res.getDimensionPixelSize(resId)
+                if (s in 24..128) size = s
             } catch (e: Exception) {}
         }
-        val density = res.displayMetrics.density
-        return Math.round(24f * density).coerceAtLeast(24)
+        if (size <= 0) {
+            val density = res.displayMetrics.density
+            size = Math.round(24f * density).coerceAtLeast(24)
+        }
+        cachedSizePx = size
+        return size
     }
 
     fun generateStatusBarBitmap(
@@ -135,37 +147,49 @@ object DynamicSpeedIconGenerator {
         display: SpeedDisplay,
         config: IconConfig
     ) {
-        val tf = try {
-            if (config.font.isNotEmpty()) {
-                Typeface.create(config.font, if (config.isFakeBold) Typeface.BOLD else Typeface.NORMAL)
-            } else {
-                Typeface.create("sans-serif-condensed", if (config.isFakeBold) Typeface.BOLD else Typeface.NORMAL)
+        var tf = cachedTypeface
+        if (tf == null) {
+            tf = try {
+                if (config.font.isNotEmpty()) {
+                    Typeface.create(config.font, if (config.isFakeBold) Typeface.BOLD else Typeface.NORMAL)
+                } else {
+                    Typeface.create("sans-serif-condensed", if (config.isFakeBold) Typeface.BOLD else Typeface.NORMAL)
+                }
+            } catch (e: Exception) {
+                if (config.isFakeBold) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
             }
-        } catch (e: Exception) {
-            if (config.isFakeBold) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
+            cachedTypeface = tf
         }
 
-        val numPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.WHITE
-            typeface = tf
-            textAlign = Paint.Align.CENTER
-            isFakeBoldText = config.isFakeBold
-            isFilterBitmap = false
-            isDither = false
-            style = Paint.Style.FILL
-            letterSpacing = config.letterSpacing
+        var numPaint = cachedNumPaint
+        if (numPaint == null) {
+            numPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.WHITE
+                textAlign = Paint.Align.CENTER
+                isFilterBitmap = false
+                isDither = false
+                style = Paint.Style.FILL
+            }
+            cachedNumPaint = numPaint
         }
+        numPaint.typeface = tf
+        numPaint.isFakeBoldText = config.isFakeBold
+        numPaint.letterSpacing = config.letterSpacing
 
-        val unitPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.WHITE
-            typeface = tf
-            textAlign = Paint.Align.CENTER
-            isFakeBoldText = config.isFakeBold
-            isFilterBitmap = false
-            isDither = false
-            style = Paint.Style.FILL
-            letterSpacing = config.letterSpacing
+        var unitPaint = cachedUnitPaint
+        if (unitPaint == null) {
+            unitPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.WHITE
+                textAlign = Paint.Align.CENTER
+                isFilterBitmap = false
+                isDither = false
+                style = Paint.Style.FILL
+            }
+            cachedUnitPaint = unitPaint
         }
+        unitPaint.typeface = tf
+        unitPaint.isFakeBoldText = config.isFakeBold
+        unitPaint.letterSpacing = config.letterSpacing
 
         val centerX = (sizePx / 2f)
 
@@ -177,10 +201,9 @@ object DynamicSpeedIconGenerator {
         val scaleNum = minOf(if (numTextW > 0f) maxNumW / numTextW else 1f, 1.0f)
         numPaint.textSize = (maxNumH * scaleNum).coerceAtLeast(8f)
 
-        val numBounds = Rect()
-        numPaint.getTextBounds(display.number, 0, display.number.length, numBounds)
+        numPaint.getTextBounds(display.number, 0, display.number.length, cachedNumBounds)
         val numCenterY = (sizePx * 0.34f)
-        val numBaseline = numCenterY + (numBounds.height() / 2f) - numBounds.bottom
+        val numBaseline = numCenterY + (cachedNumBounds.height() / 2f) - cachedNumBounds.bottom
 
         // Bottom Slot: Unit text (kB/s, MB/s)
         val maxUnitW = (sizePx - 2f).coerceAtLeast(10f)
@@ -190,10 +213,9 @@ object DynamicSpeedIconGenerator {
         val scaleUnit = minOf(if (unitTextW > 0f) maxUnitW / unitTextW else 1f, 1.0f)
         unitPaint.textSize = (maxUnitH * scaleUnit).coerceAtLeast(6f)
 
-        val unitBounds = Rect()
-        unitPaint.getTextBounds(display.unit, 0, display.unit.length, unitBounds)
+        unitPaint.getTextBounds(display.unit, 0, display.unit.length, cachedUnitBounds)
         val unitCenterY = (sizePx * 0.81f)
-        val unitBaseline = unitCenterY + (unitBounds.height() / 2f) - unitBounds.bottom
+        val unitBaseline = unitCenterY + (cachedUnitBounds.height() / 2f) - cachedUnitBounds.bottom
 
         canvas.drawText(display.number, centerX, numBaseline, numPaint)
         canvas.drawText(display.unit, centerX, unitBaseline, unitPaint)

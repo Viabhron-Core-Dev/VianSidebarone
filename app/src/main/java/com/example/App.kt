@@ -1,6 +1,7 @@
 package com.example
 
 import android.app.Application
+import android.os.Build
 import android.util.Log
 import com.example.core.LogKeeper
 
@@ -8,12 +9,23 @@ class App : Application() {
     override fun onTrimMemory(level: Int) {
         super.onTrimMemory(level)
         com.example.core.FloatingWindowManager.onTrimMemory(level)
+        com.example.core.DynamicSpeedIconGenerator.onTrimMemory(level)
     }
 
     override fun onCreate() {
         super.onCreate()
         LogKeeper.initialize(this)
-        com.example.core.IconCacheManager.init(this)
+        
+        // Lazy initialize UI icon caches only in UI/sidebar processes to keep :core process lightweight
+        val processName = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            Application.getProcessName()
+        } else {
+            null
+        }
+        val isCoreProcess = processName?.endsWith(":core") == true
+        if (!isCoreProcess) {
+            com.example.core.IconCacheManager.init(this)
+        }
         
         val defaultHandler = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { thread, exception ->

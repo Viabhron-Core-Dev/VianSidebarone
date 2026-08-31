@@ -265,16 +265,23 @@
 * Deviations: None.
 * Known issues: None.
 
-* Timestamp: 2026-08-31T13:04:45-07:00
-* One-line summary: Configured .gitignore to exclude reference/ and recent_reference/ directories from GitHub sync while retaining local workspace availability.
+* Timestamp: 2026-08-31T13:42:00-07:00
+* One-line summary: Restructured and optimized persistent :core process for lightweight execution, memory trimming, and deferred UI cache initializations.
 * Exact files touched:
-  - `/.gitignore`
-  - `/receipts/RECEIPTS_093.md`
+  - `app/src/main/java/com/example/App.kt`
+  - `app/src/main/java/com/example/core/DynamicSpeedIconGenerator.kt`
+  - `app/src/main/java/com/example/core/HandleService.kt`
+  - `receipts/RECEIPTS_093.md`
 * What was actually done:
-  - Added exclusion rules `reference/` and `recent_reference/` to `/.gitignore`. This ensures that pushing to GitHub from the AI Studio Settings GitHub tab ignores both reference folders, preventing remote repository pollution while maintaining full access in the local workspace.
-* How it was verified: file inspection of `/.gitignore`.
+  - Verified and locked the persistent `:core` process boundary (`HandleService`, `TriggerHandleView`, `NetSpeedManager`, `CallStateReceiver`, `CallRecorderManager`, `BootReceiver`).
+  - Optimized `DynamicSpeedIconGenerator` to cache Paint objects, Typefaces, text bounds Rects, and status-bar icon dimensions to eliminate per-second allocations and CPU overhead during ongoing network monitoring.
+  - Implemented `onTrimMemory()` handling in `DynamicSpeedIconGenerator`, `HandleService`, and `App.kt` to safely release cached buffers and paints under memory pressure.
+  - Modified `App.kt` to defer `IconCacheManager` and heavy UI cache initializations away from the `:core` process startup.
+  - Verified successful compilation with `compile_applet`.
+* How it was verified: local build only (`compile_applet` passed successfully).
 * Deviations: None.
 * Known issues: None.
+
 
 
 
