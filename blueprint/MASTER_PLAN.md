@@ -1,5 +1,7 @@
 # MASTER PLAN: Architecture, Multi-Container Gesture System & Clean Rebuild
 
+> **STATUS: SKIPPED** (Archived in blueprint directory per user directive)
+
 ## Executive Overview
 This Master Plan defines the target clean architecture for the project, eliminating architectural bloat, enforcing sub-30 MB idle resident RAM, providing an exact pixel-grid NetSpeed monitor, separating gesture containers, establishing a 2-part Log Keeper, isolating heavy ML Kit / Floating Mini Apps into a separate process, and integrating the call recorder sensor/caller subsystem.
 

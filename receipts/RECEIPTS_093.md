@@ -282,6 +282,27 @@
 * Deviations: None.
 * Known issues: None.
 
+* Timestamp: 2026-08-31T15:07:00-07:00
+* One-line summary: Moved blueprints into /blueprint/, marked MASTER_PLAN as SKIPPED, deleted all legacy app packages and layouts, and retained only the minimal CI-buildable APK skeleton.
+* Exact files touched:
+  - `blueprint/BLUEPRINT.md` (moved from root)
+  - `blueprint/MASTER_PLAN.md` (moved from root & marked SKIPPED)
+  - `app/src/main/java/com/example/MainActivity.kt` (minimal bootstrap Compose entry point)
+  - `app/src/main/AndroidManifest.xml` (minimal valid launcher manifest)
+  - `app/src/main/res/values/strings.xml` (minimal strings)
+  - `app/build.gradle.kts` (lean dependencies)
+  - `receipts/RECEIPTS_093.md`
+* What was actually done:
+  - Created `/blueprint/` directory and relocated `BLUEPRINT.md` and `MASTER_PLAN.md` into it.
+  - Stamped `MASTER_PLAN.md` with `> **STATUS: SKIPPED**`.
+  - Deleted all legacy package folders (`core`, `data`, `feature`, `service`, `util`, `utils`, `view`) and non-essential activities from `app/src/main/java/com/example/`.
+  - Deleted `app/src/main/res/layout/`, `app/src/main/res/xml/`, legacy calc styles, and unused custom drawables.
+  - Retained minimal buildable Android harness for GitHub Actions CI (`gradle assembleDebug`).
+  - Preserved `recent_reference/` and `receipts/` completely.
+* How it was verified: local build only (`compile_applet` passed successfully).
+* Deviations: None.
+* Known issues: None.
+
 
 
 

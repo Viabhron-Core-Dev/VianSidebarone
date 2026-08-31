@@ -1,6 +1,3 @@
 <resources>
     <string name="app_name">Viansidebhro</string>
-    <string name="accessibility_service_description">VianSide uses the Accessibility Service to perform global system actions like Back, Home, and Recents from the side menu.</string>
-    <string name="calculator_copy_result">Copy result</string>
-    <string name="calculator_result_copied">Result copied to clipboard</string>
 </resources>
