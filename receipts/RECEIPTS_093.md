@@ -311,6 +311,30 @@
 * Deviations: None. Stopped strictly after Process 1 without touching Sidebar, Settings, or Process 2.
 * Known issues: None.
 
+* Timestamp: 2026-08-31T15:52:00-07:00
+* One-line summary: Fixed Dynamic Speed Icon blurriness/sizing with immutable snapshots and updated persistent notification with daily total data and Down/Up metrics.
+* Exact files touched:
+  - `app/src/main/java/com/example/core/DynamicSpeedIconGenerator.kt`
+  - `app/src/main/java/com/example/core/DailyDataUsageHelper.kt`
+  - `app/src/main/java/com/example/core/NetSpeedManager.kt`
+  - `app/src/main/java/com/example/core/HandleService.kt`
+  - `app/src/main/AndroidManifest.xml`
+  - `receipts/RECEIPTS_093.md`
+* What was actually done:
+  - Fixed `DynamicSpeedIconGenerator` to query native status-bar icon pixel dimensions directly (`android.R.dimen.status_bar_icon_size` or fallback) without forcing `.coerceAtLeast(48)`.
+  - Resolved dynamic icon degradation/blurriness by eliminating mutable bitmap reuse in asynchronous `IconCompat` delivery, generating an exact-dimension immutable bitmap snapshot per frame.
+  - Implemented anti-aliased font metrics and baseline vertical centering for top-line numeric speed values and bottom-line units.
+  - Created `DailyDataUsageHelper` to query today's total Wi-Fi + Mobile cumulative data usage via `NetworkStatsManager` starting from local midnight, handling permissions gracefully with fallback.
+  - Updated `HandleService` foreground notification structure to:
+    - Row 1 (Title): `Data: <total data used today> • <time>` (e.g. `Data: 531.08 MiB • 30m`)
+    - Row 2 (Content): `Down: <current download speed>   Up: <current upload speed>` (e.g. `Down: 0 kB/s   Up: 0 kB/s`)
+  - Added `android.permission.PACKAGE_USAGE_STATS` declaration to `AndroidManifest.xml`.
+  - Cached daily data usage queries to run every 30s / day changeover rather than querying heavy network stats on every 1-second speed tick.
+* How it was verified: local build only (`compile_applet` passed successfully).
+* Deviations: None.
+* Known issues: None.
+
+
 
 
 

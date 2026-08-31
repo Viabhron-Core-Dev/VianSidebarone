@@ -38,6 +38,11 @@ class HandleService : Service(), SharedPreferences.OnSharedPreferenceChangeListe
 
     private var isSpeedMonitorEnabled = true
     private var isScreenOn = true
+    private var serviceStartTime: Long = System.currentTimeMillis()
+
+    private var cachedTodayDataFormatted: String = "--"
+    private var lastDailyQueryTimestamp: Long = 0L
+    private var cachedDayOfYear: Int = -1
 
     private val screenStateReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
@@ -63,14 +68,16 @@ class HandleService : Service(), SharedPreferences.OnSharedPreferenceChangeListe
 
     override fun onCreate() {
         super.onCreate()
+        serviceStartTime = System.currentTimeMillis()
         handleManager = HandleManager.getInstance(this)
         dynamicSpeedIconGenerator = DynamicSpeedIconGenerator(this)
         notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 
         createNotificationChannel()
 
-        // Start Foreground immediately
-        val initialNotification = buildNotification("0", "B", "0 B/s", "0 B/s")
+        // Start Foreground immediately with initial status
+        val initialTitle = "Data: ${getTodayDataFormatted()} • ${formatElapsedTime()}"
+        val initialNotification = buildNotification("0", "B", initialTitle, "Down: 0 kB/s   Up: 0 kB/s")
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             startForeground(
                 NOTIFICATION_ID,
@@ -123,18 +130,21 @@ class HandleService : Service(), SharedPreferences.OnSharedPreferenceChangeListe
             netSpeedManager?.stop()
             netSpeedManager = null
             // Update to a static standby notification
-            val standbyNotification = buildNotification("0", "B", "Standby", "Net speed disabled")
+            val standbyTitle = "Data: ${getTodayDataFormatted()} • ${formatElapsedTime()}"
+            val standbyNotification = buildNotification("0", "B", standbyTitle, "Down: --   Up: --")
             notificationManager.notify(NOTIFICATION_ID, standbyNotification)
         }
     }
 
     private fun updateSpeedNotification(speedData: SpeedData) {
         try {
+            val titleText = "Data: ${getTodayDataFormatted()} • ${formatElapsedTime()}"
+            val contentText = "Down: ${speedData.downFormatted}   Up: ${speedData.upFormatted}"
             val notification = buildNotification(
                 speedData.downValue,
                 speedData.downUnit,
-                "↓ ${speedData.downFormatted}   ↑ ${speedData.upFormatted}",
-                "VianSide Resident Service Active"
+                titleText,
+                contentText
             )
             notificationManager.notify(NOTIFICATION_ID, notification)
         } catch (e: Exception) {
@@ -142,11 +152,36 @@ class HandleService : Service(), SharedPreferences.OnSharedPreferenceChangeListe
         }
     }
 
+    private fun getTodayDataFormatted(): String {
+        val currentDay = java.util.Calendar.getInstance().get(java.util.Calendar.DAY_OF_YEAR)
+        val now = System.currentTimeMillis()
+        // Refresh if day rolled over or 30 seconds elapsed
+        if (currentDay != cachedDayOfYear || (now - lastDailyQueryTimestamp) > 30000L) {
+            val bytes = DailyDataUsageHelper.getTodayDataUsageBytes(this)
+            cachedTodayDataFormatted = DailyDataUsageHelper.formatDataBytes(bytes)
+            lastDailyQueryTimestamp = now
+            cachedDayOfYear = currentDay
+        }
+        return cachedTodayDataFormatted
+    }
+
+    private fun formatElapsedTime(): String {
+        val elapsedMillis = System.currentTimeMillis() - serviceStartTime
+        val elapsedMin = (elapsedMillis / 60000L).coerceAtLeast(0L)
+        return if (elapsedMin < 60) {
+            "${elapsedMin}m"
+        } else {
+            val hours = elapsedMin / 60
+            val mins = elapsedMin % 60
+            if (mins > 0) "${hours}h ${mins}m" else "${hours}h"
+        }
+    }
+
     private fun buildNotification(
         speedVal: String,
         speedUnit: String,
-        contentText: String,
-        subText: String
+        titleText: String,
+        contentText: String
     ): Notification {
         val launchIntent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
@@ -162,9 +197,8 @@ class HandleService : Service(), SharedPreferences.OnSharedPreferenceChangeListe
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(icon)
-            .setContentTitle("VianSide Core")
+            .setContentTitle(titleText)
             .setContentText(contentText)
-            .setSubText(subText)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
