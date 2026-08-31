@@ -1,0 +1,1 @@
+2026-08-04 04:12:00 - Applied PWA cleanup and multi-window callback fixes. Modified 5 files (SidebarBridge.kt, PwaServer.kt, SidebarService.kt, PwaWindowManager.kt, PwaFilePickerActivity.kt) to fix storage bloat, decode URIs, and prevent callback collisions.

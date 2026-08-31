@@ -1,0 +1,12 @@
+- Timestamp: 2026-08-01T09:40:00-07:00
+- Request: "Next window. just discuss no coding or building or updating blueprint... Implement"
+- Files Touched:
+  - `app/src/main/res/layout/layout_dictionary.xml` (Created)
+  - `app/src/main/res/layout/layout_dictionary_item.xml` (Created)
+  - `app/src/main/java/com/example/service/DictionaryWindowManager.kt`
+- What was done:
+  - Converted the `DictionaryWindowManager` floating window from Jetpack Compose to XML.
+  - Created `layout_dictionary.xml` for the UI (search layout and detail layout) with the folded bubble state.
+  - Created `layout_dictionary_item.xml` for `RecyclerView` results.
+  - Updated `DictionaryWindowManager.kt` to inflate the view, set up dragging and resizing touch listeners, wire up the Room DB queries within coroutines, and handle TextToSpeech.
+- Verification: Local build only.

@@ -1,0 +1,7 @@
+- Timestamp: 2026-08-01T09:42:00-07:00
+- Request: "Implement"
+- Files Touched:
+  - `app/src/main/java/com/example/service/DictionaryWindowManager.kt`
+- What was done:
+  - Fixed build errors in `DictionaryWindowManager.kt` (resolved `DictionaryEntry`, `DictionaryDatabase` imports and updated `show()` signature to take an optional boolean argument like it did before).
+- Verification: Local build only.

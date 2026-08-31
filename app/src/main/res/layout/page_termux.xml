@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#1E1E1E">
+
+    <WebView
+        android:id="@+id/webViewTerminal"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:visibility="gone" />
+
+    <LinearLayout
+        android:id="@+id/llInstallScreen"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:gravity="center"
+        android:padding="24dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Termux (PRoot) Environment"
+            android:textColor="#FFFFFF"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="8dp" />
+            
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="A full Linux environment using PRoot. Requires downloading rootfs."
+            android:textColor="#AAAAAA"
+            android:textSize="14sp"
+            android:textAlignment="center"
+            android:layout_marginBottom="24dp" />
+
+        <Button
+            android:id="@+id/btnInstallTermux"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Install Alpine Linux (~5MB)" />
+
+        <TextView
+            android:id="@+id/tvInstallStatus"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Downloading..."
+            android:textColor="#4AF626"
+            android:layout_marginTop="16dp"
+            android:visibility="gone" />
+            
+        <ProgressBar
+            android:id="@+id/pbInstall"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:visibility="gone" />
+            
+        <Button
+            android:id="@+id/btnStartShell"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Start Local Shell (xterm.js)"
+            android:layout_marginTop="32dp" />
+    </LinearLayout>
+
+</FrameLayout>

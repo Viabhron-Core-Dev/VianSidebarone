@@ -1,0 +1,9 @@
+- Timestamp: 2026-08-01T09:02:00-07:00
+- Request: "Check work notes floating window. still not quite right. Topbar still has minimize and no resize button button in right most corner. Check repo."
+- Files Touched:
+  - `app/src/main/java/com/example/service/WorkNotesWindowManager.kt`
+  - `app/src/main/java/com/example/ui/WindowControls.kt`
+- What was done:
+  - Removed the `onMinimize` and `onClose` icon buttons from the `WorkNotesContent` top bar to prevent duplicate/incorrectly placed controls.
+  - Updated `WindowControls.kt` (which renders the `WindowBottomControls` overlay) to use the exact `painterResource` drawables (`ic_menu_close_clear_cancel`, `ic_minimize_window`, `ic_resize_window`) instead of generic Material icons and Text ("///"), ensuring the bottom controls perfectly match the e-reader's visual layout template and properly display the resize handle.
+- Verification: Local build only.

@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/ll_audio_record_root"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:background="@drawable/bg_auto_scroll_pill"
+    android:padding="8dp"
+    android:elevation="8dp"
+    android:gravity="center">
+
+    <!-- Controls Row -->
+    <LinearLayout
+        android:id="@+id/ll_controls_row"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
+
+        <!-- Red Recording Dot -->
+        <ImageView
+            android:id="@+id/iv_rec_status"
+            android:layout_width="14dp"
+            android:layout_height="14dp"
+            android:layout_marginStart="4dp"
+            android:layout_marginEnd="6dp"
+            android:src="@drawable/ic_rec_dot"
+            android:contentDescription="Recording Status" />
+
+        <!-- Recording Timer Text -->
+        <TextView
+            android:id="@+id/tv_record_timer"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="00:00"
+            android:textColor="#FFFFFF"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:fontFamily="sans-serif-medium"
+            android:layout_marginEnd="8dp" />
+
+        <!-- Pause / Resume Button -->
+        <ImageButton
+            android:id="@+id/btn_pause_play"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:src="@android:drawable/ic_media_pause"
+            android:background="?android:attr/selectableItemBackgroundBorderless"
+            android:tint="#FFFFFF"
+            android:contentDescription="Pause/Resume" />
+
+        <!-- Next Recording Button -->
+        <ImageButton
+            android:id="@+id/btn_next"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:src="@android:drawable/ic_media_next"
+            android:background="?android:attr/selectableItemBackgroundBorderless"
+            android:tint="#FFFFFF"
+            android:contentDescription="Next Recording" />
+
+        <!-- Stop & Name Button -->
+        <ImageButton
+            android:id="@+id/btn_stop"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:src="@drawable/ic_stop"
+            android:background="?android:attr/selectableItemBackgroundBorderless"
+            android:tint="#FF4D4D"
+            android:contentDescription="Stop Recording" />
+
+        <!-- Divider -->
+        <View
+            android:layout_width="1dp"
+            android:layout_height="24dp"
+            android:layout_marginHorizontal="6dp"
+            android:background="#44FFFFFF" />
+
+        <!-- Close Panel Button -->
+        <ImageButton
+            android:id="@+id/btn_close"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:src="@android:drawable/ic_menu_close_clear_cancel"
+            android:background="?android:attr/selectableItemBackgroundBorderless"
+            android:tint="#CCCCCC"
+            android:contentDescription="Close Panel" />
+    </LinearLayout>
+
+    <!-- Inline Name Input Row (shown when Stop is pressed) -->
+    <LinearLayout
+        android:id="@+id/ll_name_input_row"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:layout_marginTop="6dp"
+        android:visibility="gone">
+
+        <EditText
+            android:id="@+id/et_record_name"
+            android:layout_width="140dp"
+            android:layout_height="34dp"
+            android:background="#333333"
+            android:textColor="#FFFFFF"
+            android:textColorHint="#888888"
+            android:textSize="12sp"
+            android:singleLine="true"
+            android:paddingHorizontal="8dp"
+            android:hint="Recording name" />
+
+        <ImageButton
+            android:id="@+id/btn_save_name"
+            android:layout_width="32dp"
+            android:layout_height="32dp"
+            android:src="@android:drawable/ic_menu_save"
+            android:background="?android:attr/selectableItemBackgroundBorderless"
+            android:tint="#4CAF50"
+            android:layout_marginStart="4dp"
+            android:contentDescription="Save" />
+
+        <ImageButton
+            android:id="@+id/btn_cancel_name"
+            android:layout_width="32dp"
+            android:layout_height="32dp"
+            android:src="@android:drawable/ic_menu_close_clear_cancel"
+            android:background="?android:attr/selectableItemBackgroundBorderless"
+            android:tint="#888888"
+            android:contentDescription="Cancel" />
+    </LinearLayout>
+
+</LinearLayout>

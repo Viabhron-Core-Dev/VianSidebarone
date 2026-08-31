@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@android:color/transparent">
+
+    <LinearLayout
+        android:id="@+id/appywork_expanded_container"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:background="#FFFFFF">
+
+        <!-- Top Bar -->
+        <LinearLayout
+            android:id="@+id/appywork_topbar"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:orientation="horizontal"
+            android:background="#87CEEB"
+            android:gravity="center_vertical"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp">
+            
+            <TextView
+                android:id="@+id/appywork_title"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Appywork"
+                android:textColor="#333333"
+                android:textSize="18sp"
+                android:textStyle="bold" />
+
+            <ImageView
+                android:id="@+id/appywork_btn_settings"
+                android:layout_width="32dp"
+                android:layout_height="32dp"
+                android:padding="4dp"
+                android:src="@android:drawable/ic_menu_preferences"
+                android:background="?android:attr/selectableItemBackgroundBorderless" />
+        </LinearLayout>
+
+        <!-- Content Area -->
+        <FrameLayout
+            android:id="@+id/appywork_content_container"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:padding="8dp">
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Project Content Area"
+                android:layout_gravity="center" />
+        </FrameLayout>
+
+        <!-- Bottom Controls -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:background="#F0F0F0"
+            android:gravity="end|center_vertical"
+            android:padding="4dp">
+            
+            <Button
+                android:id="@+id/appywork_btn_close"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Close"
+                android:textSize="12sp"
+                android:minHeight="36dp"
+                android:layout_marginEnd="4dp"
+                style="?android:attr/buttonStyleSmall" />
+
+            <Button
+                android:id="@+id/appywork_btn_fold"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Fold"
+                android:textSize="12sp"
+                android:minHeight="36dp"
+                android:layout_marginEnd="4dp"
+                style="?android:attr/buttonStyleSmall" />
+                
+            <ImageView
+                android:id="@+id/appywork_btn_resize"
+                android:layout_width="32dp"
+                android:layout_height="32dp"
+                android:padding="4dp"
+                android:src="@android:drawable/ic_menu_crop" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <!-- Folded Bubble View -->
+    <FrameLayout
+        android:id="@+id/appywork_bubble"
+        android:layout_width="56dp"
+        android:layout_height="56dp"
+        android:background="@drawable/appywork_bubble_bg"
+        android:visibility="gone">
+        <ImageView
+            android:layout_width="32dp"
+            android:layout_height="32dp"
+            android:layout_gravity="center"
+            android:src="@android:drawable/ic_menu_edit"
+            android:tint="#333333" />
+    </FrameLayout>
+</FrameLayout>

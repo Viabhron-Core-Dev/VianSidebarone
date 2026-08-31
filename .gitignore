@@ -1,0 +1,23 @@
+# Android Build Directories
+build/
+app/build/
+.gradle/
+.kotlin/
+.build-outputs/
+
+# Secrets and Credentials
+*.keystore
+*.jks
+*.p12
+*.base64
+debug.keystore.base64
+.env
+local.properties
+
+# Artifacts
+*.apk
+*.aab
+
+# Reference Folders & Scripts
+reference/
+recent_reference/

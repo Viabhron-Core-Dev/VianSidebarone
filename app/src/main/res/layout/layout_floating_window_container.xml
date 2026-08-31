@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <LinearLayout
+        android:id="@+id/window_container"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:background="#222222"
+        android:elevation="4dp">
+
+        <!-- Top Bar for Dragging and Double Tap to Fullscreen -->
+        <FrameLayout
+            android:id="@+id/window_top_bar"
+            android:layout_width="match_parent"
+            android:layout_height="24dp"
+            android:background="#444444">
+            <TextView
+                android:id="@+id/window_title"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center"
+                android:textColor="#FFFFFF"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:text="Window" />
+        </FrameLayout>
+
+        <!-- Content Container -->
+        <FrameLayout
+            android:id="@+id/window_content"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1" />
+
+    </LinearLayout>
+
+    <!-- Bottom Controls -->
+    <LinearLayout
+        android:id="@+id/bottom_window_controls"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|end"
+        android:orientation="horizontal"
+        android:background="#88000000"
+        android:padding="2dp"
+        android:elevation="10dp">
+        
+        <!-- Left to right: Close, minimize, resize -->
+        <ImageView
+            android:id="@+id/btn_close"
+            android:layout_width="32dp"
+            android:layout_height="24dp"
+            android:padding="4dp"
+            android:backgroundTint="#F44336"
+            android:src="@android:drawable/ic_menu_close_clear_cancel"
+            android:tint="#FFFFFF" />
+            
+        <Space android:layout_width="8dp" android:layout_height="wrap_content" />
+        
+        <ImageView
+            android:id="@+id/btn_minimize"
+            android:layout_width="32dp"
+            android:layout_height="24dp"
+            android:padding="4dp"
+            android:backgroundTint="#4CAF50"
+            android:src="@android:drawable/arrow_down_float"
+            android:tint="#FFFFFF" />
+            
+        <Space android:layout_width="8dp" android:layout_height="wrap_content" />
+        
+        <ImageView
+            android:id="@+id/btn_resize"
+            android:layout_width="32dp"
+            android:layout_height="24dp"
+            android:padding="2dp"
+            android:backgroundTint="#9E9E9E"
+            android:src="@android:drawable/ic_menu_zoom"
+            android:tint="#FFFFFF" />
+    </LinearLayout>
+</FrameLayout>

@@ -1,0 +1,253 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
+    <uses-permission android:name="android.permission.READ_CALL_LOG" />
+    <uses-permission android:name="android.permission.READ_CONTACTS" />
+    <uses-permission android:name="android.permission.PROCESS_OUTGOING_CALLS" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" tools:ignore="ScopedStorage" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <queries>
+        <intent>
+            <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+        </intent>
+    </queries>
+
+    <application
+        android:name=".App"
+        android:allowBackup="true"
+        android:icon="@mipmap/app_icon"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/app_icon_round"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.LiteReader">
+        
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:theme="@style/Theme.LiteReader">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+        
+        <activity
+            android:name=".feature.settings.SettingsActivity"
+            android:exported="false"
+            android:theme="@style/Theme.LiteReader" />
+            
+        <service
+            android:name=".service.SidebarService"
+            android:enabled="true"
+            android:exported="false"
+            android:process=":sidebar"
+            android:foregroundServiceType="specialUse" />
+
+        <service
+            android:name=".core.HandleService"
+            android:enabled="true"
+            android:exported="false"
+            android:process=":core"
+            android:foregroundServiceType="specialUse" />
+
+        <receiver
+            android:name=".service.BootReceiver"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
+
+        <receiver
+            android:name=".service.MidnightResetReceiver"
+            android:enabled="true"
+            android:exported="false" />
+            
+        <meta-data
+            android:name="com.google.mlkit.vision.DEPENDENCIES"
+            android:value="barcode" />
+            
+    
+        <activity android:name=".feature.miniapps.reader.ReadAloudActivity" android:label="Read Aloud" android:exported="true" android:theme="@android:style/Theme.Translucent.NoTitleBar.Fullscreen">
+            <intent-filter>
+                <action android:name="android.intent.action.PROCESS_TEXT" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+        </activity>
+        
+        <activity android:name=".feature.miniapps.translation.TranslationPopupActivity" android:label="Translate" android:exported="true" android:theme="@android:style/Theme.Translucent.NoTitleBar.Fullscreen">
+            <intent-filter>
+                <action android:name="android.intent.action.PROCESS_TEXT" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+        </activity>
+        
+        <activity android:name=".feature.miniapps.translation.TranslationManagementActivity" android:label="Manage Translations" android:exported="false" android:theme="@style/Theme.LiteReader" />
+        
+        <activity android:name=".feature.miniapps.DictionaryPopupActivity" android:label="Meaning" android:exported="true" android:theme="@android:style/Theme.Translucent.NoTitleBar.Fullscreen">
+            <intent-filter>
+                <action android:name="android.intent.action.PROCESS_TEXT" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+        </activity>
+
+        <activity android:name=".feature.miniapps.browser.BrowserReceiverActivity" android:theme="@android:style/Theme.Translucent.NoTitleBar" android:exported="true" android:label="Sidebar Browser">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="http" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+        </activity>
+        
+        <service
+            android:name=".feature.miniapps.browser.FloatingBrowserService"
+            android:exported="false"
+            android:process=":sidebar"
+            android:foregroundServiceType="specialUse" />
+        <service
+            android:name=".feature.miniapps.reader.FloatingReaderService"
+            android:exported="false"
+            android:process=":sidebar"
+            android:foregroundServiceType="mediaPlayback|microphone" />
+
+        <service
+            android:name=".service.PageWindowService"
+            android:exported="false"
+            android:process=":sidebar"
+            android:foregroundServiceType="specialUse" />
+        <service
+            android:name=".service.FloatingTriggerService"
+            android:exported="false"
+            android:process=":sidebar"
+            android:foregroundServiceType="specialUse" />
+            <activity android:name=".feature.settings.AddElementActivity" android:exported="false" android:theme="@style/Theme.LiteReader" />
+        <activity android:name=".feature.settings.ActionPickerActivity" android:exported="false" android:theme="@style/Theme.LiteReader" />
+        <activity android:name=".feature.settings.AppPickerActivity" android:exported="false" android:theme="@style/Theme.LiteReader" />
+        <activity android:name=".feature.settings.ShortcutPickerActivity" android:exported="false" android:theme="@style/Theme.LiteReader" />
+        <activity android:name=".feature.settings.IntentPickerActivity" android:exported="false" android:theme="@style/Theme.LiteReader" />
+    
+        <service
+            android:name=".feature.system_hub.VianSideAccessibilityService"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/accessibility_service_config" />
+        </service>
+        <service
+            android:name=".service.AppNotificationListener"
+            android:label="Vian Notification Listener"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+        <activity android:name=".feature.settings.TagManagementActivity" android:exported="false" android:theme="@style/Theme.LiteReader" />
+        <activity android:name=".feature.settings.LogKeeperActivity" android:exported="false" android:theme="@style/Theme.LiteReader" />
+        <activity android:name=".WidgetPickerActivity" android:exported="false" android:theme="@style/Theme.LiteReader" />
+        <activity android:name=".IconPickerActivity" android:exported="false" android:theme="@style/Theme.LiteReader" />
+        
+        <activity android:name=".HybridGridEditActivity" android:exported="false" android:theme="@style/Theme.LiteReader" />
+        <activity android:name=".WidgetsGridEditActivity" android:exported="false" android:theme="@style/Theme.LiteReader" />
+        <activity android:name=".SidebarEditActivity" android:exported="false" android:theme="@style/Theme.LiteReader" />
+        <activity android:name=".AppTrackerSettingsActivity" android:exported="false" android:theme="@style/Theme.LiteReader" />
+        <activity android:name=".AppTrackerOpenerActivity" android:exported="false" android:theme="@style/Theme.LiteReader" />
+        <activity android:name=".NotificationHistoryActivity" android:exported="false" android:theme="@style/Theme.LiteReader" />
+        <activity
+            android:name=".feature.sidebar.ScreenRecordActivity"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar"
+            android:exported="false" />
+        <service
+            android:name=".service.ScreenRecordService"
+            android:exported="false"
+            android:process=":sidebar"
+            android:foregroundServiceType="mediaProjection" />
+        <activity
+            android:name=".feature.system_hub.BarcodeScannerActivity"
+            android:exported="false"
+            android:theme="@style/Theme.LiteReader" />
+        <activity
+            android:name=".feature.system_hub.QRCropActivity"
+            android:exported="false"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar.Fullscreen" />
+        <activity
+            android:name=".feature.system_hub.RedactScreenshotActivity"
+            android:exported="false"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar.Fullscreen" />
+        <activity
+            android:name=".feature.system_hub.RecordingsActivity"
+            android:exported="false"
+            android:theme="@style/Theme.LiteReader" />
+        <activity
+            android:name=".feature.system_hub.CameraMeasureActivity"
+            android:exported="false"
+            android:theme="@style/Theme.LiteReader" />
+        <activity
+            android:name=".feature.system_hub.GhostCameraActivity"
+            android:exported="false"
+            android:theme="@style/Theme.LiteReader" />
+        <receiver
+            android:name=".feature.system_hub.CallStateReceiver"
+            android:process=":core"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.PHONE_STATE" />
+                <action android:name="android.intent.action.NEW_OUTGOING_CALL" />
+            </intent-filter>
+        </receiver>
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.provider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+    </application>
+</manifest>

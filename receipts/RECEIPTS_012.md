@@ -1,0 +1,32 @@
+# RECEIPTS_012.md
+
+- **Timestamp:** 2026-08-12T15:11
+- **Requested:** Implement Phase 10 (The Background System Hub).
+- **Files touched:**
+  - `app/src/main/java/com/example/feature/system_hub/VianSideAccessibilityService.kt`
+  - `app/src/main/java/com/example/feature/system_hub/CursorManager.kt`
+  - `app/src/main/java/com/example/feature/system_hub/AutoScrollManager.kt`
+  - `app/src/main/java/com/example/feature/system_hub/LongScreenshotManager.kt`
+  - `app/src/main/java/com/example/feature/system_hub/CallRecorderManager.kt`
+  - `app/src/main/java/com/example/feature/system_hub/FloatingRecordButtonView.kt`
+  - `app/src/main/java/com/example/feature/system_hub/QuickTileHandler.kt`
+  - `app/src/main/java/com/example/feature/system_hub/DisplayHandler.kt`
+  - `app/src/main/java/com/example/feature/system_hub/MediaVolumeHandler.kt`
+  - `app/src/main/java/com/example/feature/system_hub/BlueLightFilterManager.kt`
+  - `app/src/main/java/com/example/feature/system_hub/QRCropActivity.kt`
+  - `app/src/main/java/com/example/feature/system_hub/BarcodeScannerActivity.kt`
+  - `app/src/main/java/com/example/feature/system_hub/RecordingsActivity.kt`
+  - `app/src/main/java/com/example/core/NetSpeedManager.kt`
+  - `app/src/main/java/com/example/core/HandleService.kt`
+  - `app/src/main/java/com/example/core/PinUtils.kt`
+  - `app/src/main/java/com/example/feature/settings/NetSpeedSettingsScreen.kt`
+  - `app/src/main/java/com/example/feature/settings/CallRecorderSettingsScreen.kt`
+  - `app/src/main/java/com/example/feature/settings/SettingsActivity.kt`
+- **What was done:**
+  - Migrated the Accessibility Suite components. Rewrote `VianSideAccessibilityService`'s initialization lifecycle (`onServiceConnected`) to instead use `onStartCommand` as a modular orchestrator, loading `CursorManager`, `AutoScrollManager`, and `LongScreenshotManager` strictly on-demand.
+  - Migrated `NetSpeedManager` to `core/` and integrated it into `HandleService`. Replaced the legacy floating overlay approach with a dynamic foreground notification update (`updateForegroundNotification()`). Hooked it to `ACTION_SCREEN_ON`/`OFF` to halt polling when the screen is locked, completely removing background battery drain.
+  - Migrated `CallRecorderManager` and its dependent files as dormant, decoupled modules.
+  - Migrated hardware handlers (`QuickTileHandler`, `MediaVolumeHandler`, `DisplayHandler`, `BlueLightFilterManager`) as stateless singletons.
+  - Cleaned up stubs in `SettingsActivity`.
+- **Verification:** Local build only (`gradle compileDebugKotlin`). Success.
+- **Deviation:** `LongScreenshotManager` temporarily had `FloatingTriggerService` visibility toggles commented out, as the trigger architecture is now handled by `HandleService`.

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="48dp"
+    android:layout_height="48dp"
+    android:background="@android:drawable/btn_default_small"
+    android:backgroundTint="#333333"
+    android:padding="8dp">
+
+    <ImageView
+        android:id="@+id/bubble_icon"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:src="@android:drawable/ic_menu_view"
+        android:tint="#FFFFFF" />
+
+</FrameLayout>

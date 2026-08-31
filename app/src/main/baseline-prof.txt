@@ -1,0 +1,16 @@
+# Core System & Service Classes for Background Overlay & Handle Process
+HSPLcom/example/HandleService;->*
+HSPLcom/example/SidebarService;->*
+HSPLcom/example/OverlayView;->*
+HSPLcom/example/FloatingWindowManager;->*
+HSPLcom/example/FloatingPageManager;->*
+HSPLcom/example/core/IconManager;->*
+HSPLcom/example/utils/SidebarAppsManager;->*
+HSPLcom/example/utils/PageManager;->*
+
+# Core Activity & Settings Classes for Main Process
+HSPLcom/example/MainActivity;->*
+HSPLcom/example/feature/settings/SettingsActivity;->*
+HSPLcom/example/feature/settings/SidebarSettingsScreenKt;->*
+HSPLcom/example/feature/settings/PageManagementSettingsScreenKt;->*
+HSPLcom/example/feature/settings/LogKeeperActivity;->*

@@ -1,0 +1,19 @@
+- Timestamp: 2026-08-01T05:35:00-07:00
+- Request: "The shapes for handle not used. Just block is used... floating triggers working but for toggle(auto scroll) not working... Also floating window (pwa, page, dictionary and work notes) not good.also too big make small... check ereader floating window and button. Want that for tempplate for all with just one or 2 difference... Close, minimize and resize in that order and look."
+- Files Touched:
+  - `app/src/main/java/com/example/service/AutoScrollManager.kt`
+  - `app/src/main/java/com/example/service/VianSideAccessibilityService.kt`
+  - `app/src/main/java/com/example/utils/HandleShapeDrawable.kt`
+  - `app/src/main/java/com/example/service/TriggerHandleView.kt`
+  - `app/src/main/java/com/example/service/ReaderHandleView.kt`
+  - `app/src/main/java/com/example/ui/WindowControls.kt`
+  - `app/src/main/java/com/example/service/PageWindowManager.kt`
+  - `app/src/main/java/com/example/service/DictionaryWindowManager.kt`
+  - `app/src/main/java/com/example/service/WorkNotesWindowManager.kt`
+  - `app/src/main/java/com/example/service/PwaWindowManager.kt`
+- What was done:
+  - Fixed Handle Shapes: Created `HandleShapeDrawable` to properly draw handle shapes (triangle, half_oval, rounded_rect, rectangle) based on the current edge. Updated `TriggerHandleView` and `ReaderHandleView` to utilize the drawable instead of a plain color.
+  - Fixed Auto-Scroll Toggle: Modified `AutoScrollManager` and `VianSideAccessibilityService` so the auto-scroll action functions as a toggle when triggered from a floating action.
+  - Aligned Floating Windows: Shrank the default dimensions of all floating windows (PWA, Page, Dictionary, WorkNotes).
+  - Floating Window Template: Applied the e-reader layout template to all floating windows. They now use a common `WindowBottomControls` overlay in the bottom right corner, containing "Close", "Minimize", and "Resize" in the requested order and style.
+- Verification: Local build only (successful).

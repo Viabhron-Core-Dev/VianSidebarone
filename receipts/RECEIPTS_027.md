@@ -1,0 +1,11 @@
+- Timestamp: 2026-08-01T09:38:00-07:00
+- Request: "Can you convert all floating window into XML. Chevk repo. Doing safely and stably. And thoroughly and one file at a time. And changing all connections. Check repo... Implement. Work notes only"
+- Files Touched:
+  - `app/src/main/res/layout/layout_work_notes.xml` (Created)
+  - `app/src/main/res/drawable/bg_bubble_dark.xml` (Created)
+  - `app/src/main/java/com/example/service/WorkNotesWindowManager.kt`
+- What was done:
+  - Converted the `WorkNotesWindowManager` floating window from Jetpack Compose to XML.
+  - Created `layout_work_notes.xml` containing the folded state (bubble) and expanded state (window with top bar, text area, and bottom controls), matching the standard `layout_floating_reader.xml` structure.
+  - Set up `LayoutInflater` and proper touch gesture listeners for dragging and resizing the window in `WorkNotesWindowManager.kt`.
+- Verification: Local build only.

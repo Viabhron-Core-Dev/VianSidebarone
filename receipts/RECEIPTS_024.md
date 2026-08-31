@@ -1,0 +1,7 @@
+- Timestamp: 2026-08-01T08:51:00-07:00
+- Request: "Auto scroll not working. Even when green. Tapped pause then play still nothing."
+- Files Touched:
+  - `app/src/main/res/xml/accessibility_service_config.xml`
+- What was done:
+  - Set `android:canPerformGestures="true"` in the accessibility service configuration to allow the `AutoScrollManager` to dispatch gestures to the screen.
+- Verification: Local build only.

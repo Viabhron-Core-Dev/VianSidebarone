@@ -1,0 +1,9 @@
+- Timestamp: 2026-08-01T08:44:00-07:00
+- Request: "Handle management page. In unfolded handle. Gesture want a change gesture. Otherwise stuck with gesture even when wrong."
+- Files Touched:
+  - `app/src/main/java/com/example/HandlesListSettingsScreen.kt`
+- What was done:
+  - Added a "Change Gesture" option to the gesture dropdown menu (renamed existing "Change" to "Change Action").
+  - Implemented `migrateGesture(oldGesture, newGesture)` to safely copy gesture configurations and related page data stored in `SharedPreferences` without breaking the associated container UUIDs.
+  - Added a new `AlertDialog` (`showChangeTriggerDialog`) that provides a dropdown of currently available gestures, allowing the user to select one and successfully migrate the trigger type.
+- Verification: Local build only.

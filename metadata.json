@@ -1,0 +1,8 @@
+{
+  "name": "Remix Restructuring Viansidebro",
+  "description": "Lightweight sidebar",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
