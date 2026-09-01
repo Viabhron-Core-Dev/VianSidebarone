@@ -1,6 +1,5 @@
 package com.example.core
 
-import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
@@ -10,64 +9,59 @@ import android.graphics.Typeface
 import androidx.core.graphics.drawable.IconCompat
 
 /**
- * DynamicSpeedIconGenerator: Ultra-lightweight status-bar dynamic speed icon generator.
- * Renders directly at the target status-bar icon pixel size with proper font metrics.
+ * DynamicSpeedIconGenerator: Generates high-fidelity, crisp dynamic speed icons
+ * rendered onto a fixed 96x96 ARGB_8888 canvas using precise font metrics and anti-aliasing.
  * Produces an immutable bitmap snapshot per generation to prevent asynchronous SystemUI corruption.
  */
 class DynamicSpeedIconGenerator(private val context: Context) {
 
-    private val density = context.resources.displayMetrics.density
-
-    // Determine target system status bar icon size (e.g. 24dp or OEM specific status_bar_icon_size)
-    private val iconSize: Int = run {
-        @SuppressLint("DiscouragedApi", "InternalInsetResource")
-        val resId = context.resources.getIdentifier("status_bar_icon_size", "dimen", "android")
-        if (resId > 0) {
-            val dim = context.resources.getDimensionPixelSize(resId)
-            if (dim > 0) dim else (24 * density).toInt()
-        } else {
-            (24 * density).toInt()
-        }
+    companion object {
+        private const val ICON_SIZE = 96
     }
 
-    // Reusable Paint instances with anti-aliasing
-    private val speedPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    // Reusable Paint instances with high-quality anti-aliasing & subpixel text
+    private val speedPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.SUBPIXEL_TEXT_FLAG or Paint.FILTER_BITMAP_FLAG).apply {
         color = Color.WHITE
         typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
         textAlign = Paint.Align.CENTER
     }
 
-    private val unitPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    private val unitPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.SUBPIXEL_TEXT_FLAG or Paint.FILTER_BITMAP_FLAG).apply {
         color = Color.WHITE
-        typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.NORMAL)
+        typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
         textAlign = Paint.Align.CENTER
     }
 
     /**
      * Renders numeric speed and unit (e.g. "531" and "K", or "1.2" and "M")
-     * onto an exact-size immutable bitmap snapshot and wraps into an IconCompat.
+     * onto a 96x96 immutable bitmap snapshot and wraps into an IconCompat.
      */
     @Synchronized
     fun generateSpeedIcon(speedValue: String, speedUnit: String): IconCompat {
-        val size = iconSize.coerceAtLeast(1)
-        val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        val bitmap = Bitmap.createBitmap(ICON_SIZE, ICON_SIZE, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
 
-        val w = size.toFloat()
-        val h = size.toFloat()
+        val w = ICON_SIZE.toFloat()
+        val h = ICON_SIZE.toFloat()
         val cx = w / 2f
 
-        // Top line: Speed number
-        speedPaint.textSize = if (speedValue.length > 3) h * 0.44f else h * 0.50f
+        // Adjust top text size based on character count to prevent any horizontal clipping
+        speedPaint.textSize = when {
+            speedValue.length > 3 -> 34f
+            speedValue.length == 3 -> 42f
+            speedValue.length == 2 -> 46f
+            else -> 50f
+        }
+
+        val topCenterY = h * 0.35f
         val speedFm = speedPaint.fontMetrics
-        val topCenterY = h * 0.30f
         val speedBaseline = topCenterY - (speedFm.ascent + speedFm.descent) / 2f
         canvas.drawText(speedValue, cx, speedBaseline, speedPaint)
 
-        // Bottom line: Unit (K, M, G, B, etc.)
-        unitPaint.textSize = h * 0.38f
+        // Bottom unit text
+        unitPaint.textSize = 34f
+        val bottomCenterY = h * 0.75f
         val unitFm = unitPaint.fontMetrics
-        val bottomCenterY = h * 0.76f
         val unitBaseline = bottomCenterY - (unitFm.ascent + unitFm.descent) / 2f
         canvas.drawText(speedUnit, cx, unitBaseline, unitPaint)
 
@@ -75,7 +69,7 @@ class DynamicSpeedIconGenerator(private val context: Context) {
     }
 
     fun onTrimMemory() {
-        // Paints and metrics are lightweight and retained, no large persistent heap buffers
+        // Lightweight paints and metrics only, no retained persistent heap buffers
     }
 }
 
