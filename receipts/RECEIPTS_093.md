@@ -311,25 +311,21 @@
 * Deviations: None. Stopped strictly after Process 1 without touching Sidebar, Settings, or Process 2.
 * Known issues: None.
 
-* Timestamp: 2026-09-01T14:08:00-07:00
-* One-line summary: Implemented multi-process Log Keeper catcher with process-safe file locks and connected Log Keeper UI to the Welcome screen.
+* Timestamp: 2026-09-01T15:26:00-07:00
+* One-line summary: Replaced 48px direct icon rendering with 96x96 supersampled high-contrast canvas rendering in DynamicSpeedIconGenerator.
 * Exact files touched:
-  - `app/src/main/java/com/example/core/LogKeeper.kt`
-  - `app/src/main/java/com/example/LogKeeperActivity.kt`
-  - `app/src/main/java/com/example/MainActivity.kt`
-  - `app/src/main/java/com/example/core/HandleService.kt`
-  - `app/src/main/AndroidManifest.xml`
+  - `app/src/main/java/com/example/core/DynamicSpeedIconGenerator.kt`
   - `receipts/RECEIPTS_093.md`
 * What was actually done:
-  - Upgraded `LogKeeper.kt` to record diagnostic telemetry to `LiteReader_Log.txt` and exception crashes to `LiteReader_CrashLog.txt` in internal `context.filesDir`.
-  - Implemented multi-process concurrency safety using `FileChannel.lock()` to prevent cross-process write corruption across main UI, `:core`, and `:overlay` processes without creating a 4th process.
-  - Added non-invasive, throttled icon telemetry in `HandleService.kt` logging display density, densityDpi, dimensions, 24dp pixel calculations, and speed updates.
-  - Built `LogKeeperActivity` in Compose featuring two tabs ("Diagnostic Logs" and "Crash Reports"), live monospaced scrollable log viewer, copy to clipboard, share intent, refresh, and clear confirmation.
-  - Connected `LogKeeperActivity` directly to the Welcome / Core control screen in `MainActivity.kt` via a dedicated Diagnostics Card.
-  - Preserved `DynamicSpeedIconGenerator.kt` and `NetSpeedManager.kt` rendering and calculation code frozen without modification.
+  - Switched baseline bitmap canvas from 48x48 (24dp physical) to 96x96 ARGB_8888 supersampled canvas modeled after the reference NetSpeed Indicator architecture.
+  - Sized upper speed numeric text at 50px-66px (proportional to digit count) with horizontal width constraints and exact glyph bounding box alignment.
+  - Sized lower unit text ("B/s", "kB/s", "MB/s", "GB/s") at 40px with exact bottom glyph descent alignment to eliminate dead vertical space and prevent down-scaling blur.
+  - Added throttled `IconDiagnostics` rendering telemetry logging bitmap dimensions, measured paint sizes, and measured widths.
+  - Maintained strictly frozen Welcome/MainActivity, LogKeeper, permissions, and network-measurement algorithms.
 * How it was verified: local build only (`compile_applet` passed successfully).
 * Deviations: None.
 * Known issues: None.
+
 
 
 
