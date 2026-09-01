@@ -311,21 +311,20 @@
 * Deviations: None. Stopped strictly after Process 1 without touching Sidebar, Settings, or Process 2.
 * Known issues: None.
 
-* Timestamp: 2026-09-01T03:13:00-07:00
-* One-line summary: Calibrated DynamicSpeedIconGenerator to native 1:1 hardware status-bar pixel size, display density DPI, integer baseline snapping, and sans-serif-condensed bold typography.
+* Timestamp: 2026-09-01T10:24:00-07:00
+* One-line summary: Calibrated DynamicSpeedIconGenerator to 24dp standard small-icon grid with exact density matching and bold condensed typography.
 * Exact files touched:
   - `app/src/main/java/com/example/core/DynamicSpeedIconGenerator.kt`
   - `receipts/RECEIPTS_093.md`
 * What was actually done:
-  - Identified root causes of softness: non-integer bilinear downsampling (96px -> 44px), unassigned bitmap density DPI causing SystemUI rescales, and fractional baseline anti-aliasing phase blur across scanlines.
-  - Set `iconSize` directly to the system `status_bar_icon_size` (44px on device) with density-aware fallback.
-  - Explicitly tagged `bitmap.density = context.resources.displayMetrics.densityDpi` to prevent SystemUI BitmapDrawable density scaling.
-  - Switched typeface to `sans-serif-condensed` with `Typeface.BOLD` for sharp, non-overlapping strokes at small point sizes.
-  - Enabled `Paint.HINTING_ON`, `ANTI_ALIAS_FLAG`, `SUBPIXEL_TEXT_FLAG`, and disabled dither/filter.
-  - Snapped cx and font baseline Y coordinates to exact integer pixels with `Math.round(...)` to eliminate subpixel phase blurring across physical pixel rows.
+  - Resolved root cause of softness: Android SystemUI's `StatusBarIconView` and Notification header layouts expect standard 24dp small-icon drawables (48px at 2.0x / 320dpi density). Querying `status_bar_icon_size` (44px) caused SystemUI to perform an upscaling/interpolation pass from 22dp to 24dp.
+  - Set `iconSize = (24f * density).roundToInt().coerceAtLeast(24)` (48px on the Redmi A5), providing exact 1:1 pixel mapping with zero scaling in SystemUI.
+  - Maintained `bitmap.density = densityDpi` with an immutable snapshot per update.
+  - Calibrated font proportions and integer-rounded baselines for 1, 2, 3, and 4+ character values using bold condensed typography (`sans-serif-condensed`).
 * How it was verified: local build only (`compile_applet` passed successfully).
 * Deviations: None.
 * Known issues: None.
+
 
 
 
