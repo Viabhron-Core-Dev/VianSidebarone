@@ -12,7 +12,7 @@ import kotlin.math.roundToInt
 /**
  * DynamicSpeedIconGenerator: Generates high-fidelity, crisp dynamic speed icons
  * matching Android SystemUI's standard 24dp small-icon grid, exact display density,
- * bold condensed typography, and integer-snapped baselines.
+ * bold condensed typography, high optical glyph fill, and integer-snapped baselines.
  * Produces an immutable bitmap snapshot per generation to prevent asynchronous SystemUI corruption.
  */
 class DynamicSpeedIconGenerator(private val context: Context) {
@@ -29,6 +29,7 @@ class DynamicSpeedIconGenerator(private val context: Context) {
         typeface = Typeface.create("sans-serif-condensed", Typeface.BOLD)
         textAlign = Paint.Align.CENTER
         hinting = Paint.HINTING_ON
+        letterSpacing = -0.02f
         isDither = false
         isFilterBitmap = false
     }
@@ -38,13 +39,14 @@ class DynamicSpeedIconGenerator(private val context: Context) {
         typeface = Typeface.create("sans-serif-condensed", Typeface.BOLD)
         textAlign = Paint.Align.CENTER
         hinting = Paint.HINTING_ON
+        letterSpacing = -0.02f
         isDither = false
         isFilterBitmap = false
     }
 
     /**
-     * Renders numeric speed and unit (e.g. "531" and "K", or "1.2" and "M")
-     * onto an exact-size immutable bitmap snapshot and wraps into an IconCompat.
+     * Renders numeric speed and unit (e.g. "0" and "kB/s", "531" and "kB/s", or "1.2" and "MB/s")
+     * onto an exact-size immutable bitmap snapshot matching the reference status-bar layout and glyph scale.
      */
     @Synchronized
     fun generateSpeedIcon(speedValue: String, speedUnit: String): IconCompat {
@@ -54,28 +56,52 @@ class DynamicSpeedIconGenerator(private val context: Context) {
 
         val w = iconSize.toFloat()
         val h = iconSize.toFloat()
-        val cx = Math.round(w / 2f).toFloat()
+        val cx = (w / 2f).roundToInt().toFloat()
 
-        // Top line: Speed number
-        // Calibrate font size relative to 24dp canvas so text stays bold, legible, and unclipped
-        speedPaint.textSize = when {
-            speedValue.length > 3 -> h * 0.42f
-            speedValue.length == 3 -> h * 0.48f
-            speedValue.length == 2 -> h * 0.52f
-            else -> h * 0.56f
+        // Normalize unit string to standard status-bar unit notation
+        val formattedUnit = when (speedUnit) {
+            "K", "k", "KB", "KB/s", "kb/s" -> "kB/s"
+            "M", "m", "MB" -> "MB/s"
+            "G", "g", "GB" -> "GB/s"
+            "B", "b" -> "B/s"
+            else -> if (speedUnit.endsWith("/s", ignoreCase = true)) speedUnit else "$speedUnit/s"
         }
 
-        val topCenterY = h * 0.33f
+        // Top line: Speed number
+        // Calibrate font size to maximize optical glyph size while ensuring clean horizontal fit
+        speedPaint.textSize = when {
+            speedValue.length >= 4 -> h * 0.44f
+            speedValue.length == 3 -> h * 0.52f
+            speedValue.length == 2 -> h * 0.58f
+            else -> h * 0.62f
+        }
+
+        // Ensure number fits horizontally within the canvas with a 1px boundary margin
+        val maxNumWidth = w - 2f
+        val measuredNumWidth = speedPaint.measureText(speedValue)
+        if (measuredNumWidth > maxNumWidth && measuredNumWidth > 0f) {
+            speedPaint.textSize *= (maxNumWidth / measuredNumWidth)
+        }
+
         val speedFm = speedPaint.fontMetrics
-        val speedBaseline = Math.round(topCenterY - (speedFm.ascent + speedFm.descent) / 2f).toFloat()
+        // Align top of glyphs to the top margin (1px)
+        val speedBaseline = (1f - speedFm.ascent).roundToInt().toFloat()
         canvas.drawText(speedValue, cx, speedBaseline, speedPaint)
 
-        // Bottom line: Unit (K, M, G, B, etc.)
+        // Bottom line: Unit (kB/s, MB/s, GB/s, B/s)
+        // Sized to be prominent, legible, and fill the lower section
         unitPaint.textSize = h * 0.38f
-        val bottomCenterY = h * 0.77f
+
+        val maxUnitWidth = w - 2f
+        val measuredUnitWidth = unitPaint.measureText(formattedUnit)
+        if (measuredUnitWidth > maxUnitWidth && measuredUnitWidth > 0f) {
+            unitPaint.textSize *= (maxUnitWidth / measuredUnitWidth)
+        }
+
         val unitFm = unitPaint.fontMetrics
-        val unitBaseline = Math.round(bottomCenterY - (unitFm.ascent + unitFm.descent) / 2f).toFloat()
-        canvas.drawText(speedUnit, cx, unitBaseline, unitPaint)
+        // Align bottom of unit glyphs to the bottom margin (1px)
+        val unitBaseline = (h - 1f - unitFm.descent).roundToInt().toFloat()
+        canvas.drawText(formattedUnit, cx, unitBaseline, unitPaint)
 
         return IconCompat.createWithBitmap(bitmap)
     }
@@ -84,5 +110,6 @@ class DynamicSpeedIconGenerator(private val context: Context) {
         // Lightweight paints and metrics only, no retained persistent heap buffers
     }
 }
+
 
 

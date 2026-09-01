@@ -32,6 +32,11 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".LogKeeperActivity"
+            android:exported="false"
+            android:label="Log Keeper" />
+
         <service
             android:name=".core.HandleService"
             android:enabled="true"

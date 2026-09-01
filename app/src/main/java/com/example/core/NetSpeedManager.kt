@@ -115,19 +115,19 @@ class NetSpeedManager(
         return when {
             bytesPerSec >= 1024 * 1024 * 1024 -> Pair(
                 String.format(Locale.US, "%.1f", bytesPerSec / (1024.0 * 1024 * 1024)),
-                "G"
+                "GB/s"
             )
             bytesPerSec >= 1024 * 1024 -> Pair(
                 String.format(Locale.US, "%.1f", bytesPerSec / (1024.0 * 1024)),
-                "M"
+                "MB/s"
             )
             bytesPerSec >= 1024 -> Pair(
                 String.format(Locale.US, "%d", bytesPerSec / 1024),
-                "K"
+                "kB/s"
             )
             else -> Pair(
                 String.format(Locale.US, "%d", bytesPerSec),
-                "B"
+                "B/s"
             )
         }
     }

@@ -246,6 +246,42 @@ fun CoreControlScreen() {
                     }
                 }
             }
+
+            // Diagnostics & Log Keeper Card
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surface
+                )
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = "Diagnostics & Crash Logs",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = "Inspect real-time telemetry, status-bar icon metrics, and uncaught exceptions across all processes.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Button(
+                        onClick = {
+                            val intent = Intent(context, LogKeeperActivity::class.java)
+                            context.startActivity(intent)
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("open_log_keeper_button")
+                    ) {
+                        Text("Open Log Keeper")
+                    }
+                }
+            }
         }
     }
 }

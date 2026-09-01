@@ -311,19 +311,26 @@
 * Deviations: None. Stopped strictly after Process 1 without touching Sidebar, Settings, or Process 2.
 * Known issues: None.
 
-* Timestamp: 2026-09-01T10:24:00-07:00
-* One-line summary: Calibrated DynamicSpeedIconGenerator to 24dp standard small-icon grid with exact density matching and bold condensed typography.
+* Timestamp: 2026-09-01T14:08:00-07:00
+* One-line summary: Implemented multi-process Log Keeper catcher with process-safe file locks and connected Log Keeper UI to the Welcome screen.
 * Exact files touched:
-  - `app/src/main/java/com/example/core/DynamicSpeedIconGenerator.kt`
+  - `app/src/main/java/com/example/core/LogKeeper.kt`
+  - `app/src/main/java/com/example/LogKeeperActivity.kt`
+  - `app/src/main/java/com/example/MainActivity.kt`
+  - `app/src/main/java/com/example/core/HandleService.kt`
+  - `app/src/main/AndroidManifest.xml`
   - `receipts/RECEIPTS_093.md`
 * What was actually done:
-  - Resolved root cause of softness: Android SystemUI's `StatusBarIconView` and Notification header layouts expect standard 24dp small-icon drawables (48px at 2.0x / 320dpi density). Querying `status_bar_icon_size` (44px) caused SystemUI to perform an upscaling/interpolation pass from 22dp to 24dp.
-  - Set `iconSize = (24f * density).roundToInt().coerceAtLeast(24)` (48px on the Redmi A5), providing exact 1:1 pixel mapping with zero scaling in SystemUI.
-  - Maintained `bitmap.density = densityDpi` with an immutable snapshot per update.
-  - Calibrated font proportions and integer-rounded baselines for 1, 2, 3, and 4+ character values using bold condensed typography (`sans-serif-condensed`).
+  - Upgraded `LogKeeper.kt` to record diagnostic telemetry to `LiteReader_Log.txt` and exception crashes to `LiteReader_CrashLog.txt` in internal `context.filesDir`.
+  - Implemented multi-process concurrency safety using `FileChannel.lock()` to prevent cross-process write corruption across main UI, `:core`, and `:overlay` processes without creating a 4th process.
+  - Added non-invasive, throttled icon telemetry in `HandleService.kt` logging display density, densityDpi, dimensions, 24dp pixel calculations, and speed updates.
+  - Built `LogKeeperActivity` in Compose featuring two tabs ("Diagnostic Logs" and "Crash Reports"), live monospaced scrollable log viewer, copy to clipboard, share intent, refresh, and clear confirmation.
+  - Connected `LogKeeperActivity` directly to the Welcome / Core control screen in `MainActivity.kt` via a dedicated Diagnostics Card.
+  - Preserved `DynamicSpeedIconGenerator.kt` and `NetSpeedManager.kt` rendering and calculation code frozen without modification.
 * How it was verified: local build only (`compile_applet` passed successfully).
 * Deviations: None.
 * Known issues: None.
+
 
 
 

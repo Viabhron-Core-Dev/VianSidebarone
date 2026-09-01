@@ -44,6 +44,10 @@ class HandleService : Service(), SharedPreferences.OnSharedPreferenceChangeListe
     private var lastDailyQueryTimestamp: Long = 0L
     private var cachedDayOfYear: Int = -1
 
+    private var lastLoggedSpeedValue = ""
+    private var lastLoggedSpeedUnit = ""
+    private var lastSpeedDiagnosticLogTimestamp = 0L
+
     private val screenStateReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             when (intent.action) {
@@ -77,7 +81,7 @@ class HandleService : Service(), SharedPreferences.OnSharedPreferenceChangeListe
 
         // Start Foreground immediately with initial status
         val initialTitle = "Data: ${getTodayDataFormatted()} • ${formatElapsedTime()}"
-        val initialNotification = buildNotification("0", "B", initialTitle, "Down: 0 kB/s   Up: 0 kB/s")
+        val initialNotification = buildNotification("0", "kB/s", initialTitle, "Down: 0 kB/s   Up: 0 kB/s")
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             startForeground(
                 NOTIFICATION_ID,
@@ -97,6 +101,17 @@ class HandleService : Service(), SharedPreferences.OnSharedPreferenceChangeListe
 
         // Register Preference Listener
         prefs.registerOnSharedPreferenceChangeListener(this)
+
+        // Log display metrics and dynamic icon configuration
+        val metrics = resources.displayMetrics
+        val calc24dp = (24f * metrics.density).toInt()
+        LogKeeper.log(
+            this,
+            "IconDiagnostics",
+            "Display Metrics: density=${metrics.density}, densityDpi=${metrics.densityDpi}, " +
+            "widthPixels=${metrics.widthPixels}, heightPixels=${metrics.heightPixels}, " +
+            "scaledDensity=${metrics.scaledDensity}, 24dp_target=${calc24dp}px"
+        )
 
         // Initialize Net Speed Monitor
         isSpeedMonitorEnabled = prefs.getBoolean(KEY_NET_SPEED_ENABLED, true)
@@ -131,7 +146,7 @@ class HandleService : Service(), SharedPreferences.OnSharedPreferenceChangeListe
             netSpeedManager = null
             // Update to a static standby notification
             val standbyTitle = "Data: ${getTodayDataFormatted()} • ${formatElapsedTime()}"
-            val standbyNotification = buildNotification("0", "B", standbyTitle, "Down: --   Up: --")
+            val standbyNotification = buildNotification("0", "kB/s", standbyTitle, "Down: --   Up: --")
             notificationManager.notify(NOTIFICATION_ID, standbyNotification)
         }
     }
@@ -147,6 +162,18 @@ class HandleService : Service(), SharedPreferences.OnSharedPreferenceChangeListe
                 contentText
             )
             notificationManager.notify(NOTIFICATION_ID, notification)
+
+            val now = System.currentTimeMillis()
+            if (speedData.downValue != lastLoggedSpeedValue || speedData.downUnit != lastLoggedSpeedUnit || (now - lastSpeedDiagnosticLogTimestamp) > 30000L) {
+                lastLoggedSpeedValue = speedData.downValue
+                lastLoggedSpeedUnit = speedData.downUnit
+                lastSpeedDiagnosticLogTimestamp = now
+                LogKeeper.log(
+                    this,
+                    "IconDiagnostics",
+                    "SpeedUpdate -> Val='${speedData.downValue}', Unit='${speedData.downUnit}', Down='${speedData.downFormatted}', Up='${speedData.upFormatted}'"
+                )
+            }
         } catch (e: Exception) {
             LogKeeper.logError(this, "HandleService", "Failed to update notification", e)
         }
