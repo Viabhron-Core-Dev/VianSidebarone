@@ -311,19 +311,22 @@
 * Deviations: None. Stopped strictly after Process 1 without touching Sidebar, Settings, or Process 2.
 * Known issues: None.
 
-* Timestamp: 2026-09-01T00:32:00-07:00
-* One-line summary: Upgraded DynamicSpeedIconGenerator to 96x96 ARGB_8888 fixed resolution with subpixel anti-aliasing and immutable snapshots for persistent sharpness in status bar and expanded notification shade.
+* Timestamp: 2026-09-01T03:13:00-07:00
+* One-line summary: Calibrated DynamicSpeedIconGenerator to native 1:1 hardware status-bar pixel size, display density DPI, integer baseline snapping, and sans-serif-condensed bold typography.
 * Exact files touched:
   - `app/src/main/java/com/example/core/DynamicSpeedIconGenerator.kt`
   - `receipts/RECEIPTS_093.md`
 * What was actually done:
-  - Switched `DynamicSpeedIconGenerator` from tiny target-device pixel canvas to a standard fixed 96x96 `ARGB_8888` source resolution matching reference indicator implementations.
-  - Enabled `SUBPIXEL_TEXT_FLAG` and `FILTER_BITMAP_FLAG` on both `speedPaint` and `unitPaint` alongside `ANTI_ALIAS_FLAG` for maximum edge sharpness during SystemUI scaling.
-  - Sized text dynamically based on string length (34f to 50f for speed value, 34f for unit) with font metrics baseline calculations to avoid horizontal or vertical clipping.
-  - Retained creation of immutable snapshot bitmaps wrapped in `IconCompat` per update to prevent asynchronous SystemUI mutable bitmap degradation.
+  - Identified root causes of softness: non-integer bilinear downsampling (96px -> 44px), unassigned bitmap density DPI causing SystemUI rescales, and fractional baseline anti-aliasing phase blur across scanlines.
+  - Set `iconSize` directly to the system `status_bar_icon_size` (44px on device) with density-aware fallback.
+  - Explicitly tagged `bitmap.density = context.resources.displayMetrics.densityDpi` to prevent SystemUI BitmapDrawable density scaling.
+  - Switched typeface to `sans-serif-condensed` with `Typeface.BOLD` for sharp, non-overlapping strokes at small point sizes.
+  - Enabled `Paint.HINTING_ON`, `ANTI_ALIAS_FLAG`, `SUBPIXEL_TEXT_FLAG`, and disabled dither/filter.
+  - Snapped cx and font baseline Y coordinates to exact integer pixels with `Math.round(...)` to eliminate subpixel phase blurring across physical pixel rows.
 * How it was verified: local build only (`compile_applet` passed successfully).
 * Deviations: None.
 * Known issues: None.
+
 
 
 
