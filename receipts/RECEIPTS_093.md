@@ -360,6 +360,23 @@
 * Deviations: None.
 * Known issues: None.
 
+* Timestamp: 2026-09-02T15:19:00-07:00
+* One-line summary: Configured explicit Paint flags (isAntiAlias=true, isSubpixelText=false, letterSpacing=0f) on DynamicSpeedIconGenerator to eliminate fractional subpixel bleeding.
+* Exact files touched:
+  - `app/src/main/java/com/example/core/DynamicSpeedIconGenerator.kt`
+  - `receipts/RECEIPTS_093.md`
+* What was actually done:
+  - Set explicit Paint configuration for both `speedPaint` and `unitPaint`: `isAntiAlias = true`, `isSubpixelText = false`, `letterSpacing = 0f`.
+  - Maintained unchanged text sizes: speed at 65px (`65f`), unit at 40px (`40f`).
+  - Maintained unchanged baselines: speed at (48, 52), unit at (48, 95).
+  - Maintained unchanged canvas: 96x96 ARGB_8888 cleared with `PorterDuff.Mode.CLEAR`.
+  - Maintained native `Icon.createWithBitmap(bitmap)` and native `Notification.Builder` pipeline.
+  - Retained existing `IconDiagnostics` logging.
+  - Zero changes to speed measurement, unit selection, LogKeeper, Welcome, permissions, or process architecture.
+* How it was verified: local build only (`compile_applet`).
+* Deviations: None.
+* Known issues: None.
+
 
 
 
