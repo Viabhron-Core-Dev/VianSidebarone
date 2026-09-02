@@ -15,8 +15,8 @@ import android.os.Build
  * the NetSpeed Indicator reference implementation geometry and Paint configuration.
  *
  * Baseline: 96x96 ARGB_8888 bitmap
- * Speed Paint: Color.WHITE, AntiAlias=true, TextSize=65px, TextAlign=CENTER, sans-serif-condensed BOLD
- * Unit Paint: Color.WHITE, AntiAlias=true, TextSize=40px, TextAlign=CENTER, Typeface.DEFAULT_BOLD
+ * Speed Paint: Color.WHITE, AntiAlias=true, TextSize=68px, TextAlign=CENTER, sans-serif-condensed BOLD
+ * Unit Paint: Color.WHITE, AntiAlias=true, TextSize=36px, TextAlign=CENTER, Typeface.DEFAULT_BOLD
  * Speed baseline: x=48, y=52
  * Unit baseline: x=48, y=95
  * Clears bitmap with PorterDuff.Mode.CLEAR before each render.
@@ -34,7 +34,7 @@ class DynamicSpeedIconGenerator(private val context: Context) {
     private val speedPaint = Paint().apply {
         color = Color.WHITE
         isAntiAlias = true
-        textSize = 65f
+        textSize = 68f
         textAlign = Paint.Align.CENTER
         typeface = Typeface.create("sans-serif-condensed", Typeface.BOLD)
     }
@@ -42,7 +42,7 @@ class DynamicSpeedIconGenerator(private val context: Context) {
     private val unitPaint = Paint().apply {
         color = Color.WHITE
         isAntiAlias = true
-        textSize = 40f
+        textSize = 36f
         textAlign = Paint.Align.CENTER
         typeface = Typeface.DEFAULT_BOLD
     }
@@ -94,7 +94,7 @@ class DynamicSpeedIconGenerator(private val context: Context) {
             LogKeeper.log(
                 context,
                 "IconDiagnostics",
-                "IconCreation -> bmpWidth=${bitmap.width}, bmpHeight=${bitmap.height}, bmpDensity=${bitmap.density}, speedTextSize=65px, unitTextSize=40px, speedBaseline=(48,52), unitBaseline=(48,95), val='$speedValue', unit='$speedUnit'"
+                "IconCreation -> bmpWidth=${bitmap.width}, bmpHeight=${bitmap.height}, bmpDensity=${bitmap.density}, speedTextSize=68px, unitTextSize=36px, speedBaseline=(48,52), unitBaseline=(48,95), val='$speedValue', unit='$speedUnit'"
             )
         }
 

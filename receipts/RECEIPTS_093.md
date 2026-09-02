@@ -311,17 +311,17 @@
 * Deviations: None. Stopped strictly after Process 1 without touching Sidebar, Settings, or Process 2.
 * Known issues: None.
 
-* Timestamp: 2026-09-02T12:09:00-07:00
-* One-line summary: Matched DynamicSpeedIconGenerator renderer strictly to NetSpeed Indicator reference geometry and Paint configuration.
+* Timestamp: 2026-09-02T12:39:00-07:00
+* One-line summary: Applied optical adjustment to status-bar icon renderer (speed text size 68px, unit text size 36px).
 * Exact files touched:
   - `app/src/main/java/com/example/core/DynamicSpeedIconGenerator.kt`
   - `receipts/RECEIPTS_093.md`
 * What was actually done:
-  - Replaced dynamic typography, digit-count-dependent font sizes, baseline bounds clamping, and width reduction with exact reference geometry: speedPaint (Color.WHITE, AntiAlias=true, textSize=65f, Align.CENTER, sans-serif-condensed BOLD), unitPaint (Color.WHITE, AntiAlias=true, textSize=40f, Align.CENTER, Typeface.DEFAULT_BOLD).
-  - Configured literal baseline coordinates: speed at x=48, y=52; unit at x=48, y=95 on 96x96 ARGB_8888 canvas.
-  - Added explicit canvas clear with PorterDuff.Mode.CLEAR before each render.
-  - Added diagnostic immediately before Icon.createWithBitmap() logging actual bitmap width, height, density, and values.
-  - Preserved Welcome screen, LogKeeper, permissions, sidebar architecture, processes, and speed data pipeline untouched.
+  - Updated `speedPaint` text size from 65f to 68f on 96x96 ARGB_8888 canvas, preserving baseline at (48, 52).
+  - Updated `unitPaint` text size from 40f to 36f on 96x96 ARGB_8888 canvas, preserving baseline at (48, 95).
+  - Preserved unit selection logic for both kB/s and MB/s (and GB/s, B/s) without hardcoding.
+  - Kept native Icon.createWithBitmap() and native android.app.Notification.Builder pipeline.
+  - Welcome screen, LogKeeper, permissions, process architecture, and sidebar architecture remain strictly untouched.
 * How it was verified: local build only (`compile_applet`).
 * Deviations: None.
 * Known issues: None.
