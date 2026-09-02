@@ -102,32 +102,31 @@ class NetSpeedManager(
         onSpeedUpdate(speedData)
     }
 
+    companion object {
+        private const val ONE_MB = 1024L * 1024L
+        private const val ONE_KB = 1024L
+    }
+
     private fun formatSpeed(bytesPerSec: Long): String {
-        return when {
-            bytesPerSec >= 1024 * 1024 * 1024 -> String.format(Locale.US, "%.1f GB/s", bytesPerSec / (1024.0 * 1024 * 1024))
-            bytesPerSec >= 1024 * 1024 -> String.format(Locale.US, "%.1f MB/s", bytesPerSec / (1024.0 * 1024))
-            bytesPerSec >= 1024 -> String.format(Locale.US, "%d kB/s", bytesPerSec / 1024)
-            else -> String.format(Locale.US, "%d B/s", bytesPerSec)
+        val safeBytes = bytesPerSec.coerceAtLeast(0L)
+        return if (safeBytes >= ONE_MB) {
+            String.format(Locale.US, "%.1f MB/s", safeBytes / (1024.0 * 1024.0))
+        } else {
+            String.format(Locale.US, "%d kB/s", safeBytes / ONE_KB)
         }
     }
 
     private fun splitSpeed(bytesPerSec: Long): Pair<String, String> {
-        return when {
-            bytesPerSec >= 1024 * 1024 * 1024 -> Pair(
-                String.format(Locale.US, "%.1f", bytesPerSec / (1024.0 * 1024 * 1024)),
-                "GB/s"
-            )
-            bytesPerSec >= 1024 * 1024 -> Pair(
-                String.format(Locale.US, "%.1f", bytesPerSec / (1024.0 * 1024)),
+        val safeBytes = bytesPerSec.coerceAtLeast(0L)
+        return if (safeBytes >= ONE_MB) {
+            Pair(
+                String.format(Locale.US, "%.1f", safeBytes / (1024.0 * 1024.0)),
                 "MB/s"
             )
-            bytesPerSec >= 1024 -> Pair(
-                String.format(Locale.US, "%d", bytesPerSec / 1024),
+        } else {
+            Pair(
+                String.format(Locale.US, "%d", safeBytes / ONE_KB),
                 "kB/s"
-            )
-            else -> Pair(
-                String.format(Locale.US, "%d", bytesPerSec),
-                "B/s"
             )
         }
     }

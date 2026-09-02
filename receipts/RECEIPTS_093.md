@@ -326,6 +326,40 @@
 * Deviations: None.
 * Known issues: None.
 
+* Timestamp: 2026-09-02T14:33:00-07:00
+* One-line summary: Restricted NetSpeedManager unit selection strictly to kB/s and MB/s, removing B/s and GB/s.
+* Exact files touched:
+  - `app/src/main/java/com/example/core/NetSpeedManager.kt`
+  - `receipts/RECEIPTS_093.md`
+* What was actually done:
+  - Refactored `formatSpeed` and `splitSpeed` in `NetSpeedManager.kt` to format speeds strictly in `kB/s` (< 1 MB/s) and `MB/s` (>= 1 MB/s).
+  - Speeds below 1024 bytes/sec format as `0 kB/s` instead of B/s.
+  - Speeds >= 1 MB/s preserve one-decimal formatting (`%.1f MB/s`).
+  - Speeds in kB/s preserve integer formatting (`%d kB/s`).
+  - Removed B/s and GB/s branches completely.
+  - Underlying TrafficStats measurement, DynamicSpeedIconGenerator geometry, notifications, LogKeeper, Welcome screen, permissions, processes, and sidebar architecture strictly untouched.
+* How it was verified: local build only (`compile_applet`).
+* Deviations: None.
+* Known issues: None.
+
+* Timestamp: 2026-09-02T14:55:00-07:00
+* One-line summary: Matched DynamicSpeedIconGenerator strictly to verified NetSpeed Indicator reference Paint configuration and geometry.
+* Exact files touched:
+  - `app/src/main/java/com/example/core/DynamicSpeedIconGenerator.kt`
+  - `receipts/RECEIPTS_093.md`
+* What was actually done:
+  - Configured `speedPaint` with `Paint(Paint.ANTI_ALIAS_FLAG)`, Color.WHITE, text size 65px, Align.CENTER, sans-serif-condensed BOLD.
+  - Configured `unitPaint` with `Paint(Paint.ANTI_ALIAS_FLAG)`, Color.WHITE, text size 40px, Align.CENTER, Typeface.DEFAULT_BOLD.
+  - Confirmed NO SUBPIXEL_TEXT_FLAG, NO letterSpacing, NO getTextBounds(), NO dynamic baseline calculation, NO digit-count-dependent font sizing, NO width-based text resizing.
+  - Drew speed text at baseline (48, 52) and unit text at baseline (48, 95) on 96x96 ARGB_8888 canvas cleared with PorterDuff.Mode.CLEAR.
+  - Kept native `Icon.createWithBitmap(bitmap)` and native `android.app.Notification.Builder` pipeline.
+  - Kept kB/s and MB/s unit selection pipeline.
+  - Kept IconDiagnostics telemetry logging.
+  - Welcome/MainActivity, LogKeeper, permissions, process architecture, and sidebar architecture strictly untouched.
+* How it was verified: local build only (`compile_applet`).
+* Deviations: None.
+* Known issues: None.
+
 
 
 
