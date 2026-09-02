@@ -311,20 +311,18 @@
 * Deviations: None. Stopped strictly after Process 1 without touching Sidebar, Settings, or Process 2.
 * Known issues: None.
 
-* Timestamp: 2026-09-02T09:21:00-07:00
-* One-line summary: Replaced NotificationCompat/IconCompat with native android.app.Notification.Builder and android.graphics.drawable.Icon.
+* Timestamp: 2026-09-02T12:09:00-07:00
+* One-line summary: Matched DynamicSpeedIconGenerator renderer strictly to NetSpeed Indicator reference geometry and Paint configuration.
 * Exact files touched:
   - `app/src/main/java/com/example/core/DynamicSpeedIconGenerator.kt`
-  - `app/src/main/java/com/example/core/HandleService.kt`
   - `receipts/RECEIPTS_093.md`
 * What was actually done:
-  - Refactored `DynamicSpeedIconGenerator` to expose `generateSpeedBitmap` and `generateSpeedIcon` returning native `android.graphics.drawable.Icon` directly from the raw 96x96 ARGB_8888 bitmap snapshot. Removed all `IconCompat` imports and usages.
-  - Refactored `HandleService.buildNotification()` to use native `android.app.Notification.Builder(this, CHANNEL_ID)` and `setSmallIcon(Icon)`. Removed `NotificationCompat` import and usage.
-  - Preserved raw 96x96 ARGB_8888 bitmap with zero manual density assignment, zero intermediate application-side resize, zero drawable conversions, and zero adaptive icon wrappers.
-  - Added pre-`setSmallIcon` diagnostics logging `bmpWidth`, `bmpHeight`, `bmpDensity`, `iconType`, `resized=false`, `iconCompatInvolved=false`, and `builder=android.app.Notification.Builder`.
-  - Preserved all notification channels, foreground service flags, ongoing states, texts, PendingIntents, notification ID, and speed updates.
-  - Kept Welcome screen, LogKeeper, permissions, sidebar architecture, and process boundaries strictly untouched.
-* How it was verified: local build only (`compile_applet` passed successfully).
+  - Replaced dynamic typography, digit-count-dependent font sizes, baseline bounds clamping, and width reduction with exact reference geometry: speedPaint (Color.WHITE, AntiAlias=true, textSize=65f, Align.CENTER, sans-serif-condensed BOLD), unitPaint (Color.WHITE, AntiAlias=true, textSize=40f, Align.CENTER, Typeface.DEFAULT_BOLD).
+  - Configured literal baseline coordinates: speed at x=48, y=52; unit at x=48, y=95 on 96x96 ARGB_8888 canvas.
+  - Added explicit canvas clear with PorterDuff.Mode.CLEAR before each render.
+  - Added diagnostic immediately before Icon.createWithBitmap() logging actual bitmap width, height, density, and values.
+  - Preserved Welcome screen, LogKeeper, permissions, sidebar architecture, processes, and speed data pipeline untouched.
+* How it was verified: local build only (`compile_applet`).
 * Deviations: None.
 * Known issues: None.
 
