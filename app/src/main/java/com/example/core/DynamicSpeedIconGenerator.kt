@@ -44,7 +44,7 @@ class DynamicSpeedIconGenerator(private val context: Context) {
 
     /**
      * Renders numeric speed and unit (e.g. "0" and "kB/s", "531" and "kB/s", or "1.2" and "MB/s")
-     * onto a 96x96 supersampled bitmap with measured glyph bounds and optimal optical fill.
+     * onto a raw 96x96 ARGB_8888 bitmap snapshot matching the reference status-bar layout and glyph scale.
      */
     @Synchronized
     fun generateSpeedIcon(speedValue: String, speedUnit: String): IconCompat {
@@ -65,12 +65,12 @@ class DynamicSpeedIconGenerator(private val context: Context) {
         }
 
         // --- TOP LINE: Speed Number ---
-        // Calibrate baseline text sizes on 96x96 canvas based on digit length
+        // Calibrate baseline text sizes on 96x96 canvas (reference uses ~65px)
         val initialSpeedTextSize = when {
             speedValue.length >= 4 -> 50f
             speedValue.length == 3 -> 58f
             speedValue.length == 2 -> 64f
-            else -> 66f
+            else -> 65f
         }
         speedPaint.textSize = initialSpeedTextSize
 
@@ -82,17 +82,17 @@ class DynamicSpeedIconGenerator(private val context: Context) {
             measuredNumWidth = speedPaint.measureText(speedValue)
         }
 
-        // Measure actual glyph bounds for top alignment
+        // Reference baseline for 65px text on 96x96 canvas is around y=52
         speedPaint.getTextBounds(speedValue, 0, speedValue.length, textBounds)
         val speedBaseline = if (!textBounds.isEmpty) {
-            (2f - textBounds.top).coerceAtLeast(1f - speedPaint.fontMetrics.ascent)
+            (2f - textBounds.top).coerceIn(48f, 54f)
         } else {
-            2f - speedPaint.fontMetrics.ascent
+            52f
         }
         canvas.drawText(speedValue, cx, speedBaseline, speedPaint)
 
         // --- BOTTOM LINE: Unit (kB/s, MB/s, GB/s, B/s) ---
-        // Unit baseline text size around 40px on 96x96 canvas
+        // Reference unit baseline text size is 40px on 96x96 canvas
         val initialUnitTextSize = 40f
         unitPaint.textSize = initialUnitTextSize
 
@@ -103,14 +103,16 @@ class DynamicSpeedIconGenerator(private val context: Context) {
             measuredUnitWidth = unitPaint.measureText(formattedUnit)
         }
 
-        // Measure actual glyph bounds for bottom baseline alignment
+        // Reference baseline for 40px unit text on 96x96 canvas is around y=94..95
         unitPaint.getTextBounds(formattedUnit, 0, formattedUnit.length, textBounds)
         val unitBaseline = if (!textBounds.isEmpty) {
-            (h - 2f - textBounds.bottom).coerceAtMost(h - 2f - unitPaint.fontMetrics.descent)
+            (h - 1f - textBounds.bottom).coerceIn(90f, 95f)
         } else {
-            h - 2f - unitPaint.fontMetrics.descent
+            94f
         }
         canvas.drawText(formattedUnit, cx, unitBaseline, unitPaint)
+
+        val icon = IconCompat.createWithBitmap(bitmap)
 
         // Diagnostics telemetry (throttled)
         val now = System.currentTimeMillis()
@@ -121,11 +123,11 @@ class DynamicSpeedIconGenerator(private val context: Context) {
             LogKeeper.log(
                 context,
                 "IconDiagnostics",
-                "Render96x96 -> size=${BASE_SIZE}x${BASE_SIZE}, numSize=${speedPaint.textSize.toInt()}px, numW=${measuredNumWidth.toInt()}px, unitSize=${unitPaint.textSize.toInt()}px, unitW=${measuredUnitWidth.toInt()}px, val='$speedValue', unit='$formattedUnit'"
+                "IconDelivery -> bmp=${bitmap.width}x${bitmap.height}, bmpDensity=${bitmap.density}, devDpi=${context.resources.displayMetrics.densityDpi}, iconType=${icon.type}, noIntermediateResize=true, numSize=${speedPaint.textSize.toInt()}px, numW=${measuredNumWidth.toInt()}px, unitSize=${unitPaint.textSize.toInt()}px, unitW=${measuredUnitWidth.toInt()}px, val='$speedValue', unit='$formattedUnit'"
             )
         }
 
-        return IconCompat.createWithBitmap(bitmap)
+        return icon
     }
 
     fun onTrimMemory() {

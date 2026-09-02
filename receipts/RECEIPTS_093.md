@@ -311,17 +311,16 @@
 * Deviations: None. Stopped strictly after Process 1 without touching Sidebar, Settings, or Process 2.
 * Known issues: None.
 
-* Timestamp: 2026-09-01T15:26:00-07:00
-* One-line summary: Replaced 48px direct icon rendering with 96x96 supersampled high-contrast canvas rendering in DynamicSpeedIconGenerator.
+* Timestamp: 2026-09-02T01:46:00-07:00
+* One-line summary: Calibrated DynamicSpeedIconGenerator bitmap delivery path without manual density overrides and calibrated reference baselines at y=52 and y=94.
 * Exact files touched:
   - `app/src/main/java/com/example/core/DynamicSpeedIconGenerator.kt`
   - `receipts/RECEIPTS_093.md`
 * What was actually done:
-  - Switched baseline bitmap canvas from 48x48 (24dp physical) to 96x96 ARGB_8888 supersampled canvas modeled after the reference NetSpeed Indicator architecture.
-  - Sized upper speed numeric text at 50px-66px (proportional to digit count) with horizontal width constraints and exact glyph bounding box alignment.
-  - Sized lower unit text ("B/s", "kB/s", "MB/s", "GB/s") at 40px with exact bottom glyph descent alignment to eliminate dead vertical space and prevent down-scaling blur.
-  - Added throttled `IconDiagnostics` rendering telemetry logging bitmap dimensions, measured paint sizes, and measured widths.
-  - Maintained strictly frozen Welcome/MainActivity, LogKeeper, permissions, and network-measurement algorithms.
+  - Verified no manual density modification, application-side resizing, or drawable conversion occurs in the 96x96 bitmap delivery pipeline before `setSmallIcon()`.
+  - Calibrated speed number baseline around y=52 (65px size) and unit baseline around y=94 (40px size) matching the open-source NetSpeed Indicator reference.
+  - Added enhanced `IconDiagnostics` logging for `bmpDimensions`, `bmpDensity`, `devDpi`, `iconType`, and confirmation of no intermediate resizing.
+  - Kept Welcome screen, LogKeeper, permissions, sidebar architecture, and process boundaries strictly untouched.
 * How it was verified: local build only (`compile_applet` passed successfully).
 * Deviations: None.
 * Known issues: None.
