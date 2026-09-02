@@ -311,15 +311,18 @@
 * Deviations: None. Stopped strictly after Process 1 without touching Sidebar, Settings, or Process 2.
 * Known issues: None.
 
-* Timestamp: 2026-09-02T01:46:00-07:00
-* One-line summary: Calibrated DynamicSpeedIconGenerator bitmap delivery path without manual density overrides and calibrated reference baselines at y=52 and y=94.
+* Timestamp: 2026-09-02T09:21:00-07:00
+* One-line summary: Replaced NotificationCompat/IconCompat with native android.app.Notification.Builder and android.graphics.drawable.Icon.
 * Exact files touched:
   - `app/src/main/java/com/example/core/DynamicSpeedIconGenerator.kt`
+  - `app/src/main/java/com/example/core/HandleService.kt`
   - `receipts/RECEIPTS_093.md`
 * What was actually done:
-  - Verified no manual density modification, application-side resizing, or drawable conversion occurs in the 96x96 bitmap delivery pipeline before `setSmallIcon()`.
-  - Calibrated speed number baseline around y=52 (65px size) and unit baseline around y=94 (40px size) matching the open-source NetSpeed Indicator reference.
-  - Added enhanced `IconDiagnostics` logging for `bmpDimensions`, `bmpDensity`, `devDpi`, `iconType`, and confirmation of no intermediate resizing.
+  - Refactored `DynamicSpeedIconGenerator` to expose `generateSpeedBitmap` and `generateSpeedIcon` returning native `android.graphics.drawable.Icon` directly from the raw 96x96 ARGB_8888 bitmap snapshot. Removed all `IconCompat` imports and usages.
+  - Refactored `HandleService.buildNotification()` to use native `android.app.Notification.Builder(this, CHANNEL_ID)` and `setSmallIcon(Icon)`. Removed `NotificationCompat` import and usage.
+  - Preserved raw 96x96 ARGB_8888 bitmap with zero manual density assignment, zero intermediate application-side resize, zero drawable conversions, and zero adaptive icon wrappers.
+  - Added pre-`setSmallIcon` diagnostics logging `bmpWidth`, `bmpHeight`, `bmpDensity`, `iconType`, `resized=false`, `iconCompatInvolved=false`, and `builder=android.app.Notification.Builder`.
+  - Preserved all notification channels, foreground service flags, ongoing states, texts, PendingIntents, notification ID, and speed updates.
   - Kept Welcome screen, LogKeeper, permissions, sidebar architecture, and process boundaries strictly untouched.
 * How it was verified: local build only (`compile_applet` passed successfully).
 * Deviations: None.

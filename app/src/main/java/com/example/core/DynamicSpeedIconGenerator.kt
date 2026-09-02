@@ -7,7 +7,8 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Rect
 import android.graphics.Typeface
-import androidx.core.graphics.drawable.IconCompat
+import android.graphics.drawable.Icon
+import android.os.Build
 
 /**
  * DynamicSpeedIconGenerator: Generates high-fidelity, crisp dynamic speed icons
@@ -47,7 +48,7 @@ class DynamicSpeedIconGenerator(private val context: Context) {
      * onto a raw 96x96 ARGB_8888 bitmap snapshot matching the reference status-bar layout and glyph scale.
      */
     @Synchronized
-    fun generateSpeedIcon(speedValue: String, speedUnit: String): IconCompat {
+    fun generateSpeedBitmap(speedValue: String, speedUnit: String): Bitmap {
         val bitmap = Bitmap.createBitmap(BASE_SIZE, BASE_SIZE, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
 
@@ -112,7 +113,17 @@ class DynamicSpeedIconGenerator(private val context: Context) {
         }
         canvas.drawText(formattedUnit, cx, unitBaseline, unitPaint)
 
-        val icon = IconCompat.createWithBitmap(bitmap)
+        return bitmap
+    }
+
+    /**
+     * Exposes native android.graphics.drawable.Icon created directly from the 96x96 ARGB_8888 bitmap.
+     * Zero IconCompat wrapping, zero application-side resizing, zero density manipulation.
+     */
+    @Synchronized
+    fun generateSpeedIcon(speedValue: String, speedUnit: String): Icon {
+        val bitmap = generateSpeedBitmap(speedValue, speedUnit)
+        val icon = Icon.createWithBitmap(bitmap)
 
         // Diagnostics telemetry (throttled)
         val now = System.currentTimeMillis()
@@ -120,10 +131,11 @@ class DynamicSpeedIconGenerator(private val context: Context) {
             lastLoggedDiagnosticValue = speedValue
             lastLoggedDiagnosticUnit = speedUnit
             lastDiagnosticLogTimestamp = now
+            val iconTypeStr = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) "${icon.type}" else "TYPE_BITMAP"
             LogKeeper.log(
                 context,
                 "IconDiagnostics",
-                "IconDelivery -> bmp=${bitmap.width}x${bitmap.height}, bmpDensity=${bitmap.density}, devDpi=${context.resources.displayMetrics.densityDpi}, iconType=${icon.type}, noIntermediateResize=true, numSize=${speedPaint.textSize.toInt()}px, numW=${measuredNumWidth.toInt()}px, unitSize=${unitPaint.textSize.toInt()}px, unitW=${measuredUnitWidth.toInt()}px, val='$speedValue', unit='$formattedUnit'"
+                "IconDelivery -> bmp=${bitmap.width}x${bitmap.height}, bmpDensity=${bitmap.density}, devDpi=${context.resources.displayMetrics.densityDpi}, iconType=$iconTypeStr, noIntermediateResize=true, iconCompatInvolved=false, val='$speedValue', unit='$speedUnit'"
             )
         }
 

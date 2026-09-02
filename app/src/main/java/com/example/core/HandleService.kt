@@ -12,9 +12,9 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.SharedPreferences
 import android.content.pm.ServiceInfo
+import android.graphics.drawable.Icon
 import android.os.Build
 import android.os.IBinder
-import androidx.core.app.NotificationCompat
 import com.example.MainActivity
 import com.example.R
 
@@ -47,6 +47,10 @@ class HandleService : Service(), SharedPreferences.OnSharedPreferenceChangeListe
     private var lastLoggedSpeedValue = ""
     private var lastLoggedSpeedUnit = ""
     private var lastSpeedDiagnosticLogTimestamp = 0L
+
+    private var lastLoggedIconValue = ""
+    private var lastLoggedIconUnit = ""
+    private var lastIconLogTimestamp = 0L
 
     private val screenStateReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
@@ -220,9 +224,24 @@ class HandleService : Service(), SharedPreferences.OnSharedPreferenceChangeListe
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val icon = dynamicSpeedIconGenerator.generateSpeedIcon(speedVal, speedUnit)
+        val bitmap = dynamicSpeedIconGenerator.generateSpeedBitmap(speedVal, speedUnit)
+        val icon = Icon.createWithBitmap(bitmap)
 
-        return NotificationCompat.Builder(this, CHANNEL_ID)
+        // Diagnostics immediately before setSmallIcon
+        val now = System.currentTimeMillis()
+        if (speedVal != lastLoggedIconValue || speedUnit != lastLoggedIconUnit || (now - lastIconLogTimestamp) > 30000L) {
+            lastLoggedIconValue = speedVal
+            lastLoggedIconUnit = speedUnit
+            lastIconLogTimestamp = now
+            val iconType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) "${icon.type}" else "TYPE_BITMAP"
+            LogKeeper.log(
+                this,
+                "IconDiagnostics",
+                "PreSetSmallIcon -> bmpWidth=${bitmap.width}, bmpHeight=${bitmap.height}, bmpDensity=${bitmap.density}, iconType=$iconType, resized=false, iconCompatInvolved=false, builder=android.app.Notification.Builder, val='$speedVal', unit='$speedUnit'"
+            )
+        }
+
+        return Notification.Builder(this, CHANNEL_ID)
             .setSmallIcon(icon)
             .setContentTitle(titleText)
             .setContentText(contentText)
@@ -230,9 +249,8 @@ class HandleService : Service(), SharedPreferences.OnSharedPreferenceChangeListe
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setShowWhen(false)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
-            .setCategory(NotificationCompat.CATEGORY_SERVICE)
-            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setCategory(Notification.CATEGORY_SERVICE)
+            .setVisibility(Notification.VISIBILITY_PUBLIC)
             .build()
     }
 
