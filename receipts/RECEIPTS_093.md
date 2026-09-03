@@ -396,15 +396,19 @@
 * Deviations: None.
 * Known issues: None.
 
-* Timestamp: 2026-09-03T11:55:00-07:00
-* One-line summary: Implemented experimental conservative alpha cleanup (alpha < 40 -> 0 for white pixels) in DynamicSpeedIconGenerator to test elimination of faint anti-alias halo fringe.
+* Timestamp: 2026-09-03T13:12:00-07:00
+* One-line summary: Implemented 48x48 ARGB_8888 controlled experiment with explicit device density (320dpi) to eliminate downsampling softness in status bar.
 * Exact files touched:
   - `app/src/main/java/com/example/core/DynamicSpeedIconGenerator.kt`
+  - `app/src/main/java/com/example/core/HandleService.kt`
   - `receipts/RECEIPTS_093.md`
 * What was actually done:
-  - Preserved existing 96x96 ARGB_8888 bitmap, Paint anti-aliasing, typography, baselines, and horizontal-fit safeguard intact.
-  - Implemented post-render alpha cleanup: scans rendered bitmap pixels and converts white/near-white pixels (RGB >= 200) with faint alpha (alpha in 1..39) to fully transparent (alpha 0). Pixels with alpha >= 40 and all RGB values are left unaltered.
-  - Updated IconDiagnostics to log `alpha1To39Count` and `alpha40To254Count` along with min/max alpha to enable precise before/after comparison.
+  - Replaced 96x96 bitmap rendering with direct 48x48 ARGB_8888 bitmap matching the device's 24dp target at density=2.0 (320dpi).
+  - Explicitly set `bitmap.density = targetDensityDpi` (320) so the OS does not reinterpret its intrinsic physical size.
+  - Proportional geometry scaling: `DEFAULT_SPEED_TEXT_SIZE = 34f`, `DEFAULT_UNIT_TEXT_SIZE = 18f`, `SPEED_BASELINE_X = 24f`, `SPEED_BASELINE_Y = 26f`, `UNIT_BASELINE_X = 24f`, `UNIT_BASELINE_Y = 47f`.
+  - Added safe speed width guard of 44px (`SAFE_SPEED_WIDTH = 44f`) guaranteeing >= 2px margins from the 48px canvas edges for any value length.
+  - Preserved standard anti-aliasing and removed the experimental alpha-threshold cleanup.
+  - Added comprehensive diagnostics: bitmap dimensions, bitmap density, text sizes, measured text widths, nontransparent glyph bounds, distance to all 4 canvas edges (L, R, T, B), and touchesEdge boolean check.
 * How it was verified: local build only (`compile_applet`).
 * Deviations: None.
 * Known issues: None.
