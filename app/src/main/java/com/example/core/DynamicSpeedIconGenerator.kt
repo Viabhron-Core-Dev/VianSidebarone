@@ -14,32 +14,26 @@ import android.os.Build
  * DynamicSpeedIconGenerator: Generates dynamic status-bar speed icons matching
  * the NetSpeed Indicator reference implementation geometry and Paint configuration.
  *
- * Controlled Experiment: 48x48 ARGB_8888 bitmap directly matching the 24dp notification-icon
- * target at density=2.0 (320dpi) on Redmi A5 to eliminate downsampling blur in the status bar.
- *
- * Baseline: 48x48 ARGB_8888 bitmap
- * Explicit density: context.resources.displayMetrics.densityDpi (320 dpi)
- * Speed Paint: Color.WHITE, ANTI_ALIAS_FLAG only, TextSize=34px, TextAlign=CENTER, sans-serif-condensed BOLD
- * Unit Paint: Color.WHITE, ANTI_ALIAS_FLAG only, TextSize=18px, TextAlign=CENTER, Typeface.DEFAULT_BOLD
- * Safe speed width: 44px (guaranteeing >= 2px horizontal margin on 48px canvas)
- * Speed baseline: x=24, y=26
- * Unit baseline: x=24, y=47
+ * Baseline: 96x96 ARGB_8888 bitmap
+ * Speed Paint: Color.WHITE, ANTI_ALIAS_FLAG only, TextSize=68px, TextAlign=CENTER, sans-serif-condensed BOLD
+ * Unit Paint: Color.WHITE, ANTI_ALIAS_FLAG only, TextSize=36px, TextAlign=CENTER, Typeface.DEFAULT_BOLD
+ * Safe speed width: 88px (horizontal clipping safeguard for 3-digit values)
+ * Speed baseline: x=48, y=52
+ * Unit baseline: x=48, y=95
  * Clears bitmap with PorterDuff.Mode.CLEAR before each render.
  */
 class DynamicSpeedIconGenerator(private val context: Context) {
 
     companion object {
-        private const val BASE_SIZE = 48
-        private const val SPEED_BASELINE_X = 24f
-        private const val SPEED_BASELINE_Y = 26f
-        private const val UNIT_BASELINE_X = 24f
-        private const val UNIT_BASELINE_Y = 47f
-        private const val DEFAULT_SPEED_TEXT_SIZE = 34f
-        private const val DEFAULT_UNIT_TEXT_SIZE = 18f
-        private const val SAFE_SPEED_WIDTH = 44f
+        private const val BASE_SIZE = 96
+        private const val SPEED_BASELINE_X = 48f
+        private const val SPEED_BASELINE_Y = 52f
+        private const val UNIT_BASELINE_X = 48f
+        private const val UNIT_BASELINE_Y = 95f
+        private const val DEFAULT_SPEED_TEXT_SIZE = 68f
+        private const val DEFAULT_UNIT_TEXT_SIZE = 36f
+        private const val SAFE_SPEED_WIDTH = 88f
     }
-
-    private val targetDensityDpi = context.resources.displayMetrics.densityDpi
 
     private val speedPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.WHITE
@@ -73,14 +67,17 @@ class DynamicSpeedIconGenerator(private val context: Context) {
     private var lastLoggedDiagnosticUnit = ""
     private var lastDiagnosticLogTimestamp = 0L
 
+    private var lastMinAlphaBefore = 0
+    private var lastMinAlphaAfter = 0
+    private var lastPixelsBelow64 = 0
+    private var lastPixelsRemoved = 0
+
     /**
-     * Renders numeric speed and unit onto a 48x48 ARGB_8888 bitmap with explicit device density.
+     * Renders numeric speed and unit onto a 96x96 ARGB_8888 bitmap matching the reference geometry.
      */
     @Synchronized
     fun generateSpeedBitmap(speedValue: String, speedUnit: String): Bitmap {
-        val bitmap = Bitmap.createBitmap(BASE_SIZE, BASE_SIZE, Bitmap.Config.ARGB_8888).apply {
-            density = targetDensityDpi
-        }
+        val bitmap = Bitmap.createBitmap(BASE_SIZE, BASE_SIZE, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
         canvas.drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR)
 
@@ -93,7 +90,7 @@ class DynamicSpeedIconGenerator(private val context: Context) {
             else -> if (speedUnit.endsWith("/s", ignoreCase = true)) speedUnit else "$speedUnit/s"
         }
 
-        // Horizontal-fit safeguard: measure text width at default 34px size
+        // Horizontal-fit safeguard: measure text width at default 68px size
         speedPaint.textSize = DEFAULT_SPEED_TEXT_SIZE
         val measuredWidth = speedPaint.measureText(speedValue)
         if (measuredWidth > SAFE_SPEED_WIDTH) {
@@ -101,20 +98,58 @@ class DynamicSpeedIconGenerator(private val context: Context) {
             speedPaint.textSize = fittedSize
         }
 
-        // Top line: Speed number at baseline x=24, y=26
+        // Top line: Speed number at reference baseline x=48, y=52
         canvas.drawText(speedValue, SPEED_BASELINE_X, SPEED_BASELINE_Y, speedPaint)
 
         // Reset speedPaint textSize back to default
         speedPaint.textSize = DEFAULT_SPEED_TEXT_SIZE
 
-        // Bottom line: Unit at baseline x=24, y=47
+        // Bottom line: Unit at reference baseline x=48, y=95
         canvas.drawText(formattedUnit, UNIT_BASELINE_X, UNIT_BASELINE_Y, unitPaint)
+
+        // Conservative alpha cleanup experiment:
+        // For every pixel:
+        // - If alpha is below 64, set that pixel fully transparent (alpha = 0).
+        // - If alpha is 64 or higher, leave the pixel completely unchanged.
+        val pixels = IntArray(BASE_SIZE * BASE_SIZE)
+        bitmap.getPixels(pixels, 0, BASE_SIZE, 0, 0, BASE_SIZE, BASE_SIZE)
+
+        var minAlphaBefore = 255
+        var minAlphaAfter = 255
+        var pixelsBelow64 = 0
+        var pixelsRemoved = 0
+
+        for (i in pixels.indices) {
+            val pixel = pixels[i]
+            val a = (pixel ushr 24) and 0xFF
+            if (a > 0) {
+                if (a < minAlphaBefore) minAlphaBefore = a
+                if (a < 64) {
+                    pixelsBelow64++
+                    pixels[i] = 0 // Set fully transparent
+                    pixelsRemoved++
+                } else {
+                    if (a < minAlphaAfter) minAlphaAfter = a
+                }
+            }
+        }
+        if (minAlphaBefore == 255) minAlphaBefore = 0
+        if (minAlphaAfter == 255) minAlphaAfter = 0
+
+        lastMinAlphaBefore = minAlphaBefore
+        lastMinAlphaAfter = minAlphaAfter
+        lastPixelsBelow64 = pixelsBelow64
+        lastPixelsRemoved = pixelsRemoved
+
+        if (pixelsRemoved > 0) {
+            bitmap.setPixels(pixels, 0, BASE_SIZE, 0, 0, BASE_SIZE, BASE_SIZE)
+        }
 
         return bitmap
     }
 
     /**
-     * Exposes native android.graphics.drawable.Icon created directly from the 48x48 ARGB_8888 bitmap.
+     * Exposes native android.graphics.drawable.Icon created directly from the 96x96 ARGB_8888 bitmap.
      */
     @Synchronized
     fun generateSpeedIcon(speedValue: String, speedUnit: String): Icon {
@@ -127,24 +162,15 @@ class DynamicSpeedIconGenerator(private val context: Context) {
             lastLoggedDiagnosticUnit = speedUnit
             lastDiagnosticLogTimestamp = now
 
-            val measuredSpeedWidth = speedPaint.measureText(speedValue)
-            val measuredUnitWidth = unitPaint.measureText(
-                when (speedUnit) {
-                    "K", "k", "KB", "KB/s", "kb/s" -> "kB/s"
-                    "M", "m", "MB" -> "MB/s"
-                    "G", "g", "GB" -> "GB/s"
-                    "B", "b" -> "B/s"
-                    else -> if (speedUnit.endsWith("/s", ignoreCase = true)) speedUnit else "$speedUnit/s"
-                }
-            )
-
-            // Inspect actual bitmap pixels to find nontransparent glyph bounds and edge margins
+            // Inspect actual bitmap alpha pixels after cleanup
             val pixels = IntArray(BASE_SIZE * BASE_SIZE)
             bitmap.getPixels(pixels, 0, BASE_SIZE, 0, 0, BASE_SIZE, BASE_SIZE)
 
             var minAlpha = 255
             var maxAlpha = 0
-            var countNonTransparent = 0
+            var countAlpha64To254 = 0
+            var countOpaqueWhite = 0
+            var countOtherOpaque = 0
             var minX = BASE_SIZE
             var maxX = -1
             var minY = BASE_SIZE
@@ -155,9 +181,20 @@ class DynamicSpeedIconGenerator(private val context: Context) {
                     val pixel = pixels[y * BASE_SIZE + x]
                     val a = (pixel ushr 24) and 0xFF
                     if (a > 0) {
-                        countNonTransparent++
                         if (a < minAlpha) minAlpha = a
                         if (a > maxAlpha) maxAlpha = a
+                        if (a in 64..254) {
+                            countAlpha64To254++
+                        } else if (a == 255) {
+                            val r = (pixel ushr 16) and 0xFF
+                            val g = (pixel ushr 8) and 0xFF
+                            val b = pixel and 0xFF
+                            if (r == 255 && g == 255 && b == 255) {
+                                countOpaqueWhite++
+                            } else {
+                                countOtherOpaque++
+                            }
+                        }
                         if (x < minX) minX = x
                         if (x > maxX) maxX = x
                         if (y < minY) minY = y
@@ -167,23 +204,13 @@ class DynamicSpeedIconGenerator(private val context: Context) {
             }
             if (maxAlpha == 0) minAlpha = 0
 
-            val leftMargin = if (maxX >= minX) minX else -1
-            val rightMargin = if (maxX >= minX) (BASE_SIZE - 1 - maxX) else -1
-            val topMargin = if (maxY >= minY) minY else -1
-            val bottomMargin = if (maxY >= minY) (BASE_SIZE - 1 - maxY) else -1
-
-            val touchesAnyEdge = (minX == 0 || maxX == BASE_SIZE - 1 || minY == 0 || maxY == BASE_SIZE - 1)
+            val hasPixelsOutsideGlyphBounds = minX < 2 || maxX > 93 || minY < 0 || maxY > 95
             val glyphBoundsStr = if (maxX >= minX && maxY >= minY) "x=[$minX..$maxX],y=[$minY..$maxY]" else "none"
 
             LogKeeper.log(
                 context,
                 "IconDiagnostics",
-                "IconCreation -> bmp=${bitmap.width}x${bitmap.height}, density=${bitmap.density}, " +
-                "speedTextSize=${DEFAULT_SPEED_TEXT_SIZE}, unitTextSize=${DEFAULT_UNIT_TEXT_SIZE}, " +
-                "measuredSpeedWidth=$measuredSpeedWidth, measuredUnitWidth=$measuredUnitWidth, " +
-                "val='$speedValue', unit='$speedUnit', minAlpha=$minAlpha, maxAlpha=$maxAlpha, " +
-                "glyphBounds=$glyphBoundsStr, margins=[L=$leftMargin, R=$rightMargin, T=$topMargin, B=$bottomMargin], " +
-                "touchesEdge=$touchesAnyEdge"
+                "IconCreation -> bmp=${bitmap.width}x${bitmap.height}, density=${bitmap.density}, val='$speedValue', unit='$speedUnit', minAlphaBefore=$lastMinAlphaBefore, minAlphaAfter=$lastMinAlphaAfter, pixelsBelow64Before=$lastPixelsBelow64, pixelsRemoved=$lastPixelsRemoved, alpha64To254Count=$countAlpha64To254, opaqueWhiteCount=$countOpaqueWhite, otherOpaqueCount=$countOtherOpaque, glyphBounds=$glyphBoundsStr, pixelsOutsideGlyphRegion=$hasPixelsOutsideGlyphBounds"
             )
         }
 

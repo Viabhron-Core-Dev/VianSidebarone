@@ -270,7 +270,7 @@ class HandleService : Service(), SharedPreferences.OnSharedPreferenceChangeListe
             LogKeeper.log(
                 this,
                 "IconDiagnostics",
-                "PreSetSmallIcon -> bmpWidth=48, bmpHeight=48, iconType=$iconType, resized=false, iconCompatInvolved=false, builder=android.app.Notification.Builder, val='$speedVal', unit='$speedUnit'"
+                "PreSetSmallIcon -> bmpWidth=96, bmpHeight=96, iconType=$iconType, resized=false, iconCompatInvolved=false, builder=android.app.Notification.Builder, val='$speedVal', unit='$speedUnit'"
             )
         }
 

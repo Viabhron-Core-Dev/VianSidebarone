@@ -396,19 +396,15 @@
 * Deviations: None.
 * Known issues: None.
 
-* Timestamp: 2026-09-03T13:12:00-07:00
-* One-line summary: Implemented 48x48 ARGB_8888 controlled experiment with explicit device density (320dpi) to eliminate downsampling softness in status bar.
+* Timestamp: 2026-09-03T14:33:00-07:00
+* One-line summary: Implemented conservative alpha < 64 threshold cleanup experiment in DynamicSpeedIconGenerator to eliminate faint anti-alias halo.
 * Exact files touched:
   - `app/src/main/java/com/example/core/DynamicSpeedIconGenerator.kt`
-  - `app/src/main/java/com/example/core/HandleService.kt`
   - `receipts/RECEIPTS_093.md`
 * What was actually done:
-  - Replaced 96x96 bitmap rendering with direct 48x48 ARGB_8888 bitmap matching the device's 24dp target at density=2.0 (320dpi).
-  - Explicitly set `bitmap.density = targetDensityDpi` (320) so the OS does not reinterpret its intrinsic physical size.
-  - Proportional geometry scaling: `DEFAULT_SPEED_TEXT_SIZE = 34f`, `DEFAULT_UNIT_TEXT_SIZE = 18f`, `SPEED_BASELINE_X = 24f`, `SPEED_BASELINE_Y = 26f`, `UNIT_BASELINE_X = 24f`, `UNIT_BASELINE_Y = 47f`.
-  - Added safe speed width guard of 44px (`SAFE_SPEED_WIDTH = 44f`) guaranteeing >= 2px margins from the 48px canvas edges for any value length.
-  - Preserved standard anti-aliasing and removed the experimental alpha-threshold cleanup.
-  - Added comprehensive diagnostics: bitmap dimensions, bitmap density, text sizes, measured text widths, nontransparent glyph bounds, distance to all 4 canvas edges (L, R, T, B), and touchesEdge boolean check.
+  - Configured post-render pixel cleanup: if alpha is below 64, set that pixel fully transparent (alpha = 0). If alpha is 64 or higher, left completely unchanged without altering RGB values.
+  - Retained all existing 96x96 ARGB_8888 bitmap properties, default density, anti-aliasing on Paint, typography (68px speed, 36px unit), horizontal-fit safe width (88px), baselines (48, 52) and (48, 95), and native Icon delivery pipeline.
+  - Added diagnostics tracking count of pixels below 64 before cleanup, pixels removed, min alpha before cleanup, min remaining nonzero alpha after cleanup, alpha64To254Count, opaque counts, and glyph bounds.
 * How it was verified: local build only (`compile_applet`).
 * Deviations: None.
 * Known issues: None.
