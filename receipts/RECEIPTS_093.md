@@ -396,18 +396,19 @@
 * Deviations: None.
 * Known issues: None.
 
-* Timestamp: 2026-09-03T14:33:00-07:00
-* One-line summary: Implemented conservative alpha < 64 threshold cleanup experiment in DynamicSpeedIconGenerator to eliminate faint anti-alias halo.
+* Timestamp: 2026-09-03T15:00:00-07:00
+* One-line summary: Adjusted alpha cleanup threshold from 64 to 80 in DynamicSpeedIconGenerator to further reduce status-bar text bleed.
 * Exact files touched:
   - `app/src/main/java/com/example/core/DynamicSpeedIconGenerator.kt`
   - `receipts/RECEIPTS_093.md`
 * What was actually done:
-  - Configured post-render pixel cleanup: if alpha is below 64, set that pixel fully transparent (alpha = 0). If alpha is 64 or higher, left completely unchanged without altering RGB values.
-  - Retained all existing 96x96 ARGB_8888 bitmap properties, default density, anti-aliasing on Paint, typography (68px speed, 36px unit), horizontal-fit safe width (88px), baselines (48, 52) and (48, 95), and native Icon delivery pipeline.
-  - Added diagnostics tracking count of pixels below 64 before cleanup, pixels removed, min alpha before cleanup, min remaining nonzero alpha after cleanup, alpha64To254Count, opaque counts, and glyph bounds.
+  - Updated alpha cleanup threshold from 64 to 80 (`ALPHA_CLEANUP_THRESHOLD = 80`). Pixels with alpha < 80 are converted to transparent (`alpha = 0`), while pixels with alpha >= 80 remain completely untouched with original RGB values.
+  - Retained all existing 96x96 ARGB_8888 bitmap dimensions, density, typography (68px speed, 36px unit), horizontal-fit safe width (88px), baselines, and native Icon delivery pipeline.
+  - Updated IconDiagnostics to explicitly log `thresholdUsed=80`, `minAlphaBefore`, `minAlphaAfter`, `pixelsRemoved`, `alpha80To254Count`, opaque counts, and glyph bounds.
 * How it was verified: local build only (`compile_applet`).
 * Deviations: None.
 * Known issues: None.
+
 
 
 

@@ -33,6 +33,7 @@ class DynamicSpeedIconGenerator(private val context: Context) {
         private const val DEFAULT_SPEED_TEXT_SIZE = 68f
         private const val DEFAULT_UNIT_TEXT_SIZE = 36f
         private const val SAFE_SPEED_WIDTH = 88f
+        private const val ALPHA_CLEANUP_THRESHOLD = 80
     }
 
     private val speedPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -69,7 +70,7 @@ class DynamicSpeedIconGenerator(private val context: Context) {
 
     private var lastMinAlphaBefore = 0
     private var lastMinAlphaAfter = 0
-    private var lastPixelsBelow64 = 0
+    private var lastPixelsBelowThreshold = 0
     private var lastPixelsRemoved = 0
 
     /**
@@ -109,14 +110,14 @@ class DynamicSpeedIconGenerator(private val context: Context) {
 
         // Conservative alpha cleanup experiment:
         // For every pixel:
-        // - If alpha is below 64, set that pixel fully transparent (alpha = 0).
-        // - If alpha is 64 or higher, leave the pixel completely unchanged.
+        // - If alpha is below 80, set that pixel fully transparent (alpha = 0).
+        // - If alpha is 80 or higher, leave the pixel completely unchanged.
         val pixels = IntArray(BASE_SIZE * BASE_SIZE)
         bitmap.getPixels(pixels, 0, BASE_SIZE, 0, 0, BASE_SIZE, BASE_SIZE)
 
         var minAlphaBefore = 255
         var minAlphaAfter = 255
-        var pixelsBelow64 = 0
+        var pixelsBelowThreshold = 0
         var pixelsRemoved = 0
 
         for (i in pixels.indices) {
@@ -124,8 +125,8 @@ class DynamicSpeedIconGenerator(private val context: Context) {
             val a = (pixel ushr 24) and 0xFF
             if (a > 0) {
                 if (a < minAlphaBefore) minAlphaBefore = a
-                if (a < 64) {
-                    pixelsBelow64++
+                if (a < ALPHA_CLEANUP_THRESHOLD) {
+                    pixelsBelowThreshold++
                     pixels[i] = 0 // Set fully transparent
                     pixelsRemoved++
                 } else {
@@ -138,7 +139,7 @@ class DynamicSpeedIconGenerator(private val context: Context) {
 
         lastMinAlphaBefore = minAlphaBefore
         lastMinAlphaAfter = minAlphaAfter
-        lastPixelsBelow64 = pixelsBelow64
+        lastPixelsBelowThreshold = pixelsBelowThreshold
         lastPixelsRemoved = pixelsRemoved
 
         if (pixelsRemoved > 0) {
@@ -168,7 +169,7 @@ class DynamicSpeedIconGenerator(private val context: Context) {
 
             var minAlpha = 255
             var maxAlpha = 0
-            var countAlpha64To254 = 0
+            var countAlphaThresholdTo254 = 0
             var countOpaqueWhite = 0
             var countOtherOpaque = 0
             var minX = BASE_SIZE
@@ -183,8 +184,8 @@ class DynamicSpeedIconGenerator(private val context: Context) {
                     if (a > 0) {
                         if (a < minAlpha) minAlpha = a
                         if (a > maxAlpha) maxAlpha = a
-                        if (a in 64..254) {
-                            countAlpha64To254++
+                        if (a in ALPHA_CLEANUP_THRESHOLD..254) {
+                            countAlphaThresholdTo254++
                         } else if (a == 255) {
                             val r = (pixel ushr 16) and 0xFF
                             val g = (pixel ushr 8) and 0xFF
@@ -210,7 +211,7 @@ class DynamicSpeedIconGenerator(private val context: Context) {
             LogKeeper.log(
                 context,
                 "IconDiagnostics",
-                "IconCreation -> bmp=${bitmap.width}x${bitmap.height}, density=${bitmap.density}, val='$speedValue', unit='$speedUnit', minAlphaBefore=$lastMinAlphaBefore, minAlphaAfter=$lastMinAlphaAfter, pixelsBelow64Before=$lastPixelsBelow64, pixelsRemoved=$lastPixelsRemoved, alpha64To254Count=$countAlpha64To254, opaqueWhiteCount=$countOpaqueWhite, otherOpaqueCount=$countOtherOpaque, glyphBounds=$glyphBoundsStr, pixelsOutsideGlyphRegion=$hasPixelsOutsideGlyphBounds"
+                "IconCreation -> bmp=${bitmap.width}x${bitmap.height}, density=${bitmap.density}, val='$speedValue', unit='$speedUnit', thresholdUsed=$ALPHA_CLEANUP_THRESHOLD, minAlphaBefore=$lastMinAlphaBefore, minAlphaAfter=$lastMinAlphaAfter, pixelsRemoved=$lastPixelsRemoved, alpha${ALPHA_CLEANUP_THRESHOLD}To254Count=$countAlphaThresholdTo254, opaqueWhiteCount=$countOpaqueWhite, otherOpaqueCount=$countOtherOpaque, glyphBounds=$glyphBoundsStr, pixelsOutsideGlyphRegion=$hasPixelsOutsideGlyphBounds"
             )
         }
 
