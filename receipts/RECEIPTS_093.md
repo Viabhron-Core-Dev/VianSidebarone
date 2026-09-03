@@ -396,6 +396,22 @@
 * Deviations: None.
 * Known issues: None.
 
+* Timestamp: 2026-09-03T10:52:00-07:00
+* One-line summary: Added safe-width (88px) horizontal-fit safeguard in DynamicSpeedIconGenerator to eliminate horizontal clipping on wide 3-digit speed values.
+* Exact files touched:
+  - `app/src/main/java/com/example/core/DynamicSpeedIconGenerator.kt`
+  - `receipts/RECEIPTS_093.md`
+* What was actually done:
+  - Configured default speed text size to 68px (`DEFAULT_SPEED_TEXT_SIZE = 68f`) and unit text size to 36px (`DEFAULT_UNIT_TEXT_SIZE = 36f`).
+  - Set safe speed text width constant to 88px (`SAFE_SPEED_WIDTH = 88f`) inside the 96x96 canvas, guaranteeing a minimum 4px margin on both left and right edges.
+  - Implemented width measurement with `speedPaint.measureText(speedValue)` starting at 68px. If width <= 88px, text size remains untouched at 68px; if width > 88px, text size is minimally reduced via `68f * (88f / measuredWidth)` so the glyph bounds fit cleanly within [4..92].
+  - Speed baseline (48, 52) and unit baseline (48, 95) remain completely untouched.
+  - Unit line rendering, IconDiagnostics, bitmap size, and native Icon delivery pipeline remain completely untouched.
+* How it was verified: local build only (`compile_applet`).
+* Deviations: None.
+* Known issues: None.
+
+
 
 
 

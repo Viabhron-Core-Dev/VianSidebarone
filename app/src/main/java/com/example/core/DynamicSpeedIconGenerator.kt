@@ -15,8 +15,9 @@ import android.os.Build
  * the NetSpeed Indicator reference implementation geometry and Paint configuration.
  *
  * Baseline: 96x96 ARGB_8888 bitmap
- * Speed Paint: Color.WHITE, ANTI_ALIAS_FLAG only, TextSize=65px, TextAlign=CENTER, sans-serif-condensed BOLD
- * Unit Paint: Color.WHITE, ANTI_ALIAS_FLAG only, TextSize=40px, TextAlign=CENTER, Typeface.DEFAULT_BOLD
+ * Speed Paint: Color.WHITE, ANTI_ALIAS_FLAG only, TextSize=68px, TextAlign=CENTER, sans-serif-condensed BOLD
+ * Unit Paint: Color.WHITE, ANTI_ALIAS_FLAG only, TextSize=36px, TextAlign=CENTER, Typeface.DEFAULT_BOLD
+ * Safe speed width: 88px (horizontal clipping safeguard for 3-digit values)
  * Speed baseline: x=48, y=52
  * Unit baseline: x=48, y=95
  * Clears bitmap with PorterDuff.Mode.CLEAR before each render.
@@ -29,6 +30,9 @@ class DynamicSpeedIconGenerator(private val context: Context) {
         private const val SPEED_BASELINE_Y = 52f
         private const val UNIT_BASELINE_X = 48f
         private const val UNIT_BASELINE_Y = 95f
+        private const val DEFAULT_SPEED_TEXT_SIZE = 68f
+        private const val DEFAULT_UNIT_TEXT_SIZE = 36f
+        private const val SAFE_SPEED_WIDTH = 88f
     }
 
     private val speedPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -39,7 +43,7 @@ class DynamicSpeedIconGenerator(private val context: Context) {
         isFilterBitmap = false
         isDither = false
         letterSpacing = 0f
-        textSize = 65f
+        textSize = DEFAULT_SPEED_TEXT_SIZE
         textAlign = Paint.Align.CENTER
         typeface = Typeface.create("sans-serif-condensed", Typeface.BOLD)
         clearShadowLayer()
@@ -53,7 +57,7 @@ class DynamicSpeedIconGenerator(private val context: Context) {
         isFilterBitmap = false
         isDither = false
         letterSpacing = 0f
-        textSize = 40f
+        textSize = DEFAULT_UNIT_TEXT_SIZE
         textAlign = Paint.Align.CENTER
         typeface = Typeface.DEFAULT_BOLD
         clearShadowLayer()
@@ -81,8 +85,19 @@ class DynamicSpeedIconGenerator(private val context: Context) {
             else -> if (speedUnit.endsWith("/s", ignoreCase = true)) speedUnit else "$speedUnit/s"
         }
 
+        // Horizontal-fit safeguard: measure text width at default 68px size
+        speedPaint.textSize = DEFAULT_SPEED_TEXT_SIZE
+        val measuredWidth = speedPaint.measureText(speedValue)
+        if (measuredWidth > SAFE_SPEED_WIDTH) {
+            val fittedSize = DEFAULT_SPEED_TEXT_SIZE * (SAFE_SPEED_WIDTH / measuredWidth)
+            speedPaint.textSize = fittedSize
+        }
+
         // Top line: Speed number at reference baseline x=48, y=52
         canvas.drawText(speedValue, SPEED_BASELINE_X, SPEED_BASELINE_Y, speedPaint)
+
+        // Reset speedPaint textSize back to default
+        speedPaint.textSize = DEFAULT_SPEED_TEXT_SIZE
 
         // Bottom line: Unit at reference baseline x=48, y=95
         canvas.drawText(formattedUnit, UNIT_BASELINE_X, UNIT_BASELINE_Y, unitPaint)
