@@ -102,6 +102,30 @@ class DynamicSpeedIconGenerator(private val context: Context) {
         // Bottom line: Unit at reference baseline x=48, y=95
         canvas.drawText(formattedUnit, UNIT_BASELINE_X, UNIT_BASELINE_Y, unitPaint)
 
+        // Experimental conservative alpha cleanup:
+        // Converts extremely faint anti-aliasing edge fringe (alpha < 40) of white/near-white pixels
+        // to fully transparent (0), eliminating faint soft/gray halo without altering glyph geometry.
+        val pixels = IntArray(BASE_SIZE * BASE_SIZE)
+        bitmap.getPixels(pixels, 0, BASE_SIZE, 0, 0, BASE_SIZE, BASE_SIZE)
+        var modifiedCount = 0
+        for (i in pixels.indices) {
+            val pixel = pixels[i]
+            val a = (pixel ushr 24) and 0xFF
+            if (a in 1 until 40) {
+                val r = (pixel ushr 16) and 0xFF
+                val g = (pixel ushr 8) and 0xFF
+                val b = pixel and 0xFF
+                // Only modify pixels whose RGB is white/near-white
+                if (r >= 200 && g >= 200 && b >= 200) {
+                    pixels[i] = 0 // Fully transparent Color.TRANSPARENT
+                    modifiedCount++
+                }
+            }
+        }
+        if (modifiedCount > 0) {
+            bitmap.setPixels(pixels, 0, BASE_SIZE, 0, 0, BASE_SIZE, BASE_SIZE)
+        }
+
         return bitmap
     }
 
@@ -119,13 +143,14 @@ class DynamicSpeedIconGenerator(private val context: Context) {
             lastLoggedDiagnosticUnit = speedUnit
             lastDiagnosticLogTimestamp = now
 
-            // Inspect actual bitmap alpha pixels
+            // Inspect actual bitmap alpha pixels after cleanup
             val pixels = IntArray(BASE_SIZE * BASE_SIZE)
             bitmap.getPixels(pixels, 0, BASE_SIZE, 0, 0, BASE_SIZE, BASE_SIZE)
 
             var minAlpha = 255
             var maxAlpha = 0
-            var countAlpha1To254 = 0
+            var countAlpha1To39 = 0
+            var countAlpha40To254 = 0
             var countOpaqueWhite = 0
             var countOtherOpaque = 0
             var minX = BASE_SIZE
@@ -140,8 +165,10 @@ class DynamicSpeedIconGenerator(private val context: Context) {
                     if (a > 0) {
                         if (a < minAlpha) minAlpha = a
                         if (a > maxAlpha) maxAlpha = a
-                        if (a in 1..254) {
-                            countAlpha1To254++
+                        if (a in 1..39) {
+                            countAlpha1To39++
+                        } else if (a in 40..254) {
+                            countAlpha40To254++
                         } else if (a == 255) {
                             val r = (pixel ushr 16) and 0xFF
                             val g = (pixel ushr 8) and 0xFF
@@ -161,17 +188,13 @@ class DynamicSpeedIconGenerator(private val context: Context) {
             }
             if (maxAlpha == 0) minAlpha = 0
 
-            // Expected glyph region check:
-            // Glyphs are centered horizontally (x around 48) and positioned vertically
-            // between speed line (y around 2..56) and unit line (y around 66..95).
-            // Outside expected glyph region indicates unexpected border/background bleeding.
             val hasPixelsOutsideGlyphBounds = minX < 2 || maxX > 93 || minY < 0 || maxY > 95
             val glyphBoundsStr = if (maxX >= minX && maxY >= minY) "x=[$minX..$maxX],y=[$minY..$maxY]" else "none"
 
             LogKeeper.log(
                 context,
                 "IconDiagnostics",
-                "IconCreation -> bmp=${bitmap.width}x${bitmap.height}, density=${bitmap.density}, val='$speedValue', unit='$speedUnit', minAlpha=$minAlpha, maxAlpha=$maxAlpha, alpha1To254Count=$countAlpha1To254, opaqueWhiteCount=$countOpaqueWhite, otherOpaqueCount=$countOtherOpaque, glyphBounds=$glyphBoundsStr, pixelsOutsideGlyphRegion=$hasPixelsOutsideGlyphBounds"
+                "IconCreation -> bmp=${bitmap.width}x${bitmap.height}, density=${bitmap.density}, val='$speedValue', unit='$speedUnit', minAlpha=$minAlpha, maxAlpha=$maxAlpha, alpha1To39Count=$countAlpha1To39, alpha40To254Count=$countAlpha40To254, opaqueWhiteCount=$countOpaqueWhite, otherOpaqueCount=$countOtherOpaque, glyphBounds=$glyphBoundsStr, pixelsOutsideGlyphRegion=$hasPixelsOutsideGlyphBounds"
             )
         }
 

@@ -396,17 +396,15 @@
 * Deviations: None.
 * Known issues: None.
 
-* Timestamp: 2026-09-03T10:52:00-07:00
-* One-line summary: Added safe-width (88px) horizontal-fit safeguard in DynamicSpeedIconGenerator to eliminate horizontal clipping on wide 3-digit speed values.
+* Timestamp: 2026-09-03T11:55:00-07:00
+* One-line summary: Implemented experimental conservative alpha cleanup (alpha < 40 -> 0 for white pixels) in DynamicSpeedIconGenerator to test elimination of faint anti-alias halo fringe.
 * Exact files touched:
   - `app/src/main/java/com/example/core/DynamicSpeedIconGenerator.kt`
   - `receipts/RECEIPTS_093.md`
 * What was actually done:
-  - Configured default speed text size to 68px (`DEFAULT_SPEED_TEXT_SIZE = 68f`) and unit text size to 36px (`DEFAULT_UNIT_TEXT_SIZE = 36f`).
-  - Set safe speed text width constant to 88px (`SAFE_SPEED_WIDTH = 88f`) inside the 96x96 canvas, guaranteeing a minimum 4px margin on both left and right edges.
-  - Implemented width measurement with `speedPaint.measureText(speedValue)` starting at 68px. If width <= 88px, text size remains untouched at 68px; if width > 88px, text size is minimally reduced via `68f * (88f / measuredWidth)` so the glyph bounds fit cleanly within [4..92].
-  - Speed baseline (48, 52) and unit baseline (48, 95) remain completely untouched.
-  - Unit line rendering, IconDiagnostics, bitmap size, and native Icon delivery pipeline remain completely untouched.
+  - Preserved existing 96x96 ARGB_8888 bitmap, Paint anti-aliasing, typography, baselines, and horizontal-fit safeguard intact.
+  - Implemented post-render alpha cleanup: scans rendered bitmap pixels and converts white/near-white pixels (RGB >= 200) with faint alpha (alpha in 1..39) to fully transparent (alpha 0). Pixels with alpha >= 40 and all RGB values are left unaltered.
+  - Updated IconDiagnostics to log `alpha1To39Count` and `alpha40To254Count` along with min/max alpha to enable precise before/after comparison.
 * How it was verified: local build only (`compile_applet`).
 * Deviations: None.
 * Known issues: None.
