@@ -33,22 +33,30 @@ class DynamicSpeedIconGenerator(private val context: Context) {
 
     private val speedPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.WHITE
+        style = Paint.Style.FILL
         isAntiAlias = true
         isSubpixelText = false
+        isFilterBitmap = false
+        isDither = false
         letterSpacing = 0f
         textSize = 65f
         textAlign = Paint.Align.CENTER
         typeface = Typeface.create("sans-serif-condensed", Typeface.BOLD)
+        clearShadowLayer()
     }
 
     private val unitPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.WHITE
+        style = Paint.Style.FILL
         isAntiAlias = true
         isSubpixelText = false
+        isFilterBitmap = false
+        isDither = false
         letterSpacing = 0f
         textSize = 40f
         textAlign = Paint.Align.CENTER
         typeface = Typeface.DEFAULT_BOLD
+        clearShadowLayer()
     }
 
     private var lastLoggedDiagnosticValue = ""

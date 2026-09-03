@@ -39,6 +39,8 @@ class HandleService : Service(), SharedPreferences.OnSharedPreferenceChangeListe
     private var isSpeedMonitorEnabled = true
     private var isScreenOn = true
     private var serviceStartTime: Long = System.currentTimeMillis()
+    private var isFirstSpeedCallback = true
+    private var isQueryingTodayData = false
 
     private var cachedTodayDataFormatted: String = "--"
     private var lastDailyQueryTimestamp: Long = 0L
@@ -77,15 +79,19 @@ class HandleService : Service(), SharedPreferences.OnSharedPreferenceChangeListe
     override fun onCreate() {
         super.onCreate()
         serviceStartTime = System.currentTimeMillis()
-        handleManager = HandleManager.getInstance(this)
-        dynamicSpeedIconGenerator = DynamicSpeedIconGenerator(this)
+        LogKeeper.log(this, "StartupDiagnostics", "HandleService onCreate start (t=0ms)")
+
         notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-
         createNotificationChannel()
+        dynamicSpeedIconGenerator = DynamicSpeedIconGenerator(this)
 
-        // Start Foreground immediately with initial status
+        // 1. Build initial foreground notification with initial display state
+        val tBuild = System.currentTimeMillis() - serviceStartTime
+        LogKeeper.log(this, "StartupDiagnostics", "buildNotification start (t=${tBuild}ms)")
         val initialTitle = "Data: ${getTodayDataFormatted()} • ${formatElapsedTime()}"
         val initialNotification = buildNotification("0", "kB/s", initialTitle, "Down: 0 kB/s   Up: 0 kB/s")
+
+        // 2. Start Foreground IMMEDIATELY
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             startForeground(
                 NOTIFICATION_ID,
@@ -95,18 +101,30 @@ class HandleService : Service(), SharedPreferences.OnSharedPreferenceChangeListe
         } else {
             startForeground(NOTIFICATION_ID, initialNotification)
         }
+        val tFg = System.currentTimeMillis() - serviceStartTime
+        LogKeeper.log(this, "StartupDiagnostics", "startForeground completed (t=${tFg}ms)")
 
-        // Register Screen On/Off receiver
+        // 3. Initialize Net Speed Monitor immediately after entering foreground
+        val tNetSetup = System.currentTimeMillis() - serviceStartTime
+        LogKeeper.log(this, "StartupDiagnostics", "setupNetSpeedManager start (t=${tNetSetup}ms)")
+        isSpeedMonitorEnabled = prefs.getBoolean(KEY_NET_SPEED_ENABLED, true)
+        setupNetSpeedManager()
+        val tNetStarted = System.currentTimeMillis() - serviceStartTime
+        LogKeeper.log(this, "StartupDiagnostics", "NetSpeedManager.start completed (t=${tNetStarted}ms)")
+
+        // 4. Secondary component registrations
         val filter = IntentFilter().apply {
             addAction(Intent.ACTION_SCREEN_ON)
             addAction(Intent.ACTION_SCREEN_OFF)
         }
         registerReceiver(screenStateReceiver, filter)
-
-        // Register Preference Listener
         prefs.registerOnSharedPreferenceChangeListener(this)
 
-        // Log display metrics and dynamic icon configuration
+        handleManager = HandleManager.getInstance(this)
+        attachHandles()
+        CallRecorderManager.getInstance(this).startListening()
+
+        // 5. Non-essential diagnostic logging moved after service and speed monitor are active
         val metrics = resources.displayMetrics
         val calc24dp = (24f * metrics.density).toInt()
         LogKeeper.log(
@@ -116,16 +134,6 @@ class HandleService : Service(), SharedPreferences.OnSharedPreferenceChangeListe
             "widthPixels=${metrics.widthPixels}, heightPixels=${metrics.heightPixels}, " +
             "scaledDensity=${metrics.scaledDensity}, 24dp_target=${calc24dp}px"
         )
-
-        // Initialize Net Speed Monitor
-        isSpeedMonitorEnabled = prefs.getBoolean(KEY_NET_SPEED_ENABLED, true)
-        setupNetSpeedManager()
-
-        // Attach Active Handles
-        attachHandles()
-
-        // Start Call Recorder listener if enabled
-        CallRecorderManager.getInstance(this).startListening()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -157,6 +165,16 @@ class HandleService : Service(), SharedPreferences.OnSharedPreferenceChangeListe
 
     private fun updateSpeedNotification(speedData: SpeedData) {
         try {
+            if (isFirstSpeedCallback) {
+                isFirstSpeedCallback = false
+                val tFirst = System.currentTimeMillis() - serviceStartTime
+                LogKeeper.log(
+                    this,
+                    "StartupDiagnostics",
+                    "first speed callback (t=${tFirst}ms): val='${speedData.downValue}', unit='${speedData.downUnit}'"
+                )
+            }
+
             val titleText = "Data: ${getTodayDataFormatted()} • ${formatElapsedTime()}"
             val contentText = "Down: ${speedData.downFormatted}   Up: ${speedData.upFormatted}"
             val notification = buildNotification(
@@ -186,14 +204,30 @@ class HandleService : Service(), SharedPreferences.OnSharedPreferenceChangeListe
     private fun getTodayDataFormatted(): String {
         val currentDay = java.util.Calendar.getInstance().get(java.util.Calendar.DAY_OF_YEAR)
         val now = System.currentTimeMillis()
-        // Refresh if day rolled over or 30 seconds elapsed
+        // Non-blocking asynchronous query if day rolled over or 30 seconds elapsed
         if (currentDay != cachedDayOfYear || (now - lastDailyQueryTimestamp) > 30000L) {
-            val bytes = DailyDataUsageHelper.getTodayDataUsageBytes(this)
-            cachedTodayDataFormatted = DailyDataUsageHelper.formatDataBytes(bytes)
             lastDailyQueryTimestamp = now
             cachedDayOfYear = currentDay
+            queryTodayDataUsageAsync()
         }
         return cachedTodayDataFormatted
+    }
+
+    private fun queryTodayDataUsageAsync() {
+        if (isQueryingTodayData) return
+        isQueryingTodayData = true
+        Thread {
+            try {
+                val bytes = DailyDataUsageHelper.getTodayDataUsageBytes(this@HandleService)
+                val formatted = DailyDataUsageHelper.formatDataBytes(bytes)
+                synchronized(this@HandleService) {
+                    cachedTodayDataFormatted = formatted
+                }
+            } catch (_: Exception) {
+            } finally {
+                isQueryingTodayData = false
+            }
+        }.start()
     }
 
     private fun formatElapsedTime(): String {
@@ -224,8 +258,7 @@ class HandleService : Service(), SharedPreferences.OnSharedPreferenceChangeListe
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val bitmap = dynamicSpeedIconGenerator.generateSpeedBitmap(speedVal, speedUnit)
-        val icon = Icon.createWithBitmap(bitmap)
+        val icon = dynamicSpeedIconGenerator.generateSpeedIcon(speedVal, speedUnit)
 
         // Diagnostics immediately before setSmallIcon
         val now = System.currentTimeMillis()
@@ -237,7 +270,7 @@ class HandleService : Service(), SharedPreferences.OnSharedPreferenceChangeListe
             LogKeeper.log(
                 this,
                 "IconDiagnostics",
-                "PreSetSmallIcon -> bmpWidth=${bitmap.width}, bmpHeight=${bitmap.height}, bmpDensity=${bitmap.density}, iconType=$iconType, resized=false, iconCompatInvolved=false, builder=android.app.Notification.Builder, val='$speedVal', unit='$speedUnit'"
+                "PreSetSmallIcon -> bmpWidth=96, bmpHeight=96, iconType=$iconType, resized=false, iconCompatInvolved=false, builder=android.app.Notification.Builder, val='$speedVal', unit='$speedUnit'"
             )
         }
 

@@ -49,7 +49,7 @@ class NetSpeedManager(
         lastRxBytes = TrafficStats.getTotalRxBytes()
         lastTxBytes = TrafficStats.getTotalTxBytes()
         lastTimestamp = System.currentTimeMillis()
-        handler.post(tickRunnable)
+        handler.postDelayed(tickRunnable, 1000L)
     }
 
     fun stop() {

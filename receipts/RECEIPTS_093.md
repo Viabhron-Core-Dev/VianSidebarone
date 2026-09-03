@@ -377,6 +377,25 @@
 * Deviations: None.
 * Known issues: None.
 
+* Timestamp: 2026-09-03T06:15:00-07:00
+* One-line summary: Cleaned Paint flags on DynamicSpeedIconGenerator and optimized HandleService startup sequence to ensure immediate foreground notification display.
+* Exact files touched:
+  - `app/src/main/java/com/example/core/DynamicSpeedIconGenerator.kt`
+  - `app/src/main/java/com/example/core/HandleService.kt`
+  - `app/src/main/java/com/example/core/NetSpeedManager.kt`
+  - `receipts/RECEIPTS_093.md`
+* What was actually done:
+  - Ensured explicit Paint configuration for `speedPaint` and `unitPaint`: `color = Color.WHITE`, `style = Paint.Style.FILL`, `isAntiAlias = true`, `isSubpixelText = false`, `isFilterBitmap = false`, `isDither = false`, `letterSpacing = 0f`, `clearShadowLayer()`.
+  - Preserved unchanged sizes (65f, 40f), fixed baselines (48, 52) and (48, 95), 96x96 ARGB_8888 canvas, and native Icon delivery pipeline.
+  - Eliminated main-thread startup blocking in HandleService by executing NetworkStatsManager queries asynchronously, immediately displaying cached/standby status without waiting for network IPC.
+  - Reordered HandleService.onCreate() to call startForeground() immediately, followed directly by setupNetSpeedManager() and NetSpeedManager.start().
+  - Moved non-essential display metric and secondary logging after foreground notification is active.
+  - Updated NetSpeedManager.start() to schedule the first 1-second sample via handler.postDelayed(tickRunnable, 1000L).
+  - Added StartupDiagnostics logging key milestones: HandleService onCreate start, buildNotification start, startForeground completed, setupNetSpeedManager start, NetSpeedManager.start completed, and first speed callback.
+* How it was verified: local build only (`compile_applet`).
+* Deviations: None.
+* Known issues: None.
+
 
 
 
