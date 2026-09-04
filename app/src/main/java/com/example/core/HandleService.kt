@@ -182,17 +182,32 @@ class HandleService : Service(), SharedPreferences.OnSharedPreferenceChangeListe
             val speedUnit = speedData.downUnit
 
             // Live Resource selection:
-            // if displayed value == "108" and unit == "kB/s":
-            //   use the pre-rendered 108 kB/s drawable
-            // else:
-            //   use the existing runtime Icon.createWithBitmap renderer
-            val isResource = speedVal == "108" && speedUnit.equals("kB/s", ignoreCase = true)
+            // if displayedUnit == "kB/s" and displayedVal is exactly "0", "1", or "2":
+            //   select the corresponding pre-rendered RESOURCE icon
+            // otherwise:
+            //   continue using the existing RUNTIME Canvas renderer unchanged
+            val resourceDrawableId = if (speedUnit.equals("kB/s", ignoreCase = true)) {
+                when (speedVal) {
+                    "0" -> R.drawable.ic_stat_speed_0_k
+                    "1" -> R.drawable.ic_stat_speed_1_k
+                    "2" -> R.drawable.ic_stat_speed_2_k
+                    else -> null
+                }
+            } else {
+                null
+            }
 
+            val isResource = resourceDrawableId != null
             val selectedMode = if (isResource) "RESOURCE" else "RUNTIME"
-            val resName = if (isResource) "ic_stat_speed_108_k" else "none"
+            val resName = when (resourceDrawableId) {
+                R.drawable.ic_stat_speed_0_k -> "ic_stat_speed_0_k"
+                R.drawable.ic_stat_speed_1_k -> "ic_stat_speed_1_k"
+                R.drawable.ic_stat_speed_2_k -> "ic_stat_speed_2_k"
+                else -> "none"
+            }
 
-            val icon = if (isResource) {
-                Icon.createWithResource(this, R.drawable.ic_stat_speed_108_k)
+            val icon = if (resourceDrawableId != null) {
+                Icon.createWithResource(this, resourceDrawableId)
             } else {
                 dynamicSpeedIconGenerator.generateSpeedIcon(speedVal, speedUnit)
             }
