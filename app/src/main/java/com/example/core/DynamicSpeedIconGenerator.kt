@@ -72,6 +72,8 @@ class DynamicSpeedIconGenerator(private val context: Context) {
     private var lastMinAlphaAfter = 0
     private var lastPixelsBelowThreshold = 0
     private var lastPixelsRemoved = 0
+    private var lastDensityBefore = 0
+    private var lastDensityAfter = 0
 
     /**
      * Renders numeric speed and unit onto a 96x96 ARGB_8888 bitmap matching the reference geometry.
@@ -146,6 +148,16 @@ class DynamicSpeedIconGenerator(private val context: Context) {
             bitmap.setPixels(pixels, 0, BASE_SIZE, 0, 0, BASE_SIZE, BASE_SIZE)
         }
 
+        // Density isolation experiment:
+        // Switch bitmap density metadata from default inherited device density to Bitmap.DENSITY_NONE (0)
+        // while leaving all 96x96 pixel dimensions and pixel values completely unchanged.
+        val densityBefore = bitmap.density
+        bitmap.density = Bitmap.DENSITY_NONE
+        val densityAfter = bitmap.density
+
+        lastDensityBefore = densityBefore
+        lastDensityAfter = densityAfter
+
         return bitmap
     }
 
@@ -155,8 +167,10 @@ class DynamicSpeedIconGenerator(private val context: Context) {
     @Synchronized
     fun generateSpeedIcon(speedValue: String, speedUnit: String): Icon {
         val bitmap = generateSpeedBitmap(speedValue, speedUnit)
+        val icon = Icon.createWithBitmap(bitmap)
+        val iconType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) "${icon.type}" else "TYPE_BITMAP"
 
-        // Diagnostic immediately before Icon.createWithBitmap() logging actual width, height, density, and values
+        // Diagnostic immediately before Icon return logging actual width, height, density, and values
         val now = System.currentTimeMillis()
         if (speedValue != lastLoggedDiagnosticValue || speedUnit != lastLoggedDiagnosticUnit || (now - lastDiagnosticLogTimestamp) > 30000L) {
             lastLoggedDiagnosticValue = speedValue
@@ -211,11 +225,10 @@ class DynamicSpeedIconGenerator(private val context: Context) {
             LogKeeper.log(
                 context,
                 "IconDiagnostics",
-                "IconCreation -> bmp=${bitmap.width}x${bitmap.height}, density=${bitmap.density}, val='$speedValue', unit='$speedUnit', thresholdUsed=$ALPHA_CLEANUP_THRESHOLD, minAlphaBefore=$lastMinAlphaBefore, minAlphaAfter=$lastMinAlphaAfter, pixelsRemoved=$lastPixelsRemoved, alpha${ALPHA_CLEANUP_THRESHOLD}To254Count=$countAlphaThresholdTo254, opaqueWhiteCount=$countOpaqueWhite, otherOpaqueCount=$countOtherOpaque, glyphBounds=$glyphBoundsStr, pixelsOutsideGlyphRegion=$hasPixelsOutsideGlyphBounds"
+                "IconCreation -> bmp=${bitmap.width}x${bitmap.height}, densityBefore=$lastDensityBefore, densityAfter=${bitmap.density}, iconType=$iconType, resized=false, val='$speedValue', unit='$speedUnit', thresholdUsed=$ALPHA_CLEANUP_THRESHOLD, minAlphaBefore=$lastMinAlphaBefore, minAlphaAfter=$lastMinAlphaAfter, pixelsRemoved=$lastPixelsRemoved, alpha${ALPHA_CLEANUP_THRESHOLD}To254Count=$countAlphaThresholdTo254, opaqueWhiteCount=$countOpaqueWhite, otherOpaqueCount=$countOtherOpaque, glyphBounds=$glyphBoundsStr, pixelsOutsideGlyphRegion=$hasPixelsOutsideGlyphBounds"
             )
         }
 
-        val icon = Icon.createWithBitmap(bitmap)
         return icon
     }
 

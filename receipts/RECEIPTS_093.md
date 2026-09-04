@@ -396,15 +396,15 @@
 * Deviations: None.
 * Known issues: None.
 
-* Timestamp: 2026-09-03T15:00:00-07:00
-* One-line summary: Adjusted alpha cleanup threshold from 64 to 80 in DynamicSpeedIconGenerator to further reduce status-bar text bleed.
+* Timestamp: 2026-09-04T06:46:00-07:00
+* One-line summary: Tested setting bitmap density metadata to Bitmap.DENSITY_NONE in DynamicSpeedIconGenerator to isolate SystemUI scaling.
 * Exact files touched:
   - `app/src/main/java/com/example/core/DynamicSpeedIconGenerator.kt`
   - `receipts/RECEIPTS_093.md`
 * What was actually done:
-  - Updated alpha cleanup threshold from 64 to 80 (`ALPHA_CLEANUP_THRESHOLD = 80`). Pixels with alpha < 80 are converted to transparent (`alpha = 0`), while pixels with alpha >= 80 remain completely untouched with original RGB values.
-  - Retained all existing 96x96 ARGB_8888 bitmap dimensions, density, typography (68px speed, 36px unit), horizontal-fit safe width (88px), baselines, and native Icon delivery pipeline.
-  - Updated IconDiagnostics to explicitly log `thresholdUsed=80`, `minAlphaBefore`, `minAlphaAfter`, `pixelsRemoved`, `alpha80To254Count`, opaque counts, and glyph bounds.
+  - Set bitmap density metadata to `Bitmap.DENSITY_NONE` (0) on the generated 96x96 bitmap to test density-independent raw bitmap rendering without SystemUI automatic DPI rescaling.
+  - Left all 96x96 pixel dimensions, rendered pixel values, Paint configuration, baselines, typography, and alpha threshold (80) completely untouched.
+  - Added diagnostics logging `densityBefore`, `densityAfter`, `iconType`, and `resized=false` alongside existing alpha and glyph metrics.
 * How it was verified: local build only (`compile_applet`).
 * Deviations: None.
 * Known issues: None.
