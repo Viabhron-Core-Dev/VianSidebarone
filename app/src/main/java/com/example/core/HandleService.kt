@@ -258,20 +258,40 @@ class HandleService : Service(), SharedPreferences.OnSharedPreferenceChangeListe
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val icon = dynamicSpeedIconGenerator.generateSpeedIcon(speedVal, speedUnit)
+        val isTest43MbState = (speedVal == "43" || speedVal.startsWith("43.") || speedVal.startsWith("43")) &&
+                speedUnit.contains("M", ignoreCase = true)
 
-        // Diagnostics immediately before setSmallIcon
-        val now = System.currentTimeMillis()
-        if (speedVal != lastLoggedIconValue || speedUnit != lastLoggedIconUnit || (now - lastIconLogTimestamp) > 30000L) {
-            lastLoggedIconValue = speedVal
-            lastLoggedIconUnit = speedUnit
-            lastIconLogTimestamp = now
-            val iconType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) "${icon.type}" else "TYPE_BITMAP"
-            LogKeeper.log(
-                this,
-                "IconDiagnostics",
-                "PreSetSmallIcon -> bmpWidth=96, bmpHeight=96, iconType=$iconType, resized=false, iconCompatInvolved=false, builder=android.app.Notification.Builder, val='$speedVal', unit='$speedUnit'"
-            )
+        val icon = if (isTest43MbState) {
+            val resIcon = Icon.createWithResource(this, R.drawable.ic_stat_speed_43_mb)
+            val now = System.currentTimeMillis()
+            if (speedVal != lastLoggedIconValue || speedUnit != lastLoggedIconUnit || (now - lastIconLogTimestamp) > 30000L) {
+                lastLoggedIconValue = speedVal
+                lastLoggedIconUnit = speedUnit
+                lastIconLogTimestamp = now
+                val iconType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) "${resIcon.type}" else "TYPE_RESOURCE"
+                LogKeeper.log(
+                    this,
+                    "IconDiagnostics",
+                    "POC Resource Selected -> resName=ic_stat_speed_43_mb, resId=${R.drawable.ic_stat_speed_43_mb}, resDir=res/drawable-xhdpi, dim=96x96, iconPath=Icon.createWithResource(this, R.drawable.ic_stat_speed_43_mb), iconType=$iconType, speedVal='$speedVal', speedUnit='$speedUnit'"
+                )
+            }
+            resIcon
+        } else {
+            val dynamicIcon = dynamicSpeedIconGenerator.generateSpeedIcon(speedVal, speedUnit)
+            // Diagnostics immediately before setSmallIcon
+            val now = System.currentTimeMillis()
+            if (speedVal != lastLoggedIconValue || speedUnit != lastLoggedIconUnit || (now - lastIconLogTimestamp) > 30000L) {
+                lastLoggedIconValue = speedVal
+                lastLoggedIconUnit = speedUnit
+                lastIconLogTimestamp = now
+                val iconType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) "${dynamicIcon.type}" else "TYPE_BITMAP"
+                LogKeeper.log(
+                    this,
+                    "IconDiagnostics",
+                    "PreSetSmallIcon -> bmpWidth=96, bmpHeight=96, iconType=$iconType, resized=false, iconCompatInvolved=false, builder=android.app.Notification.Builder, val='$speedVal', unit='$speedUnit'"
+                )
+            }
+            dynamicIcon
         }
 
         return Notification.Builder(this, CHANNEL_ID)

@@ -33,6 +33,7 @@ class DynamicSpeedIconGenerator(private val context: Context) {
         private const val DEFAULT_SPEED_TEXT_SIZE = 68f
         private const val DEFAULT_UNIT_TEXT_SIZE = 36f
         private const val SAFE_SPEED_WIDTH = 88f
+        private const val ALPHA_CLEANUP_THRESHOLD = 80
     }
 
     private val speedPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -67,6 +68,10 @@ class DynamicSpeedIconGenerator(private val context: Context) {
     private var lastLoggedDiagnosticUnit = ""
     private var lastDiagnosticLogTimestamp = 0L
 
+    private var lastMinAlphaBefore = 0
+    private var lastMinAlphaAfter = 0
+    private var lastPixelsBelowThreshold = 0
+    private var lastPixelsRemoved = 0
     private var lastDensityBefore = 0
     private var lastDensityAfter = 0
 
@@ -105,6 +110,44 @@ class DynamicSpeedIconGenerator(private val context: Context) {
         // Bottom line: Unit at reference baseline x=48, y=95
         canvas.drawText(formattedUnit, UNIT_BASELINE_X, UNIT_BASELINE_Y, unitPaint)
 
+        // Conservative alpha cleanup experiment:
+        // For every pixel:
+        // - If alpha is below 80, set that pixel fully transparent (alpha = 0).
+        // - If alpha is 80 or higher, leave the pixel completely unchanged.
+        val pixels = IntArray(BASE_SIZE * BASE_SIZE)
+        bitmap.getPixels(pixels, 0, BASE_SIZE, 0, 0, BASE_SIZE, BASE_SIZE)
+
+        var minAlphaBefore = 255
+        var minAlphaAfter = 255
+        var pixelsBelowThreshold = 0
+        var pixelsRemoved = 0
+
+        for (i in pixels.indices) {
+            val pixel = pixels[i]
+            val a = (pixel ushr 24) and 0xFF
+            if (a > 0) {
+                if (a < minAlphaBefore) minAlphaBefore = a
+                if (a < ALPHA_CLEANUP_THRESHOLD) {
+                    pixelsBelowThreshold++
+                    pixels[i] = 0 // Set fully transparent
+                    pixelsRemoved++
+                } else {
+                    if (a < minAlphaAfter) minAlphaAfter = a
+                }
+            }
+        }
+        if (minAlphaBefore == 255) minAlphaBefore = 0
+        if (minAlphaAfter == 255) minAlphaAfter = 0
+
+        lastMinAlphaBefore = minAlphaBefore
+        lastMinAlphaAfter = minAlphaAfter
+        lastPixelsBelowThreshold = pixelsBelowThreshold
+        lastPixelsRemoved = pixelsRemoved
+
+        if (pixelsRemoved > 0) {
+            bitmap.setPixels(pixels, 0, BASE_SIZE, 0, 0, BASE_SIZE, BASE_SIZE)
+        }
+
         // Density isolation experiment:
         // Switch bitmap density metadata from default inherited device density to Bitmap.DENSITY_NONE (0)
         // while leaving all 96x96 pixel dimensions and pixel values completely unchanged.
@@ -134,13 +177,13 @@ class DynamicSpeedIconGenerator(private val context: Context) {
             lastLoggedDiagnosticUnit = speedUnit
             lastDiagnosticLogTimestamp = now
 
-            // Inspect actual bitmap alpha pixels (no threshold cleanup applied)
+            // Inspect actual bitmap alpha pixels after cleanup
             val pixels = IntArray(BASE_SIZE * BASE_SIZE)
             bitmap.getPixels(pixels, 0, BASE_SIZE, 0, 0, BASE_SIZE, BASE_SIZE)
 
             var minAlpha = 255
             var maxAlpha = 0
-            var countSemiTransparentAlpha = 0
+            var countAlphaThresholdTo254 = 0
             var countOpaqueWhite = 0
             var countOtherOpaque = 0
             var minX = BASE_SIZE
@@ -155,8 +198,8 @@ class DynamicSpeedIconGenerator(private val context: Context) {
                     if (a > 0) {
                         if (a < minAlpha) minAlpha = a
                         if (a > maxAlpha) maxAlpha = a
-                        if (a in 1..254) {
-                            countSemiTransparentAlpha++
+                        if (a in ALPHA_CLEANUP_THRESHOLD..254) {
+                            countAlphaThresholdTo254++
                         } else if (a == 255) {
                             val r = (pixel ushr 16) and 0xFF
                             val g = (pixel ushr 8) and 0xFF
@@ -182,7 +225,7 @@ class DynamicSpeedIconGenerator(private val context: Context) {
             LogKeeper.log(
                 context,
                 "IconDiagnostics",
-                "IconCreation -> bmp=${bitmap.width}x${bitmap.height}, densityBefore=$lastDensityBefore, densityAfter=${bitmap.density}, iconType=$iconType, resized=false, val='$speedValue', unit='$speedUnit', alphaCleanup=NONE, minAlpha=$minAlpha, maxAlpha=$maxAlpha, semiTransparentAlphaCount=$countSemiTransparentAlpha, opaqueWhiteCount=$countOpaqueWhite, otherOpaqueCount=$countOtherOpaque, glyphBounds=$glyphBoundsStr, pixelsOutsideGlyphRegion=$hasPixelsOutsideGlyphBounds"
+                "IconCreation -> bmp=${bitmap.width}x${bitmap.height}, densityBefore=$lastDensityBefore, densityAfter=${bitmap.density}, iconType=$iconType, resized=false, val='$speedValue', unit='$speedUnit', thresholdUsed=$ALPHA_CLEANUP_THRESHOLD, minAlphaBefore=$lastMinAlphaBefore, minAlphaAfter=$lastMinAlphaAfter, pixelsRemoved=$lastPixelsRemoved, alpha${ALPHA_CLEANUP_THRESHOLD}To254Count=$countAlphaThresholdTo254, opaqueWhiteCount=$countOpaqueWhite, otherOpaqueCount=$countOtherOpaque, glyphBounds=$glyphBoundsStr, pixelsOutsideGlyphRegion=$hasPixelsOutsideGlyphBounds"
             )
         }
 

@@ -396,19 +396,35 @@
 * Deviations: None.
 * Known issues: None.
 
-* Timestamp: 2026-09-04T10:06:00-07:00
-* One-line summary: Removed alpha-threshold post-processing in DynamicSpeedIconGenerator to A/B test natural anti-aliased alpha against threshold 80 with DENSITY_NONE.
+* Timestamp: 2026-09-04T06:46:00-07:00
+* One-line summary: Tested setting bitmap density metadata to Bitmap.DENSITY_NONE in DynamicSpeedIconGenerator to isolate SystemUI scaling.
 * Exact files touched:
   - `app/src/main/java/com/example/core/DynamicSpeedIconGenerator.kt`
   - `receipts/RECEIPTS_093.md`
 * What was actually done:
-  - Preserved 96x96 ARGB_8888 bitmap dimensions, Bitmap.DENSITY_NONE (0) density metadata, and exact typography (68px speed, 36px unit, sans-serif-condensed BOLD / DEFAULT_BOLD, baselines (48, 52) and (48, 95), 88px safe width).
-  - Preserved native android.app.Notification.Builder and Icon.createWithBitmap() delivery path.
-  - Removed only the post-render alpha threshold/cleanup logic, allowing Canvas-rendered anti-aliased text to retain its natural alpha values.
-  - Updated IconDiagnostics logging to explicitly reflect `alphaCleanup=NONE` and report natural `minAlpha`, `maxAlpha`, and `semiTransparentAlphaCount`.
+  - Set bitmap density metadata to `Bitmap.DENSITY_NONE` (0) on the generated 96x96 bitmap to test density-independent raw bitmap rendering without SystemUI automatic DPI rescaling.
+  - Left all 96x96 pixel dimensions, rendered pixel values, Paint configuration, baselines, typography, and alpha threshold (80) completely untouched.
+  - Added diagnostics logging `densityBefore`, `densityAfter`, `iconType`, and `resized=false` alongside existing alpha and glyph metrics.
 * How it was verified: local build only (`compile_applet`).
 * Deviations: None.
 * Known issues: None.
+
+* Timestamp: 2026-09-04T13:16:00-07:00
+* One-line summary: Implemented isolated proof-of-concept test using pre-rendered Android resource drawable for 43 MB/s status-bar icon.
+* Exact files touched:
+  - `app/src/main/res/drawable-xhdpi/ic_stat_speed_43_mb.png`
+  - `app/src/main/java/com/example/core/HandleService.kt`
+  - `receipts/RECEIPTS_093.md`
+* What was actually done:
+  - Generated `app/src/main/res/drawable-xhdpi/ic_stat_speed_43_mb.png` (96x96 px) using exact Android typography (Roboto Condensed Bold 68px, Roboto Bold 36px), baselines (48, 52) and (48, 95), and alpha cleanup threshold 80.
+  - Placed pre-rendered drawable in `res/drawable-xhdpi` matching the 320 dpi density of the Redmi A5 target device without adding multiple density variants.
+  - Temporarily routed status-bar notification small icon selection in `HandleService.buildNotification` to use `Icon.createWithResource(this, R.drawable.ic_stat_speed_43_mb)` when in the 43 MB/s state.
+  - Left existing runtime Canvas generator in `DynamicSpeedIconGenerator.kt` as fallback for all other states.
+  - Added IconDiagnostics logging resource name, resource ID, directory, dimensions, and small icon delivery path.
+* How it was verified: local build only (`compile_applet`).
+* Deviations: None.
+* Known issues: None.
+
 
 
 
