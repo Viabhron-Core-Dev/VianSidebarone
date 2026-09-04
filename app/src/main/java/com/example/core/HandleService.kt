@@ -182,18 +182,17 @@ class HandleService : Service(), SharedPreferences.OnSharedPreferenceChangeListe
             val speedUnit = speedData.downUnit
 
             // Live Resource selection:
-            // if displayed value == "43" (or "43.0" / "43.x") and unit == "MB/s":
-            //   use the pre-rendered 43 MB/s drawable
+            // if displayed value == "108" and unit == "kB/s":
+            //   use the pre-rendered 108 kB/s drawable
             // else:
             //   use the existing runtime Icon.createWithBitmap renderer
-            val isResource = (speedVal == "43" || speedVal == "43.0" || speedVal.startsWith("43.")) &&
-                    speedUnit.equals("MB/s", ignoreCase = true)
+            val isResource = speedVal == "108" && speedUnit.equals("kB/s", ignoreCase = true)
 
             val selectedMode = if (isResource) "RESOURCE" else "RUNTIME"
-            val resName = if (isResource) "ic_stat_speed_43_mb" else "none"
+            val resName = if (isResource) "ic_stat_speed_108_k" else "none"
 
             val icon = if (isResource) {
-                Icon.createWithResource(this, R.drawable.ic_stat_speed_43_mb)
+                Icon.createWithResource(this, R.drawable.ic_stat_speed_108_k)
             } else {
                 dynamicSpeedIconGenerator.generateSpeedIcon(speedVal, speedUnit)
             }

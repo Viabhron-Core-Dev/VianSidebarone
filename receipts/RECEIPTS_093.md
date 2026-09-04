@@ -438,7 +438,20 @@
   - Added minimal diagnostics logging to `IconDiagnostics`: `displayedVal`, `displayedUnit`, `mode` (RESOURCE or RUNTIME), `resName`, `setSmallIconReceived=true`, and `notifyExecuted=true`.
   - Added startup diagnostic confirming initial notification icon is replaced upon first live speed callback.
   - Synchronized `isScreenOn` state with `PowerManager.isInteractive` on service creation.
-* How it was verified: local build only (`compile_applet`, `gradle assembleDebug`, `gradle :app:testDebugUnitTest`).
+* Timestamp: 2026-09-04T14:55:00-07:00
+* One-line summary: Created 108 kB/s pre-rendered xhdpi resource icon and updated HandleService live condition.
+* Exact files touched:
+  - `app/src/main/res/drawable-xhdpi/ic_stat_speed_108_k.png`
+  - `app/src/main/java/com/example/core/HandleService.kt`
+  - `receipts/RECEIPTS_093.md`
+* What was actually done:
+  - Pre-rendered `app/src/main/res/drawable-xhdpi/ic_stat_speed_108_k.png` (96x96 px) using authentic Roboto Condensed Bold and Roboto Bold TrueType fonts, baselines (48, 52) and (48, 95), centered layout, safe-width horizontal fitting, and alpha cleanup threshold 80.
+  - Placed pre-rendered drawable in `app/src/main/res/drawable-xhdpi/` matching the 320 dpi density of the Redmi A5 target device.
+  - Preserved `app/src/main/res/drawable-xhdpi/ic_stat_speed_43_mb.png` in the repository.
+  - Updated live speed notification callback `HandleService.updateSpeedNotification` condition to: `speedVal == "108" && speedUnit.equals("kB/s", ignoreCase = true)`.
+  - Configured resource name `ic_stat_speed_108_k` and mode `RESOURCE` when active; delegates all other values to existing runtime `dynamicSpeedIconGenerator.generateSpeedIcon(speedVal, speedUnit)` (`RUNTIME`).
+  - Preserved diagnostic logging for `LiveUpdate -> displayedVal='108', displayedUnit='kB/s', mode=RESOURCE, resName=ic_stat_speed_108_k, setSmallIconReceived=true, notifyExecuted=true`.
+* How it was verified: local build only (`compile_applet`, `gradle assembleDebug`).
 * Deviations: None.
 * Known issues: None.
 
