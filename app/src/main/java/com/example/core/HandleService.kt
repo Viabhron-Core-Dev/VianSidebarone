@@ -15,6 +15,7 @@ import android.content.pm.ServiceInfo
 import android.graphics.drawable.Icon
 import android.os.Build
 import android.os.IBinder
+import android.os.PowerManager
 import com.example.MainActivity
 import com.example.R
 
@@ -54,6 +55,11 @@ class HandleService : Service(), SharedPreferences.OnSharedPreferenceChangeListe
     private var lastLoggedIconUnit = ""
     private var lastIconLogTimestamp = 0L
 
+    private var lastLiveLoggedMode = ""
+    private var lastLiveLoggedVal = ""
+    private var lastLiveLoggedUnit = ""
+    private var lastLiveLogTimestamp = 0L
+
     private val screenStateReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             when (intent.action) {
@@ -85,11 +91,17 @@ class HandleService : Service(), SharedPreferences.OnSharedPreferenceChangeListe
         createNotificationChannel()
         dynamicSpeedIconGenerator = DynamicSpeedIconGenerator(this)
 
+        val powerManager = getSystemService(Context.POWER_SERVICE) as? PowerManager
+        if (powerManager != null) {
+            isScreenOn = powerManager.isInteractive
+        }
+
         // 1. Build initial foreground notification with initial display state
         val tBuild = System.currentTimeMillis() - serviceStartTime
         LogKeeper.log(this, "StartupDiagnostics", "buildNotification start (t=${tBuild}ms)")
         val initialTitle = "Data: ${getTodayDataFormatted()} • ${formatElapsedTime()}"
-        val initialNotification = buildNotification("0", "kB/s", initialTitle, "Down: 0 kB/s   Up: 0 kB/s")
+        val initialIcon = dynamicSpeedIconGenerator.generateSpeedIcon("0", "kB/s")
+        val initialNotification = buildNotification(initialIcon, initialTitle, "Down: 0 kB/s   Up: 0 kB/s")
 
         // 2. Start Foreground IMMEDIATELY
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -158,42 +170,70 @@ class HandleService : Service(), SharedPreferences.OnSharedPreferenceChangeListe
             netSpeedManager = null
             // Update to a static standby notification
             val standbyTitle = "Data: ${getTodayDataFormatted()} • ${formatElapsedTime()}"
-            val standbyNotification = buildNotification("0", "kB/s", standbyTitle, "Down: --   Up: --")
+            val standbyIcon = dynamicSpeedIconGenerator.generateSpeedIcon("0", "kB/s")
+            val standbyNotification = buildNotification(standbyIcon, standbyTitle, "Down: --   Up: --")
             notificationManager.notify(NOTIFICATION_ID, standbyNotification)
         }
     }
 
     private fun updateSpeedNotification(speedData: SpeedData) {
         try {
-            if (isFirstSpeedCallback) {
-                isFirstSpeedCallback = false
-                val tFirst = System.currentTimeMillis() - serviceStartTime
-                LogKeeper.log(
-                    this,
-                    "StartupDiagnostics",
-                    "first speed callback (t=${tFirst}ms): val='${speedData.downValue}', unit='${speedData.downUnit}'"
-                )
+            val speedVal = speedData.downValue
+            val speedUnit = speedData.downUnit
+
+            // Live Resource selection:
+            // if displayed value == "43" (or "43.0" / "43.x") and unit == "MB/s":
+            //   use the pre-rendered 43 MB/s drawable
+            // else:
+            //   use the existing runtime Icon.createWithBitmap renderer
+            val isResource = (speedVal == "43" || speedVal == "43.0" || speedVal.startsWith("43.")) &&
+                    speedUnit.equals("MB/s", ignoreCase = true)
+
+            val selectedMode = if (isResource) "RESOURCE" else "RUNTIME"
+            val resName = if (isResource) "ic_stat_speed_43_mb" else "none"
+
+            val icon = if (isResource) {
+                Icon.createWithResource(this, R.drawable.ic_stat_speed_43_mb)
+            } else {
+                dynamicSpeedIconGenerator.generateSpeedIcon(speedVal, speedUnit)
             }
 
             val titleText = "Data: ${getTodayDataFormatted()} • ${formatElapsedTime()}"
             val contentText = "Down: ${speedData.downFormatted}   Up: ${speedData.upFormatted}"
-            val notification = buildNotification(
-                speedData.downValue,
-                speedData.downUnit,
-                titleText,
-                contentText
-            )
+
+            val notification = buildNotification(icon, titleText, contentText)
             notificationManager.notify(NOTIFICATION_ID, notification)
 
             val now = System.currentTimeMillis()
-            if (speedData.downValue != lastLoggedSpeedValue || speedData.downUnit != lastLoggedSpeedUnit || (now - lastSpeedDiagnosticLogTimestamp) > 30000L) {
-                lastLoggedSpeedValue = speedData.downValue
-                lastLoggedSpeedUnit = speedData.downUnit
-                lastSpeedDiagnosticLogTimestamp = now
+            if (isFirstSpeedCallback) {
+                isFirstSpeedCallback = false
+                val tFirst = now - serviceStartTime
+                LogKeeper.log(
+                    this,
+                    "StartupDiagnostics",
+                    "first speed callback (t=${tFirst}ms): initial 0 notification replaced by live speed notification (val='$speedVal', unit='$speedUnit', mode=$selectedMode)"
+                )
+            }
+
+            // Minimal diagnostics around the LIVE update path:
+            // - displayed speed value
+            // - displayed unit
+            // - selected icon mode: RESOURCE or RUNTIME
+            // - resource name when RESOURCE
+            // - confirmation that setSmallIcon received the selected icon
+            val modeChanged = (selectedMode != lastLiveLoggedMode)
+            val valChanged = (speedVal != lastLiveLoggedVal || speedUnit != lastLiveLoggedUnit)
+            val timeElapsed = (now - lastLiveLogTimestamp) > 10000L
+
+            if (isResource || modeChanged || valChanged || timeElapsed) {
+                lastLiveLoggedMode = selectedMode
+                lastLiveLoggedVal = speedVal
+                lastLiveLoggedUnit = speedUnit
+                lastLiveLogTimestamp = now
                 LogKeeper.log(
                     this,
                     "IconDiagnostics",
-                    "SpeedUpdate -> Val='${speedData.downValue}', Unit='${speedData.downUnit}', Down='${speedData.downFormatted}', Up='${speedData.upFormatted}'"
+                    "LiveUpdate -> displayedVal='$speedVal', displayedUnit='$speedUnit', mode=$selectedMode, resName=$resName, setSmallIconReceived=true, notifyExecuted=true"
                 )
             }
         } catch (e: Exception) {
@@ -243,8 +283,7 @@ class HandleService : Service(), SharedPreferences.OnSharedPreferenceChangeListe
     }
 
     private fun buildNotification(
-        speedVal: String,
-        speedUnit: String,
+        icon: Icon,
         titleText: String,
         contentText: String
     ): Notification {
@@ -257,42 +296,6 @@ class HandleService : Service(), SharedPreferences.OnSharedPreferenceChangeListe
             launchIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-
-        val isTest43MbState = (speedVal == "43" || speedVal.startsWith("43.") || speedVal.startsWith("43")) &&
-                speedUnit.contains("M", ignoreCase = true)
-
-        val icon = if (isTest43MbState) {
-            val resIcon = Icon.createWithResource(this, R.drawable.ic_stat_speed_43_mb)
-            val now = System.currentTimeMillis()
-            if (speedVal != lastLoggedIconValue || speedUnit != lastLoggedIconUnit || (now - lastIconLogTimestamp) > 30000L) {
-                lastLoggedIconValue = speedVal
-                lastLoggedIconUnit = speedUnit
-                lastIconLogTimestamp = now
-                val iconType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) "${resIcon.type}" else "TYPE_RESOURCE"
-                LogKeeper.log(
-                    this,
-                    "IconDiagnostics",
-                    "POC Resource Selected -> resName=ic_stat_speed_43_mb, resId=${R.drawable.ic_stat_speed_43_mb}, resDir=res/drawable-xhdpi, dim=96x96, iconPath=Icon.createWithResource(this, R.drawable.ic_stat_speed_43_mb), iconType=$iconType, speedVal='$speedVal', speedUnit='$speedUnit'"
-                )
-            }
-            resIcon
-        } else {
-            val dynamicIcon = dynamicSpeedIconGenerator.generateSpeedIcon(speedVal, speedUnit)
-            // Diagnostics immediately before setSmallIcon
-            val now = System.currentTimeMillis()
-            if (speedVal != lastLoggedIconValue || speedUnit != lastLoggedIconUnit || (now - lastIconLogTimestamp) > 30000L) {
-                lastLoggedIconValue = speedVal
-                lastLoggedIconUnit = speedUnit
-                lastIconLogTimestamp = now
-                val iconType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) "${dynamicIcon.type}" else "TYPE_BITMAP"
-                LogKeeper.log(
-                    this,
-                    "IconDiagnostics",
-                    "PreSetSmallIcon -> bmpWidth=96, bmpHeight=96, iconType=$iconType, resized=false, iconCompatInvolved=false, builder=android.app.Notification.Builder, val='$speedVal', unit='$speedUnit'"
-                )
-            }
-            dynamicIcon
-        }
 
         return Notification.Builder(this, CHANNEL_ID)
             .setSmallIcon(icon)

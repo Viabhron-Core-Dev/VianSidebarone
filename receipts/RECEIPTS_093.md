@@ -425,6 +425,23 @@
 * Deviations: None.
 * Known issues: None.
 
+* Timestamp: 2026-09-04T13:55:00-07:00
+* One-line summary: Connected 43 MB/s pre-rendered resource drawable directly into live HandleService.updateSpeedNotification path.
+* Exact files touched:
+  - `app/src/main/java/com/example/core/HandleService.kt`
+  - `receipts/RECEIPTS_093.md`
+* What was actually done:
+  - Refactored icon selection into `HandleService.updateSpeedNotification`, the exact callback invoked by `NetSpeedManager` on every 1-second tick when the screen is active.
+  - Implemented exact condition: if displayed value is 43 (`speedVal == "43" || speedVal == "43.0" || speedVal.startsWith("43.")`) and unit is `"MB/s"` (case-insensitive), selects `Icon.createWithResource(this, R.drawable.ic_stat_speed_43_mb)` (mode `RESOURCE`).
+  - For all other values, continues using runtime `dynamicSpeedIconGenerator.generateSpeedIcon(speedVal, speedUnit)` (mode `RUNTIME`).
+  - Updated `buildNotification` signature to take pre-resolved `Icon` directly.
+  - Added minimal diagnostics logging to `IconDiagnostics`: `displayedVal`, `displayedUnit`, `mode` (RESOURCE or RUNTIME), `resName`, `setSmallIconReceived=true`, and `notifyExecuted=true`.
+  - Added startup diagnostic confirming initial notification icon is replaced upon first live speed callback.
+  - Synchronized `isScreenOn` state with `PowerManager.isInteractive` on service creation.
+* How it was verified: local build only (`compile_applet`, `gradle assembleDebug`, `gradle :app:testDebugUnitTest`).
+* Deviations: None.
+* Known issues: None.
+
 
 
 
