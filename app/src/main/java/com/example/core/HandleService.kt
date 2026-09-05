@@ -12,7 +12,6 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.SharedPreferences
 import android.content.pm.ServiceInfo
-import android.graphics.drawable.Icon
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
@@ -27,7 +26,6 @@ import com.example.R
 class HandleService : Service(), SharedPreferences.OnSharedPreferenceChangeListener {
 
     private lateinit var handleManager: HandleManager
-    private lateinit var dynamicSpeedIconGenerator: DynamicSpeedIconGenerator
     private lateinit var notificationManager: NotificationManager
 
     private var netSpeedManager: NetSpeedManager? = null
@@ -47,15 +45,6 @@ class HandleService : Service(), SharedPreferences.OnSharedPreferenceChangeListe
     private var lastDailyQueryTimestamp: Long = 0L
     private var cachedDayOfYear: Int = -1
 
-    private var lastLoggedSpeedValue = ""
-    private var lastLoggedSpeedUnit = ""
-    private var lastSpeedDiagnosticLogTimestamp = 0L
-
-    private var lastLoggedIconValue = ""
-    private var lastLoggedIconUnit = ""
-    private var lastIconLogTimestamp = 0L
-
-    private var lastLiveLoggedMode = ""
     private var lastLiveLoggedVal = ""
     private var lastLiveLoggedUnit = ""
     private var lastLiveLogTimestamp = 0L
@@ -89,7 +78,6 @@ class HandleService : Service(), SharedPreferences.OnSharedPreferenceChangeListe
 
         notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         createNotificationChannel()
-        dynamicSpeedIconGenerator = DynamicSpeedIconGenerator(this)
 
         val powerManager = getSystemService(Context.POWER_SERVICE) as? PowerManager
         if (powerManager != null) {
@@ -100,8 +88,8 @@ class HandleService : Service(), SharedPreferences.OnSharedPreferenceChangeListe
         val tBuild = System.currentTimeMillis() - serviceStartTime
         LogKeeper.log(this, "StartupDiagnostics", "buildNotification start (t=${tBuild}ms)")
         val initialTitle = "Data: ${getTodayDataFormatted()} • ${formatElapsedTime()}"
-        val initialIcon = dynamicSpeedIconGenerator.generateSpeedIcon("0", "kB/s")
-        val initialNotification = buildNotification(initialIcon, initialTitle, "Down: 0 kB/s   Up: 0 kB/s")
+        val initialIconResId = SpeedIconProvider.resolve("0", "kB/s").resId
+        val initialNotification = buildNotification(initialIconResId, initialTitle, "Down: 0 kB/s   Up: 0 kB/s")
 
         // 2. Start Foreground IMMEDIATELY
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -170,8 +158,8 @@ class HandleService : Service(), SharedPreferences.OnSharedPreferenceChangeListe
             netSpeedManager = null
             // Update to a static standby notification
             val standbyTitle = "Data: ${getTodayDataFormatted()} • ${formatElapsedTime()}"
-            val standbyIcon = dynamicSpeedIconGenerator.generateSpeedIcon("0", "kB/s")
-            val standbyNotification = buildNotification(standbyIcon, standbyTitle, "Down: --   Up: --")
+            val standbyIconResId = SpeedIconProvider.resolve("0", "kB/s").resId
+            val standbyNotification = buildNotification(standbyIconResId, standbyTitle, "Down: --   Up: --")
             notificationManager.notify(NOTIFICATION_ID, standbyNotification)
         }
     }
@@ -181,41 +169,16 @@ class HandleService : Service(), SharedPreferences.OnSharedPreferenceChangeListe
             val speedVal = speedData.downValue
             val speedUnit = speedData.downUnit
 
-            // Live Resource selection:
-            // if displayedUnit == "kB/s" and displayedVal is exactly "0", "1", or "2":
-            //   select the corresponding pre-rendered RESOURCE icon
-            // otherwise:
-            //   continue using the existing RUNTIME Canvas renderer unchanged
-            val resourceDrawableId = if (speedUnit.equals("kB/s", ignoreCase = true)) {
-                when (speedVal) {
-                    "0" -> R.drawable.ic_stat_speed_0_k
-                    "1" -> R.drawable.ic_stat_speed_1_k
-                    "2" -> R.drawable.ic_stat_speed_2_k
-                    else -> null
-                }
-            } else {
-                null
-            }
-
-            val isResource = resourceDrawableId != null
-            val selectedMode = if (isResource) "RESOURCE" else "RUNTIME"
-            val resName = when (resourceDrawableId) {
-                R.drawable.ic_stat_speed_0_k -> "ic_stat_speed_0_k"
-                R.drawable.ic_stat_speed_1_k -> "ic_stat_speed_1_k"
-                R.drawable.ic_stat_speed_2_k -> "ic_stat_speed_2_k"
-                else -> "none"
-            }
-
-            val icon = if (resourceDrawableId != null) {
-                Icon.createWithResource(this, resourceDrawableId)
-            } else {
-                dynamicSpeedIconGenerator.generateSpeedIcon(speedVal, speedUnit)
-            }
+            // Final Pre-Rendered Resource Lookup:
+            // speed value -> display formatting -> resource ID lookup -> Notification.Builder.setSmallIcon(resourceId)
+            val iconInfo = SpeedIconProvider.resolve(speedVal, speedUnit)
+            val selectedResId = iconInfo.resId
+            val selectedResName = iconInfo.resName
 
             val titleText = "Data: ${getTodayDataFormatted()} • ${formatElapsedTime()}"
             val contentText = "Down: ${speedData.downFormatted}   Up: ${speedData.upFormatted}"
 
-            val notification = buildNotification(icon, titleText, contentText)
+            val notification = buildNotification(selectedResId, titleText, contentText)
             notificationManager.notify(NOTIFICATION_ID, notification)
 
             val now = System.currentTimeMillis()
@@ -225,29 +188,23 @@ class HandleService : Service(), SharedPreferences.OnSharedPreferenceChangeListe
                 LogKeeper.log(
                     this,
                     "StartupDiagnostics",
-                    "first speed callback (t=${tFirst}ms): initial 0 notification replaced by live speed notification (val='$speedVal', unit='$speedUnit', mode=$selectedMode)"
+                    "first speed callback (t=${tFirst}ms): initial notification replaced by live speed notification (val='$speedVal', unit='$speedUnit', resName=$selectedResName)"
                 )
             }
 
-            // Minimal diagnostics around the LIVE update path:
-            // - displayed speed value
-            // - displayed unit
-            // - selected icon mode: RESOURCE or RUNTIME
-            // - resource name when RESOURCE
-            // - confirmation that setSmallIcon received the selected icon
-            val modeChanged = (selectedMode != lastLiveLoggedMode)
+            // Concise diagnostics:
+            // displayed value, displayed unit, selected resource name, and confirmation that setSmallIcon received the resource ID
             val valChanged = (speedVal != lastLiveLoggedVal || speedUnit != lastLiveLoggedUnit)
             val timeElapsed = (now - lastLiveLogTimestamp) > 10000L
 
-            if (isResource || modeChanged || valChanged || timeElapsed) {
-                lastLiveLoggedMode = selectedMode
+            if (valChanged || timeElapsed) {
                 lastLiveLoggedVal = speedVal
                 lastLiveLoggedUnit = speedUnit
                 lastLiveLogTimestamp = now
                 LogKeeper.log(
                     this,
                     "IconDiagnostics",
-                    "LiveUpdate -> displayedVal='$speedVal', displayedUnit='$speedUnit', mode=$selectedMode, resName=$resName, setSmallIconReceived=true, notifyExecuted=true"
+                    "LiveUpdate -> displayedVal='$speedVal', displayedUnit='$speedUnit', mode=RESOURCE, resName=$selectedResName, setSmallIconReceived=true, notifyExecuted=true"
                 )
             }
         } catch (e: Exception) {
@@ -297,7 +254,7 @@ class HandleService : Service(), SharedPreferences.OnSharedPreferenceChangeListe
     }
 
     private fun buildNotification(
-        icon: Icon,
+        iconResId: Int,
         titleText: String,
         contentText: String
     ): Notification {
@@ -312,7 +269,7 @@ class HandleService : Service(), SharedPreferences.OnSharedPreferenceChangeListe
         )
 
         return Notification.Builder(this, CHANNEL_ID)
-            .setSmallIcon(icon)
+            .setSmallIcon(iconResId)
             .setContentTitle(titleText)
             .setContentText(contentText)
             .setContentIntent(pendingIntent)
@@ -400,13 +357,6 @@ class HandleService : Service(), SharedPreferences.OnSharedPreferenceChangeListe
         }
     }
 
-    override fun onTrimMemory(level: Int) {
-        super.onTrimMemory(level)
-        if (level >= TRIM_MEMORY_MODERATE) {
-            dynamicSpeedIconGenerator.onTrimMemory()
-        }
-    }
-
     override fun onDestroy() {
         super.onDestroy()
         prefs.unregisterOnSharedPreferenceChangeListener(this)
@@ -421,7 +371,6 @@ class HandleService : Service(), SharedPreferences.OnSharedPreferenceChangeListe
 
         CallRecorderManager.getInstance(this).stopListening()
         detachHandles()
-        dynamicSpeedIconGenerator.onTrimMemory()
     }
 
     override fun onBind(intent: Intent?): IBinder? = null

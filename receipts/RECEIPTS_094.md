@@ -24,3 +24,32 @@
 * How it was verified: local build only (`compile_applet`, `gradle assembleDebug`).
 * Deviations: None.
 * Known issues: None.
+
+* Timestamp: 2026-09-05T10:59:00-07:00
+* One-line summary: Replaced dynamic Canvas status-bar icon engine with complete pre-rendered 96x96 resource-icon implementation (0-999 kB/s, 1.0-43.0 MB/s).
+* Exact files touched:
+  - `tools/generate_speed_icons.py`
+  - `tools/fonts/RobotoCondensed-Bold.ttf`
+  - `tools/fonts/Roboto-Bold.ttf`
+  - `app/src/main/res/drawable-xhdpi/` (1,421 PNGs)
+  - `app/src/main/java/com/example/core/SpeedIconProvider.kt`
+  - `app/src/main/java/com/example/core/DynamicSpeedIconGenerator.kt` (deleted)
+  - `app/src/main/java/com/example/core/HandleService.kt`
+  - `receipts/RECEIPTS_094.md`
+* What was actually done:
+  - Created deterministic asset generator `tools/generate_speed_icons.py` using authentic bold TrueType fonts.
+  - Rendered complete 1,421 pre-rendered 96x96 status-bar icons into `app/src/main/res/drawable-xhdpi/`:
+    * 1,000 icons for kB/s (`0` through `999` kB/s, integer values): `ic_stat_speed_<val>_k.png`
+    * 421 icons for MB/s (`1.0` through `43.0` MB/s, 0.1 increments): `ic_stat_speed_<d>_<f>_m.png`
+  - Applied bolder glyph weight without expanding nominal bounds. Preserved exact baseline geometry: top number baseline at y=52 (centered at x=48), bottom unit baseline at y=95 (centered at x=48), white glyphs on transparent background, alpha cleanup threshold 80.
+  - Placed assets exclusively in `drawable-xhdpi` (320 dpi / density 2.0) for Redmi A5, preventing Android OS density scaling artifacts.
+  - Generated `SpeedIconProvider.kt` with compile-time `R.drawable` reference arrays for O(1) resource ID resolution and zero runtime rasterization.
+  - Completely deleted `DynamicSpeedIconGenerator.kt` and purged all runtime Canvas, Paint, Bitmap, createWithBitmap, alpha thresholding, bitmap density manipulation, and memory trim hooks.
+  - Updated `HandleService.kt`:
+    * `buildNotification` now accepts `iconResId: Int` directly and calls `Notification.Builder.setSmallIcon(iconResId)`.
+    * Initial and standby notifications use `SpeedIconProvider.resolve("0", "kB/s").resId`.
+    * Live speed updates resolve the resource ID via `SpeedIconProvider.resolve(speedVal, speedUnit)` and invoke `setSmallIcon(selectedResId)`.
+    * LogKeeper diagnostics log `LiveUpdate -> displayedVal, displayedUnit, mode=RESOURCE, resName, setSmallIconReceived=true, notifyExecuted=true`.
+* How it was verified: local build only (`compile_applet`, `gradle assembleDebug`, and lookup mapping pass for 0 kB/s, 999 kB/s, 1.0 MB/s, 1.5 MB/s, 7.7 MB/s, and 43.0 MB/s).
+* Deviations: None.
+* Known issues: None.
