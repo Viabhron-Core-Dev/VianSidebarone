@@ -69,3 +69,19 @@
 * How it was verified: local build only (`compile_applet`, `gradle assembleDebug`, and automated resource audit script confirming 1,000 kB/s and 421 MB/s resources on disk and inside the generated APK).
 * Deviations: None.
 * Known issues: None.
+
+* Timestamp: 2026-09-05T15:00:00-07:00
+* One-line summary: Replaced external ImageMagick convert dependency in tools/generate_speed_icons.py with a self-contained in-process Python FreeType and headless Java fallback renderer.
+* Exact files touched:
+  - `tools/generate_speed_icons.py`
+  - `receipts/RECEIPTS_094.md`
+* What was actually done:
+  - Eliminated the external `convert` executable invocation from `tools/generate_speed_icons.py`.
+  - Implemented in-process font glyph rasterization, emboldening/stroke simulation, unit layer caching, and pure-Python PNG chunk encoding (`zlib` + `struct`) using Python standard library ctypes and system `libfreetype.so.6`.
+  - Added headless Java AWT renderer fallback (`SpeedIconAwtRenderer`) for execution environments where `libfreetype` is absent, guaranteeing 100% portability on any clean runner with Java/JDK.
+  - Preserved identical visual specifications: 96x96 dimensions, white text on transparent background, stacked number and unit, baseline y=52 for speed, baseline y=95 for unit, centered at x=48, bold typography, kB/s integer range 0–999, MB/s range 1.0–43.0 in 0.1 increments, and alpha cleanup threshold 80.
+  - Preserved incremental caching behavior: only missing or incomplete PNGs are rendered.
+  - Verified with incremental test deletion, `gradle :app:generateSpeedIcons`, `compile_applet`, and `gradle assembleDebug`.
+* How it was verified: local build only (`gradle :app:generateSpeedIcons`, Python resource audit asserting 1,000 kB/s and 421 MB/s PNGs on disk with matching `SpeedIconProvider` references, `compile_applet`, and `gradle assembleDebug`).
+* Deviations: None.
+* Known issues: None.

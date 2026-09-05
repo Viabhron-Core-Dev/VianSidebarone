@@ -12,8 +12,11 @@ Artwork specs:
 - Speed baseline: X=48, Y=52
 - Unit baseline: X=48, Y=95
 - White glyphs on transparent background
-- Visibly bolder/thicker stroke
+- Visibly bolder/thicker typography
 - Alpha cleanup threshold 80
+
+Uses pure Python standard library with libfreetype or Java headless fallback.
+Does NOT invoke or require external ImageMagick 'convert' executable.
 """
 
 import os
@@ -21,77 +24,344 @@ import sys
 import time
 import struct
 import zlib
+import ctypes
+import ctypes.util
 import subprocess
-from concurrent.futures import ProcessPoolExecutor
 
 FONT_SPEED = "tools/fonts/RobotoCondensed-Bold.ttf"
 FONT_UNIT = "tools/fonts/Roboto-Bold.ttf"
 OUT_DIR = "app/src/main/res/drawable-xhdpi"
 PROVIDER_FILE = "app/src/main/java/com/example/core/SpeedIconProvider.kt"
 
-def get_glyph_params(val_str, unit_str):
-    if unit_str == "kB/s":
-        # Integer values 0..999
-        val_int = int(val_str)
-        if val_int < 10:
-            return 68.0, 1.0
-        elif val_int < 100:
-            return 68.0, 1.0
-        else:
-            return 58.67, 0.86
-    else:
-        # MB/s values 1.0..43.0
-        if len(val_str) <= 3: # e.g. 1.0 .. 9.9
-            return 68.0, 1.0
-        else: # e.g. 10.0 .. 43.0
-            return 49.87, 0.73
+# PNG chunk helper
+IHDR = struct.pack(">IIBBBBB", 96, 96, 8, 6, 0, 0, 0)
 
-def render_icon(item):
-    val_str, unit_str, filename = item
-    pointsize, strokewidth = get_glyph_params(val_str, unit_str)
-    out_path = os.path.join(OUT_DIR, f"{filename}.png")
+def make_chunk(tag, data):
+    tag_b = tag.encode("ascii")
+    crc = zlib.crc32(tag_b + data) & 0xFFFFFFFF
+    return struct.pack(">I", len(data)) + tag_b + data + struct.pack(">I", crc)
 
-    cmd = [
-        "convert", "-size", "96x96", "xc:none",
-        "-fill", "white",
-        "-font", FONT_SPEED, "-pointsize", str(pointsize),
-        "-stroke", "white", "-strokewidth", str(strokewidth),
-        "-draw", f'text-anchor middle text 48,52 "{val_str}"',
-        "-font", FONT_UNIT, "-pointsize", "36",
-        "-stroke", "white", "-strokewidth", "0.8",
-        "-draw", f'text-anchor middle text 48,95 "{unit_str}"',
-        "-depth", "8", "rgba:-"
+def encode_png(raw_rows):
+    compressed = zlib.compress(bytes(raw_rows), level=6)
+    return b"\x89PNG\r\n\x1a\n" + make_chunk("IHDR", IHDR) + make_chunk("IDAT", compressed) + make_chunk("IEND", b"")
+
+# --- FreeType C-Types Bindings ---
+class FT_Generic(ctypes.Structure):
+    _fields_ = [('data', ctypes.c_void_p), ('finalizer', ctypes.c_void_p)]
+
+class FT_BBox(ctypes.Structure):
+    _fields_ = [('xMin', ctypes.c_long), ('yMin', ctypes.c_long), ('xMax', ctypes.c_long), ('yMax', ctypes.c_long)]
+
+class FT_Vector(ctypes.Structure):
+    _fields_ = [('x', ctypes.c_long), ('y', ctypes.c_long)]
+
+class FT_Bitmap(ctypes.Structure):
+    _fields_ = [
+        ('rows', ctypes.c_uint),
+        ('width', ctypes.c_uint),
+        ('pitch', ctypes.c_int),
+        ('buffer', ctypes.POINTER(ctypes.c_ubyte)),
+        ('num_grays', ctypes.c_ushort),
+        ('pixel_mode', ctypes.c_ubyte),
+        ('palette_mode', ctypes.c_ubyte),
+        ('palette', ctypes.c_void_p),
     ]
 
-    raw = bytearray(subprocess.check_output(cmd))
+class FT_Glyph_Metrics(ctypes.Structure):
+    _fields_ = [
+        ('width', ctypes.c_long),
+        ('height', ctypes.c_long),
+        ('horiBearingX', ctypes.c_long),
+        ('horiBearingY', ctypes.c_long),
+        ('horiAdvance', ctypes.c_long),
+        ('vertBearingX', ctypes.c_long),
+        ('vertBearingY', ctypes.c_long),
+        ('vertAdvance', ctypes.c_long),
+    ]
 
-    # Apply alpha cleanup threshold 80
-    for i in range(0, len(raw), 4):
-        if raw[i + 3] < 80:
-            raw[i] = 0
-            raw[i + 1] = 0
-            raw[i + 2] = 0
-            raw[i + 3] = 0
+class FT_GlyphSlotRec(ctypes.Structure):
+    _fields_ = [
+        ('library', ctypes.c_void_p),
+        ('face', ctypes.c_void_p),
+        ('next', ctypes.c_void_p),
+        ('glyph_index', ctypes.c_uint),
+        ('generic', FT_Generic),
+        ('metrics', FT_Glyph_Metrics),
+        ('linearHoriAdvance', ctypes.c_long),
+        ('linearVertAdvance', ctypes.c_long),
+        ('advance', FT_Vector),
+        ('format', ctypes.c_uint),
+        ('bitmap', FT_Bitmap),
+        ('bitmap_left', ctypes.c_int),
+        ('bitmap_top', ctypes.c_int),
+    ]
 
-    raw_rows = bytearray()
-    for y in range(96):
-        raw_rows.append(0)
-        raw_rows.extend(raw[y * 96 * 4 : (y + 1) * 96 * 4])
+class FT_FaceRec(ctypes.Structure):
+    pass
 
-    compressed = zlib.compress(bytes(raw_rows), level=6)
+FT_FaceRec._fields_ = [
+    ('num_faces', ctypes.c_long),
+    ('face_index', ctypes.c_long),
+    ('face_flags', ctypes.c_long),
+    ('style_flags', ctypes.c_long),
+    ('num_glyphs', ctypes.c_long),
+    ('family_name', ctypes.c_char_p),
+    ('style_name', ctypes.c_char_p),
+    ('num_fixed_sizes', ctypes.c_int),
+    ('available_sizes', ctypes.c_void_p),
+    ('num_charmaps', ctypes.c_int),
+    ('charmaps', ctypes.c_void_p),
+    ('generic', FT_Generic),
+    ('bbox', FT_BBox),
+    ('units_per_EM', ctypes.c_ushort),
+    ('ascender', ctypes.c_short),
+    ('descender', ctypes.c_short),
+    ('height', ctypes.c_short),
+    ('max_advance_width', ctypes.c_short),
+    ('max_advance_height', ctypes.c_short),
+    ('underline_position', ctypes.c_short),
+    ('underline_thickness', ctypes.c_short),
+    ('glyph', ctypes.POINTER(FT_GlyphSlotRec)),
+]
 
-    def chunk(tag, data):
-        tag_b = tag.encode("ascii")
-        crc = zlib.crc32(tag_b + data) & 0xFFFFFFFF
-        return struct.pack(">I", len(data)) + tag_b + data + struct.pack(">I", crc)
+def load_freetype_lib():
+    candidates = [
+        ctypes.util.find_library("freetype"),
+        "libfreetype.so.6",
+        "libfreetype.so",
+        "/usr/lib/x86_64-linux-gnu/libfreetype.so.6",
+        "/usr/lib/aarch64-linux-gnu/libfreetype.so.6",
+        "/usr/lib/libfreetype.so.6",
+    ]
+    for cand in candidates:
+        if cand:
+            try:
+                return ctypes.CDLL(cand)
+            except Exception:
+                pass
+    return None
 
-    ihdr = struct.pack(">IIBBBBB", 96, 96, 8, 6, 0, 0, 0)
-    png = b"\x89PNG\r\n\x1a\n" + chunk("IHDR", ihdr) + chunk("IDAT", compressed) + chunk("IEND", b"")
+class FreeTypeIconRenderer:
+    def __init__(self):
+        self.ft = load_freetype_lib()
+        if not self.ft:
+            raise RuntimeError("FreeType library not found on system.")
 
-    with open(out_path, "wb") as f:
-        f.write(png)
+        self.lib = ctypes.c_void_p()
+        err = self.ft.FT_Init_FreeType(ctypes.byref(self.lib))
+        if err != 0:
+            raise RuntimeError(f"FT_Init_FreeType failed: {err}")
 
-    return filename
+        self.face_speed = ctypes.POINTER(FT_FaceRec)()
+        self.face_unit = ctypes.POINTER(FT_FaceRec)()
+
+        err1 = self.ft.FT_New_Face(self.lib, FONT_SPEED.encode("utf-8"), 0, ctypes.byref(self.face_speed))
+        err2 = self.ft.FT_New_Face(self.lib, FONT_UNIT.encode("utf-8"), 0, ctypes.byref(self.face_unit))
+        if err1 != 0 or err2 != 0:
+            raise RuntimeError(f"FT_New_Face failed: err1={err1}, err2={err2}")
+
+        self.glyph_cache = {}
+        self._init_glyph_cache()
+        self.unit_kb_layer = self._pre_render_unit("kB/s")
+        self.unit_mb_layer = self._pre_render_unit("MB/s")
+
+    def _get_emboldened_glyph(self, face, ch, sz, stroke_radius=0.5):
+        self.ft.FT_Set_Pixel_Sizes(face, 0, sz)
+        self.ft.FT_Load_Char(face, ord(ch), 4) # FT_LOAD_RENDER
+        slot = face.contents.glyph.contents
+        adv = slot.advance.x >> 6
+        w = slot.bitmap.width
+        h = slot.bitmap.rows
+        left = slot.bitmap_left
+        top = slot.bitmap_top
+        pitch = slot.bitmap.pitch
+        buf = bytes([slot.bitmap.buffer[i] for i in range(h * pitch)])
+
+        ew = w + 2
+        eh = h + 2
+        eleft = left - 1
+        etop = top + 1
+        ebuf = bytearray(ew * eh)
+
+        offsets = [(1, 1, 1.0)]
+        if stroke_radius >= 0.5:
+            offsets += [(0, 1, 0.7), (2, 1, 0.7), (1, 0, 0.7), (1, 2, 0.7)]
+        if stroke_radius >= 0.8:
+            offsets += [(0, 0, 0.5), (2, 0, 0.5), (0, 2, 0.5), (2, 2, 0.5)]
+
+        for ox, oy, weight in offsets:
+            for r in range(h):
+                row_ebuf = (r + oy) * ew
+                row_buf = r * pitch
+                for c in range(w):
+                    val = int(buf[row_buf + c] * weight)
+                    pos = row_ebuf + (c + ox)
+                    if val > ebuf[pos]:
+                        ebuf[pos] = val
+
+        return adv, ew, eh, eleft, etop, bytes(ebuf)
+
+    def _init_glyph_cache(self):
+        for sz in [68, 59, 50]:
+            for ch in "0123456789.":
+                radius = 0.8 if sz >= 59 else 0.6
+                self.glyph_cache[(sz, ch)] = self._get_emboldened_glyph(self.face_speed, ch, sz, radius)
+
+    def _pre_render_unit(self, text):
+        self.ft.FT_Set_Pixel_Sizes(self.face_unit, 0, 36)
+        glyphs = []
+        total_adv = 0
+        for char in text:
+            adv, ew, eh, eleft, etop, ebuf = self._get_emboldened_glyph(self.face_unit, char, 36, 0.5)
+            glyphs.append((adv, ew, eh, eleft, etop, ebuf))
+            total_adv += adv
+
+        pen_x = 48.0 - total_adv / 2.0
+        canvas = bytearray(96 * 96)
+        for adv, ew, eh, eleft, etop, ebuf in glyphs:
+            gx = int(round(pen_x)) + eleft
+            gy = 95 - etop
+            for r in range(eh):
+                y = gy + r
+                if 0 <= y < 96:
+                    row_y = y * 96
+                    row_ebuf = r * ew
+                    for c in range(ew):
+                        x = gx + c
+                        if 0 <= x < 96:
+                            val = ebuf[row_ebuf + c]
+                            if val > canvas[row_y + x]:
+                                canvas[row_y + x] = val
+            pen_x += adv
+        return bytes(canvas)
+
+    def render(self, val_str, unit_str):
+        is_kb = (unit_str == "kB/s")
+        canvas = bytearray(self.unit_kb_layer if is_kb else self.unit_mb_layer)
+
+        if is_kb:
+            sz = 68 if int(val_str) < 100 else 59
+        else:
+            sz = 68 if len(val_str) <= 3 else 50
+
+        total_adv = sum(self.glyph_cache[(sz, ch)][0] for ch in val_str)
+        pen_x = 48.0 - total_adv / 2.0
+
+        for ch in val_str:
+            adv, ew, eh, eleft, etop, ebuf = self.glyph_cache[(sz, ch)]
+            gx = int(round(pen_x)) + eleft
+            gy = 52 - etop
+            for r in range(eh):
+                y = gy + r
+                if 0 <= y < 96:
+                    row_y = y * 96
+                    row_ebuf = r * ew
+                    for c in range(ew):
+                        x = gx + c
+                        if 0 <= x < 96:
+                            val = ebuf[row_ebuf + c]
+                            if val > canvas[row_y + x]:
+                                canvas[row_y + x] = val
+            pen_x += adv
+
+        raw_rows = bytearray(96 * (96 * 4 + 1))
+        for y in range(96):
+            dest_idx = y * (96 * 4 + 1) + 1
+            src_idx = y * 96
+            for x in range(96):
+                a = canvas[src_idx + x]
+                if a >= 80:
+                    raw_rows[dest_idx : dest_idx + 4] = b"\xff\xff\xff" + bytes([a])
+                dest_idx += 4
+
+        return encode_png(raw_rows)
+
+def render_items_java(items, out_dir):
+    """Headless Java AWT fallback renderer if libfreetype is unavailable."""
+    java_file = "/tmp/SpeedIconAwtRenderer.java"
+    java_code = """
+import java.io.*;
+import java.awt.*;
+import java.awt.image.*;
+import javax.imageio.ImageIO;
+
+public class SpeedIconAwtRenderer {
+    public static void main(String[] args) throws Exception {
+        File outDir = new File(args[0]);
+        Font fontSpeed = Font.createFont(Font.TRUETYPE_FONT, new File("tools/fonts/RobotoCondensed-Bold.ttf"));
+        Font fontUnit = Font.createFont(Font.TRUETYPE_FONT, new File("tools/fonts/Roboto-Bold.ttf"));
+        BufferedReader reader = new BufferedReader(new InputStreamReader(System.in));
+        String line;
+        while ((line = reader.readLine()) != null) {
+            line = line.trim();
+            if (line.isEmpty()) continue;
+            String[] parts = line.split(",");
+            if (parts.length < 3) continue;
+            String val = parts[0];
+            String unit = parts[1];
+            String filename = parts[2];
+
+            BufferedImage img = new BufferedImage(96, 96, BufferedImage.TYPE_INT_ARGB);
+            Graphics2D g = img.createGraphics();
+            g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+            g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+
+            boolean isKb = unit.equals("kB/s");
+            float szSpeed;
+            if (isKb) {
+                szSpeed = Integer.parseInt(val) < 100 ? 68f : 59f;
+            } else {
+                szSpeed = val.length() <= 3 ? 68f : 50f;
+            }
+
+            g.setFont(fontSpeed.deriveFont(Font.BOLD, szSpeed));
+            FontMetrics fmSpeed = g.getFontMetrics();
+            int sw = fmSpeed.stringWidth(val);
+            int sx = 48 - sw / 2;
+            int sy = 52;
+
+            g.setColor(Color.WHITE);
+            // Thicker typography offsets
+            g.drawString(val, sx - 1, sy);
+            g.drawString(val, sx + 1, sy);
+            g.drawString(val, sx, sy - 1);
+            g.drawString(val, sx, sy + 1);
+            g.drawString(val, sx, sy);
+
+            g.setFont(fontUnit.deriveFont(Font.BOLD, 36f));
+            FontMetrics fmUnit = g.getFontMetrics();
+            int uw = fmUnit.stringWidth(unit);
+            int ux = 48 - uw / 2;
+            int uy = 95;
+            g.drawString(unit, ux - 1, uy);
+            g.drawString(unit, ux + 1, uy);
+            g.drawString(unit, ux, uy);
+            g.dispose();
+
+            for (int y = 0; y < 96; y++) {
+                for (int x = 0; x < 96; x++) {
+                    int argb = img.getRGB(x, y);
+                    int a = (argb >> 24) & 0xFF;
+                    if (a < 80) {
+                        img.setRGB(x, y, 0);
+                    } else {
+                        img.setRGB(x, y, (a << 24) | 0x00FFFFFF);
+                    }
+                }
+            }
+            ImageIO.write(img, "png", new File(outDir, filename + ".png"));
+        }
+    }
+}
+"""
+    with open(java_file, "w") as f:
+        f.write(java_code)
+    
+    input_data = "\n".join(f"{item[0]},{item[1]},{item[2]}" for item in items) + "\n"
+    proc = subprocess.Popen(["java", "-Djava.awt.headless=true", java_file, out_dir], stdin=subprocess.PIPE)
+    proc.communicate(input=input_data.encode("utf-8"))
+    if proc.returncode != 0:
+        raise RuntimeError(f"Java icon renderer failed with return code {proc.returncode}")
 
 def generate_provider_kt(kb_items, mb_items):
     lines = [
@@ -178,10 +448,18 @@ def main():
     if items_to_render:
         print(f"Generating {len(items_to_render)} missing/requested pre-rendered icons out of {total}...")
         t0 = time.time()
-        with ProcessPoolExecutor() as executor:
-            for idx, _ in enumerate(executor.map(render_icon, items_to_render), 1):
-                if idx % 100 == 0 or idx == len(items_to_render):
+        try:
+            renderer = FreeTypeIconRenderer()
+            for idx, item in enumerate(items_to_render, 1):
+                val_str, unit_str, filename = item
+                png_bytes = renderer.render(val_str, unit_str)
+                with open(os.path.join(OUT_DIR, f"{filename}.png"), "wb") as f:
+                    f.write(png_bytes)
+                if idx % 200 == 0 or idx == len(items_to_render):
                     print(f"  Progress: {idx}/{len(items_to_render)} icons generated ({time.time() - t0:.1f}s)")
+        except Exception as e:
+            print(f"FreeType direct rendering unavailable ({e}), falling back to headless Java renderer...")
+            render_items_java(items_to_render, OUT_DIR)
         t1 = time.time()
         print(f"Rendered {len(items_to_render)} icons in {t1 - t0:.2f}s.")
     else:
