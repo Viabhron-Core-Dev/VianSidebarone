@@ -53,3 +53,19 @@
 * How it was verified: local build only (`compile_applet`, `gradle assembleDebug`, and lookup mapping pass for 0 kB/s, 999 kB/s, 1.0 MB/s, 1.5 MB/s, 7.7 MB/s, and 43.0 MB/s).
 * Deviations: None.
 * Known issues: None.
+
+* Timestamp: 2026-09-05T14:34:00-07:00
+* One-line summary: Integrated deterministic build-time icon generation into Gradle build lifecycle and verified all 1,421 status-bar drawable resources.
+* Exact files touched:
+  - `tools/generate_speed_icons.py`
+  - `app/build.gradle.kts`
+  - `receipts/RECEIPTS_094.md`
+* What was actually done:
+  - Wired `generateSpeedIcons` task into `app/build.gradle.kts` attached as a dependency of `preBuild`, guaranteeing icon generation and verification execute automatically before resource processing (`generateDebugResources`, `mergeDebugResources`) and Kotlin compilation (`compileDebugKotlin`).
+  - Enhanced `tools/generate_speed_icons.py` to perform fast incremental scans: verifies existence of all 1,421 pre-rendered PNGs, renders only missing items, and strictly asserts that 1,000 kB/s (`0`..`999`) and 421 MB/s (`1.0`..`43.0`) drawables exist on disk.
+  - Verified that all 1,421 referenced `R.drawable` symbols in `SpeedIconProvider.kt` resolve to valid disk resources with zero unresolved references and zero duplicate resource identifiers.
+  - Verified packaged APK `app-debug.apk` contains all 1,421 pre-rendered icons.
+  - Executed `gradle :app:generateSpeedIcons`, `gradle :app:preBuild`, `compile_applet`, and `gradle assembleDebug`.
+* How it was verified: local build only (`compile_applet`, `gradle assembleDebug`, and automated resource audit script confirming 1,000 kB/s and 421 MB/s resources on disk and inside the generated APK).
+* Deviations: None.
+* Known issues: None.

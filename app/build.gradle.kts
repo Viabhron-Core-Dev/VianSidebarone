@@ -44,3 +44,13 @@ dependencies {
     implementation(libs.androidx.ui.tooling.preview)
     implementation(libs.androidx.material3)
 }
+
+val generateSpeedIcons = tasks.register<Exec>("generateSpeedIcons") {
+    description = "Generates pre-rendered 96x96 status-bar speed icons and provider table before build"
+    workingDir = rootProject.projectDir
+    commandLine = listOf("python3", "tools/generate_speed_icons.py")
+}
+
+tasks.named("preBuild").configure {
+    dependsOn(generateSpeedIcons)
+}

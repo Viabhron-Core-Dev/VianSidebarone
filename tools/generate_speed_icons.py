@@ -152,6 +152,7 @@ def generate_provider_kt(kb_items, mb_items):
 
 def main():
     os.makedirs(OUT_DIR, exist_ok=True)
+    force = "--force" in sys.argv
 
     kb_items = []
     for i in range(1000): # 0..999
@@ -166,18 +167,37 @@ def main():
 
     all_items = kb_items + mb_items
     total = len(all_items)
-    print(f"Generating {total} pre-rendered icons ({len(kb_items)} kB/s + {len(mb_items)} MB/s)...")
 
-    t0 = time.time()
-    with ProcessPoolExecutor() as executor:
-        for idx, _ in enumerate(executor.map(render_icon, all_items), 1):
-            if idx % 200 == 0 or idx == total:
-                print(f"  Progress: {idx}/{total} icons generated ({time.time() - t0:.1f}s)")
-    t1 = time.time()
-    print(f"Generated {total} icons in {t1 - t0:.2f}s.")
+    items_to_render = []
+    for item in all_items:
+        _, _, filename = item
+        out_path = os.path.join(OUT_DIR, f"{filename}.png")
+        if force or not os.path.exists(out_path) or os.path.getsize(out_path) < 100:
+            items_to_render.append(item)
 
-    generate_provider_kt(kb_items, mb_items)
-    print("Asset generation complete.")
+    if items_to_render:
+        print(f"Generating {len(items_to_render)} missing/requested pre-rendered icons out of {total}...")
+        t0 = time.time()
+        with ProcessPoolExecutor() as executor:
+            for idx, _ in enumerate(executor.map(render_icon, items_to_render), 1):
+                if idx % 100 == 0 or idx == len(items_to_render):
+                    print(f"  Progress: {idx}/{len(items_to_render)} icons generated ({time.time() - t0:.1f}s)")
+        t1 = time.time()
+        print(f"Rendered {len(items_to_render)} icons in {t1 - t0:.2f}s.")
+    else:
+        print(f"All {total} pre-rendered icons already exist in {OUT_DIR}.")
+
+    if force or not os.path.exists(PROVIDER_FILE) or os.path.getsize(PROVIDER_FILE) < 1000:
+        generate_provider_kt(kb_items, mb_items)
+    else:
+        print(f"{PROVIDER_FILE} is up to date.")
+
+    # Validation check to guarantee every single resource exists on disk
+    missing = [item[2] for item in all_items if not os.path.exists(os.path.join(OUT_DIR, f"{item[2]}.png"))]
+    if missing:
+        raise RuntimeError(f"FATAL: {len(missing)} icons missing after generation: {missing[:10]}")
+
+    print(f"Speed icon verification successful: {total}/{total} icons present.")
 
 if __name__ == "__main__":
     main()
