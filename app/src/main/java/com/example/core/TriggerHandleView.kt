@@ -21,7 +21,7 @@ import com.example.util.HandleShapeDrawable
 class TriggerHandleView(
     context: Context,
     private var config: HandleConfig,
-    private val onGestureAction: (actionKey: String, handleConfig: HandleConfig) -> Unit
+    private val onGestureAction: (actionKey: String, gesture: String, handleConfig: HandleConfig) -> Unit
 ) : View(context) {
 
     private val windowManager = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
@@ -46,7 +46,7 @@ class TriggerHandleView(
     private val gestureDetector = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
         override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
             if (!isDragging) {
-                onGestureAction(config.onTapAction, config)
+                onGestureAction(config.onTapAction, HandleGestures.TAP, config)
                 return true
             }
             return false
@@ -54,7 +54,7 @@ class TriggerHandleView(
 
         override fun onDoubleTap(e: MotionEvent): Boolean {
             if (!isDragging) {
-                onGestureAction(config.onDoubleTapAction, config)
+                onGestureAction(config.onDoubleTapAction, HandleGestures.DOUBLE_TAP, config)
                 return true
             }
             return false
@@ -65,7 +65,7 @@ class TriggerHandleView(
                 isDragging = true
                 performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
             } else {
-                onGestureAction(config.onLongPressAction, config)
+                onGestureAction(config.onLongPressAction, HandleGestures.LONG_PRESS, config)
             }
         }
 
@@ -81,18 +81,18 @@ class TriggerHandleView(
 
             if (Math.abs(dx) > Math.abs(dy)) {
                 if (dx > 50) {
-                    onGestureAction(config.onSwipeRightAction, config)
+                    onGestureAction(config.onSwipeRightAction, HandleGestures.SWIPE_RIGHT, config)
                     return true
                 } else if (dx < -50) {
-                    onGestureAction(config.onSwipeLeftAction, config)
+                    onGestureAction(config.onSwipeLeftAction, HandleGestures.SWIPE_LEFT, config)
                     return true
                 }
             } else {
                 if (dy > 50) {
-                    onGestureAction(config.onSwipeDownAction, config)
+                    onGestureAction(config.onSwipeDownAction, HandleGestures.SWIPE_DOWN, config)
                     return true
                 } else if (dy < -50) {
-                    onGestureAction(config.onSwipeUpAction, config)
+                    onGestureAction(config.onSwipeUpAction, HandleGestures.SWIPE_UP, config)
                     return true
                 }
             }

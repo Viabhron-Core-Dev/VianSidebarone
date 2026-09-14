@@ -15,11 +15,13 @@ import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
+import android.provider.Settings
 import com.example.MainActivity
 import com.example.R
+import com.example.feature.sidebar.SidebarManager
 
 /**
- * HandleService: Persistent resident foreground service in the `:core` process.
+ * HandleService: Persistent resident foreground service in the Main process (com.example).
  * Manages floating trigger handles, network speed monitor with dynamic status-bar icon,
  * and call recorder sensor state.
  */
@@ -55,10 +57,19 @@ class HandleService : Service(), SharedPreferences.OnSharedPreferenceChangeListe
                 Intent.ACTION_SCREEN_ON -> {
                     isScreenOn = true
                     netSpeedManager?.setScreenState(true)
+                    attachHandles()
                 }
                 Intent.ACTION_SCREEN_OFF -> {
                     isScreenOn = false
                     netSpeedManager?.setScreenState(false)
+                    SidebarManager.getInstance(this@HandleService).closeContainer()
+                    detachHandles()
+                }
+                Intent.ACTION_USER_PRESENT -> {
+                    isScreenOn = true
+                    if (activeHandleViews.isEmpty()) {
+                        attachHandles()
+                    }
                 }
             }
         }
@@ -69,6 +80,32 @@ class HandleService : Service(), SharedPreferences.OnSharedPreferenceChangeListe
         const val NOTIFICATION_ID = 1001
         const val KEY_NET_SPEED_ENABLED = "net_speed_enabled"
         const val ACTION_RELOAD_HANDLES = "com.example.action.RELOAD_HANDLES"
+
+        fun startIfConfigured(context: Context) {
+            try {
+                val prefs = context.getSharedPreferences(HandleManager.PREFS_NAME, Context.MODE_PRIVATE)
+                val autoStart = prefs.getBoolean("auto_start_on_boot", true)
+                if (autoStart && Settings.canDrawOverlays(context)) {
+                    start(context)
+                }
+            } catch (e: Exception) {
+                LogKeeper.logError(context, "HandleService", "Failed to startIfConfigured", e)
+            }
+        }
+
+        fun start(context: Context) {
+            val serviceIntent = Intent(context, HandleService::class.java)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.startForegroundService(serviceIntent)
+            } else {
+                context.startService(serviceIntent)
+            }
+        }
+
+        fun stop(context: Context) {
+            val serviceIntent = Intent(context, HandleService::class.java)
+            context.stopService(serviceIntent)
+        }
     }
 
     override fun onCreate() {
@@ -116,13 +153,18 @@ class HandleService : Service(), SharedPreferences.OnSharedPreferenceChangeListe
         val filter = IntentFilter().apply {
             addAction(Intent.ACTION_SCREEN_ON)
             addAction(Intent.ACTION_SCREEN_OFF)
+            addAction(Intent.ACTION_USER_PRESENT)
         }
         registerReceiver(screenStateReceiver, filter)
         prefs.registerOnSharedPreferenceChangeListener(this)
 
         handleManager = HandleManager.getInstance(this)
-        attachHandles()
+        if (isScreenOn) {
+            attachHandles()
+        }
         CallRecorderManager.getInstance(this).startListening()
+        SidebarManager.getInstance(this).registerReceiver(this)
+        com.example.feature.element.ElementActionRegistry.getInstance(this).registerReceiver(this)
 
         // 5. Non-essential diagnostic logging moved after service and speed monitor are active
         val metrics = resources.displayMetrics
@@ -138,7 +180,9 @@ class HandleService : Service(), SharedPreferences.OnSharedPreferenceChangeListe
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_RELOAD_HANDLES) {
-            attachHandles()
+            if (isScreenOn) {
+                attachHandles()
+            }
         }
         return START_STICKY
     }
@@ -303,8 +347,8 @@ class HandleService : Service(), SharedPreferences.OnSharedPreferenceChangeListe
 
         val configs = handleManager.getActiveHandles()
         for (config in configs) {
-            val handleView = TriggerHandleView(this, config) { actionKey, handleConfig ->
-                handleGestureAction(actionKey, handleConfig)
+            val handleView = TriggerHandleView(this, config) { actionKey, gesture, handleConfig ->
+                handleGestureAction(actionKey, gesture, handleConfig)
             }
             handleView.attachToWindow()
             activeHandleViews.add(handleView)
@@ -318,23 +362,31 @@ class HandleService : Service(), SharedPreferences.OnSharedPreferenceChangeListe
         activeHandleViews.clear()
     }
 
-    private fun handleGestureAction(actionKey: String, handleConfig: HandleConfig) {
-        when (actionKey) {
-            HandleManager.ACTION_OPEN_SIDEBAR -> {
-                // Dispatch intent for Sidebar trigger (to be consumed by :sidebar process in subsequent steps)
+    private fun handleGestureAction(actionKey: String, gesture: String, handleConfig: HandleConfig) {
+        val containerId = HandleManager.getContainerId(handleConfig.id, gesture)
+        when (val target = HandleManager.resolveGestureTarget(handleConfig.id, gesture, actionKey)) {
+            is GestureTarget.Container -> {
+                // Synchronously resolve active Sidebar container in Main process
+                SidebarManager.getInstance(this).openTarget(handleConfig.id, gesture, target)
+
+                // Dispatch broadcast for Sidebar trigger with independent container identity
                 val intent = Intent("com.example.action.OPEN_SIDEBAR").apply {
                     putExtra("handle_id", handleConfig.id)
+                    putExtra("gesture", gesture)
+                    putExtra("container_id", target.containerId)
                     addFlags(Intent.FLAG_INCLUDE_STOPPED_PACKAGES)
                 }
                 sendBroadcast(intent)
             }
-            HandleManager.ACTION_NONE -> {
+            is GestureTarget.None -> {
                 // No action
             }
-            else -> {
+            is GestureTarget.Action -> {
                 val intent = Intent("com.example.action.TRIGGER_ACTION").apply {
-                    putExtra("action_key", actionKey)
+                    putExtra("action_key", target.actionKey)
                     putExtra("handle_id", handleConfig.id)
+                    putExtra("gesture", gesture)
+                    putExtra("container_id", containerId)
                 }
                 sendBroadcast(intent)
             }
@@ -344,7 +396,9 @@ class HandleService : Service(), SharedPreferences.OnSharedPreferenceChangeListe
     override fun onSharedPreferenceChanged(sharedPreferences: SharedPreferences?, key: String?) {
         if (key == null) return
         if (key.startsWith("handle_") || key == HandleManager.KEY_HANDLES_COUNT) {
-            attachHandles()
+            if (isScreenOn) {
+                attachHandles()
+            }
         } else if (key == KEY_NET_SPEED_ENABLED) {
             isSpeedMonitorEnabled = prefs.getBoolean(KEY_NET_SPEED_ENABLED, true)
             setupNetSpeedManager()
@@ -370,6 +424,9 @@ class HandleService : Service(), SharedPreferences.OnSharedPreferenceChangeListe
         netSpeedManager = null
 
         CallRecorderManager.getInstance(this).stopListening()
+        SidebarManager.getInstance(this).dismiss()
+        SidebarManager.getInstance(this).unregisterReceiver(this)
+        com.example.feature.element.ElementActionRegistry.getInstance(this).unregisterReceiver(this)
         detachHandles()
     }
 
