@@ -118,6 +118,19 @@ class SidebarManager private constructor(private val context: Context) : Sidebar
     }
 
     /**
+     * Resolves and opens a SidebarContainer by its ID (handleId_gesture).
+     */
+    fun openContainerById(containerId: String): SidebarRuntimeState? {
+        val lastUnderscore = containerId.lastIndexOf('_')
+        if (lastUnderscore > 0) {
+            val handleId = containerId.substring(0, lastUnderscore)
+            val gesture = containerId.substring(lastUnderscore + 1)
+            return openContainer(handleId, gesture, containerId)
+        }
+        return null
+    }
+
+    /**
      * Opens and resolves the independent SidebarContainer for the given handle + gesture.
      *
      * Validates explicit container IDs against canonical handleId + gesture calculations.
@@ -271,6 +284,13 @@ class SidebarManager private constructor(private val context: Context) : Sidebar
         SidebarWindowCoordinator.getInstance(context).closeSidebar()
         val current = _activeState.value ?: return
         _activeState.value = current.copy(isOpen = false, isEditMode = false)
+    }
+
+    /**
+     * Alias for [closeContainer] for callers expecting closeSidebar.
+     */
+    fun closeSidebar() {
+        closeContainer()
     }
 
     /**

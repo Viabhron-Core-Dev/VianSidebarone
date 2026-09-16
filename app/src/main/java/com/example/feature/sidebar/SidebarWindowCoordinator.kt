@@ -58,6 +58,9 @@ class SidebarWindowCoordinator private constructor(context: Context) {
                     windowId = SidebarWindow.WINDOW_ID,
                     context = appContext,
                     edge = edge,
+                    physicalHandleId = state.handleId,
+                    containerId = state.containerId,
+                    defaultPageIndex = state.currentPageIndex,
                     onCloseRequested = {
                         closeSidebar()
                     }

@@ -67,6 +67,10 @@ object LogKeeper {
         return name
     }
 
+    fun writeLog(tag: String, message: String) {
+        Log.d(tag, message)
+    }
+
     /**
      * Records a standard diagnostic or telemetry log entry to LiteReader_Log.txt
      */

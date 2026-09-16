@@ -61,8 +61,26 @@ data class SidebarPage(
     val pageId: String,
     val pageType: String = PageTypes.resolvePageType(pageId),
     val title: String = PageTypes.resolveDefaultTitle(pageType),
-    val order: Int = 0
+    val order: Int = 0,
+    val iconName: String = "",
+    val customIconBase64: String = "",
+    val isSystem: Boolean = false,
+    val isAppGroup: Boolean = false,
+    val appGroupPackageNames: List<String> = emptyList(),
+    val isDirectAction: Boolean = false,
+    val directActionKey: String = "",
+    val isMiniApp: Boolean = false,
+    val miniAppType: String = "",
+    val useCustomSettings: Boolean = false,
+    val width: Int = 0,
+    val height: Int = 0,
+    val wrapContentHeight: Boolean = true,
+    val transparency: Float = 0.9f,
+    val gridColumns: Int = 3,
+    val stickAlignment: String = "bottom"
 ) {
+    val id: String get() = pageId
+    val type: String get() = pageType
     val isFirst: Boolean get() = order == 0
 }
 

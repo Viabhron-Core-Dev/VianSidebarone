@@ -10,6 +10,19 @@
     <uses-permission android:name="android.permission.READ_PHONE_STATE" />
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission
+        android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
+        tools:ignore="ScopedStorage" />
+    <uses-permission
+        android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
+    <uses-permission
+        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
     <uses-permission
         android:name="android.permission.PACKAGE_USAGE_STATS"
         tools:ignore="ProtectedPermissions" />
@@ -46,6 +59,47 @@
             android:exported="false"
             android:process=":heavy"
             android:label="Log Keeper" />
+
+        <activity android:name=".SettingsActivity" android:exported="false" />
+        <activity android:name=".SidebarEditActivity" android:exported="false" />
+        <activity android:name=".HybridGridEditActivity" android:exported="false" />
+        <activity android:name=".WidgetsGridEditActivity" android:exported="false" />
+        <activity android:name=".IconPickerActivity" android:exported="false" />
+        <activity android:name=".WidgetPickerActivity" android:exported="false" />
+        <activity android:name=".AppTrackerSettingsActivity" android:exported="false" />
+        <activity android:name=".NotificationHistoryActivity" android:exported="false" />
+        <activity android:name=".AppTrackerOpenerActivity" android:exported="false" />
+        <activity android:name=".feature.settings.AddElementActivity" android:exported="false" />
+        <activity android:name=".feature.settings.AppPickerActivity" android:exported="false" />
+        <activity android:name=".feature.settings.ShortcutPickerActivity" android:exported="false" />
+        <activity android:name=".feature.settings.IntentPickerActivity" android:exported="false" />
+        <activity android:name=".feature.settings.ActionPickerActivity" android:exported="false" />
+        <activity android:name=".feature.settings.TagManagementActivity" android:exported="false" />
+        <activity android:name=".feature.sidebar.ScreenRecordActivity" android:exported="false" />
+
+        <service android:name=".service.ScreenRecordService" android:exported="false" />
+        <service android:name=".feature.system_hub.BlueLightFilterManager" android:exported="false" />
+
+        <service
+            android:name=".service.AppNotificationListener"
+            android:exported="false"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+
+        <service
+            android:name=".feature.system_hub.VianSideAccessibilityService"
+            android:exported="false"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/accessibility_service_config" />
+        </service>
 
         <service
             android:name=".feature.floating.HeavyFloatingHostService"

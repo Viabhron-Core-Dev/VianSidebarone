@@ -1,0 +1,150 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#151515"
+    android:orientation="vertical">
+
+    <RelativeLayout
+        android:id="@+id/notes_header"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:padding="8dp"
+        android:background="#2A2A2A">
+
+        <ImageButton
+            android:id="@+id/btn_notes_back"
+            android:layout_width="32dp"
+            android:layout_height="32dp"
+            android:layout_alignParentStart="true"
+            android:layout_centerVertical="true"
+            android:background="?android:attr/selectableItemBackgroundBorderless"
+            android:src="@android:drawable/ic_media_previous"
+            android:tint="#FFFFFF" />
+
+        <TextView
+            android:id="@+id/tv_notes_title"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_toEndOf="@id/btn_notes_back"
+            android:layout_centerVertical="true"
+            android:layout_marginStart="16dp"
+            android:text="Quick Notes"
+            android:textColor="#FFFFFF"
+            android:textSize="18sp"
+            android:textStyle="bold" />
+
+        <ImageButton
+            android:id="@+id/btn_notes_delete"
+            android:layout_width="32dp"
+            android:layout_height="32dp"
+            android:layout_alignParentEnd="true"
+            android:layout_centerVertical="true"
+            android:background="?android:attr/selectableItemBackgroundBorderless"
+            android:src="@android:drawable/ic_menu_delete"
+            android:tint="#FFFFFF"
+            android:visibility="gone" />
+
+        <ImageButton
+            android:id="@+id/btn_notes_search"
+            android:layout_width="32dp"
+            android:layout_height="32dp"
+            android:layout_toStartOf="@id/btn_notes_add"
+            android:layout_centerVertical="true"
+            android:layout_marginEnd="8dp"
+            android:background="?android:attr/selectableItemBackgroundBorderless"
+            android:src="@android:drawable/ic_menu_search"
+            android:tint="#FFFFFF" />
+
+        <ImageButton
+            android:id="@+id/btn_notes_add"
+            android:layout_width="32dp"
+            android:layout_height="32dp"
+            android:layout_alignParentEnd="true"
+            android:layout_centerVertical="true"
+            android:background="?android:attr/selectableItemBackgroundBorderless"
+            android:src="@android:drawable/ic_menu_add"
+            android:tint="#FFFFFF" />
+    </RelativeLayout>
+
+    <EditText
+        android:id="@+id/et_search_notes"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:hint="Search notes..."
+        android:textColor="#FFFFFF"
+        android:textColorHint="#AAAAAA"
+        android:background="#2A2A2A"
+        android:padding="12dp"
+        android:inputType="text"
+        android:singleLine="true"
+        android:visibility="gone" />
+
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent">
+
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/list_notes"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:clipToPadding="false"
+            android:padding="8dp" />
+
+        <LinearLayout
+            android:id="@+id/note_editor_container"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:orientation="vertical"
+            android:background="#151515"
+            android:padding="16dp"
+            android:clickable="true"
+            android:focusable="true"
+            android:visibility="gone">
+
+            <EditText
+                android:id="@+id/et_note_title"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:hint="Title (Optional)"
+                android:inputType="textCapSentences"
+                android:singleLine="true"
+                android:textColor="#FFFFFF"
+                android:textColorHint="#888888" />
+
+            <EditText
+                android:id="@+id/et_note_text"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1"
+                android:layout_marginTop="8dp"
+                android:gravity="top|start"
+                android:hint="Note text"
+                android:inputType="textMultiLine|textCapSentences"
+                android:textColor="#FFFFFF"
+                android:textColorHint="#888888" />
+                
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="end"
+                android:layout_marginTop="16dp">
+                <Button
+                    android:id="@+id/btn_note_cancel"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Cancel"
+                    style="?android:attr/buttonBarButtonStyle"
+                    android:textColor="#FFFFFF" />
+                <Button
+                    android:id="@+id/btn_note_save"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Save"
+                    style="?android:attr/buttonBarButtonStyle"
+                    android:textColor="#4CAF50" />
+            </LinearLayout>
+        </LinearLayout>
+    </FrameLayout>
+</LinearLayout>

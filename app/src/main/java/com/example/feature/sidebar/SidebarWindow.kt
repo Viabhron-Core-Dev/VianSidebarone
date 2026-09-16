@@ -9,6 +9,7 @@ import com.example.core.FloatingWindow
 import com.example.core.FloatingWindowManager
 import com.example.core.WindowBounds
 import com.example.util.HandleEdge
+import com.example.utils.SidebarPage
 
 /**
  * SidebarWindow: FloatingWindow implementation for the Sidebar Page Container overlay.
@@ -23,6 +24,10 @@ class SidebarWindow(
     windowId: String = WINDOW_ID,
     context: Context,
     val edge: HandleEdge,
+    val physicalHandleId: String = "sidebar",
+    val containerId: String = "sidebar",
+    private val pageConfigs: List<SidebarPage>? = null,
+    private val defaultPageIndex: Int = 0,
     private val onCloseRequested: () -> Unit
 ) : FloatingWindow(windowId, context, TYPE_PAGE) {
 
@@ -57,10 +62,18 @@ class SidebarWindow(
 
     override fun getOrCreateContainerView(): FrameLayout {
         if (sidebarView == null) {
+            val prefs = context.getSharedPreferences("FloatingReaderPrefs", Context.MODE_PRIVATE)
+            val wm = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+            val pages = pageConfigs ?: com.example.utils.PageManager.getPages(prefs, containerId)
             sidebarView = SidebarView(
                 context = context,
-                edge = edge,
-                onCloseRequested = onCloseRequested
+                prefs = prefs,
+                windowManager = wm,
+                physicalHandleId = physicalHandleId,
+                containerId = containerId,
+                pageConfigs = pages,
+                defaultPageIndex = defaultPageIndex,
+                onClose = onCloseRequested
             )
         }
         return sidebarView!!
