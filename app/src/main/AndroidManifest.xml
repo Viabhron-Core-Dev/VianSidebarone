@@ -5,6 +5,7 @@
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.READ_PHONE_STATE" />
@@ -76,8 +77,19 @@
         <activity android:name=".feature.settings.ActionPickerActivity" android:exported="false" />
         <activity android:name=".feature.settings.TagManagementActivity" android:exported="false" />
         <activity android:name=".feature.sidebar.ScreenRecordActivity" android:exported="false" />
+        <activity
+            android:name=".feature.system_hub.CameraMeasureActivity"
+            android:exported="false"
+            android:theme="@style/Theme.LiteReader" />
+        <activity
+            android:name=".feature.system_hub.GhostCameraActivity"
+            android:exported="false"
+            android:theme="@style/Theme.LiteReader" />
 
-        <service android:name=".service.ScreenRecordService" android:exported="false" />
+        <service
+            android:name=".service.ScreenRecordService"
+            android:exported="false"
+            android:foregroundServiceType="mediaProjection" />
         <service android:name=".feature.system_hub.BlueLightFilterManager" android:exported="false" />
 
         <service

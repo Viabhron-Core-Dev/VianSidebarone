@@ -67,3 +67,36 @@
 * Any deviation from what was requested, and why: None.
 * Any known issue or follow-up needed: None.
 
+* Timestamp: 2026-09-17T22:25:00Z
+* One-line summary: Registered GhostCameraActivity and CameraMeasureActivity in manifest, declared mediaProjection foreground service attributes, and synchronized folder popup system action handling.
+* Exact files touched:
+  - `app/src/main/AndroidManifest.xml`
+  - `app/src/main/java/com/example/feature/sidebar/HybridGridPageView.kt`
+  - `receipts/RECEIPTS_095.md`
+* What was actually done:
+  - Inspected reference implementation in `Vian-Sidebar-main/app/src/main/AndroidManifest.xml` and identified missing `<activity>` declarations for `GhostCameraActivity` and `CameraMeasureActivity`.
+  - Added declarations for `.feature.system_hub.GhostCameraActivity` and `.feature.system_hub.CameraMeasureActivity` to `app/src/main/AndroidManifest.xml` with `android:exported="false"` and `android:theme="@style/Theme.LiteReader"`.
+  - Added `android:foregroundServiceType="mediaProjection"` to `.service.ScreenRecordService` and added `<uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />` to satisfy Android 14 foreground service requirements for screen recording.
+  - Updated `showFolderPopup` in `HybridGridPageView.kt` to handle all system actions (`audio_record`, `camera_measure`, `arrangement_checker` / `ghost_camera`, `settings`, and accessibility service fallback), ensuring folder items function identically to root grid items without silent drops.
+* How it was verified: local build only (`compile_applet` passed cleanly; `gradle :app:testDebugUnitTest` executed and passed all unit tests).
+* Any deviation from what was requested, and why: None.
+* Any known issue or follow-up needed: Screen capture sub-actions (`redact_screenshot`, `qr_scan`, `barcode_scanner`) are defined as items in `SidebarAppsManager.kt` but do not have local activity implementations in this repository; they route gracefully to the accessibility service or display an enablement toast without crashing.
+
+* Timestamp: 2026-09-17T22:33:00Z
+* One-line summary: Restored Handle appearance (slanted block shape, #242962ff default color, right edge default) and robust gesture touch handling aligned with OG reference.
+* Exact files touched:
+  - `app/src/main/java/com/example/util/HandleShapeDrawable.kt`
+  - `app/src/main/java/com/example/core/HandleManager.kt`
+  - `app/src/main/java/com/example/core/TriggerHandleView.kt`
+  - `receipts/RECEIPTS_095.md`
+* What was actually done:
+  - Inspected OG reference in `Vian-Sidebar-main/app/src/main/java/com/example/util/HandleShapeDrawable.kt` and restored `SLANTED_BLOCK` geometry, robust `HandleShape.fromString()` and `HandleEdge.fromString()` factory methods, and precise edge slant path construction.
+  - Aligned default handle configuration in `HandleManager.kt` to match the OG reference: `HandleShape.SLANTED_BLOCK`, `HandleEdge.RIGHT`, default color `#242962ff` (14% alpha), width 12dp, height 120dp, `onSwipeLeftAction = "open_sidebar"`, and self-healed stale template placeholder defaults.
+  - Enhanced `TriggerHandleView.kt` with window layout parameter flags (`FLAG_NOT_TOUCH_MODAL`), `onDown: true` in `GestureDetector`, and inward horizontal/vertical gesture detection on `ACTION_MOVE` to ensure responsive, tactile swipe-to-open sidebar triggering with haptic feedback.
+  - Preserved the Main process runtime ownership of handle detection and the Handle → Gesture → Container → Page independent architecture.
+* How it was verified: local build only (`compile_applet` passed cleanly; `gradle :app:testDebugUnitTest` executed and passed all unit tests).
+* Any deviation from what was requested, and why: None.
+* Any known issue or follow-up needed: None.
+
+
+

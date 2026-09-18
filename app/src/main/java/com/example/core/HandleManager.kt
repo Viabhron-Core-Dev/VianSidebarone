@@ -63,19 +63,19 @@ data class HandleConfig(
     val id: String,
     val name: String,
     val enabled: Boolean = true,
-    val edge: HandleEdge = HandleEdge.LEFT,
+    val edge: HandleEdge = HandleEdge.RIGHT,
     val positionPercent: Float = 0.5f, // 0.0 to 1.0 along the screen edge
-    val widthDp: Int = 18,
+    val widthDp: Int = 12,
     val heightDp: Int = 120,
-    val color: Int = Color.parseColor("#99444444"),
-    val shape: HandleShape = HandleShape.ROUNDED_RECT,
-    val alphaPercent: Int = 80,
+    val color: Int = Color.parseColor("#242962ff"),
+    val shape: HandleShape = HandleShape.SLANTED_BLOCK,
+    val alphaPercent: Int = 14,
     // Gesture Action Keys
-    val onTapAction: String = "open_sidebar",
+    val onTapAction: String = "none",
     val onDoubleTapAction: String = "none",
     val onLongPressAction: String = "move_handle",
     val onSwipeLeftAction: String = "open_sidebar",
-    val onSwipeRightAction: String = "open_sidebar",
+    val onSwipeRightAction: String = "none",
     val onSwipeUpAction: String = "none",
     val onSwipeDownAction: String = "none"
 ) {
@@ -166,27 +166,51 @@ class HandleManager(private val context: Context) {
         val handles = mutableListOf<HandleConfig>()
         val count = prefs.getInt(KEY_HANDLES_COUNT, 1)
 
+        // Self-heal stale default from earlier run if still uncustomized template values
+        if (prefs.getInt("handle_color_1", 0) == Color.parseColor("#99444444") &&
+            prefs.getString("handle_shape_1", null) == "ROUNDED_RECT" &&
+            prefs.getString("handle_edge_1", null) == "LEFT") {
+            prefs.edit()
+                .putString("handle_color_1", "#242962ff")
+                .putString("handle_shape_1", "SLANTED_BLOCK")
+                .putString("handle_edge_1", "RIGHT")
+                .putInt("handle_width_1", 12)
+                .putInt("handle_height_1", 120)
+                .putString("handle_tap_1", ACTION_NONE)
+                .putString("handle_swipe_left_1", ACTION_OPEN_SIDEBAR)
+                .apply()
+        }
+
         for (i in 1..count) {
             val enabled = prefs.getBoolean("handle_enabled_$i", i == 1)
             if (!enabled) continue
 
             val id = "handle_$i"
             val name = prefs.getString("handle_name_$i", "Handle $i") ?: "Handle $i"
-            val edgeStr = prefs.getString("handle_edge_$i", if (i == 1) "LEFT" else "RIGHT") ?: "LEFT"
-            val edge = try { HandleEdge.valueOf(edgeStr) } catch (e: Exception) { HandleEdge.LEFT }
+            val edgeStr = prefs.getString("handle_edge_$i", "RIGHT") ?: "RIGHT"
+            val edge = HandleEdge.fromString(edgeStr)
             val posPercent = prefs.getFloat("handle_pos_$i", 0.5f)
-            val widthDp = prefs.getInt("handle_width_$i", 18)
-            val heightDp = prefs.getInt("handle_height_$i", 120)
-            val color = prefs.getInt("handle_color_$i", Color.parseColor("#99444444"))
-            val shapeStr = prefs.getString("handle_shape_$i", "ROUNDED_RECT") ?: "ROUNDED_RECT"
-            val shape = try { HandleShape.valueOf(shapeStr) } catch (e: Exception) { HandleShape.ROUNDED_RECT }
-            val alpha = prefs.getInt("handle_alpha_$i", 80)
+            val widthDp = try { prefs.getInt("handle_width_$i", 12) } catch (_: Exception) { 12 }
+            val heightDp = try { prefs.getInt("handle_height_$i", 120) } catch (_: Exception) { 120 }
+            val color = try {
+                val raw = prefs.all["handle_color_$i"]
+                when (raw) {
+                    is Int -> raw
+                    is String -> Color.parseColor(raw)
+                    else -> Color.parseColor("#242962ff")
+                }
+            } catch (e: Exception) {
+                Color.parseColor("#242962ff")
+            }
+            val shapeStr = prefs.getString("handle_shape_$i", "SLANTED_BLOCK") ?: "SLANTED_BLOCK"
+            val shape = HandleShape.fromString(shapeStr)
+            val alpha = try { prefs.getInt("handle_alpha_$i", 14) } catch (_: Exception) { 14 }
 
-            val tap = prefs.getString("handle_tap_$i", ACTION_OPEN_SIDEBAR) ?: ACTION_OPEN_SIDEBAR
+            val tap = prefs.getString("handle_tap_$i", ACTION_NONE) ?: ACTION_NONE
             val doubleTap = prefs.getString("handle_double_tap_$i", ACTION_NONE) ?: ACTION_NONE
             val longPress = prefs.getString("handle_long_press_$i", ACTION_MOVE_HANDLE) ?: ACTION_MOVE_HANDLE
-            val swipeLeft = prefs.getString("handle_swipe_left_$i", ACTION_OPEN_SIDEBAR) ?: ACTION_OPEN_SIDEBAR
-            val swipeRight = prefs.getString("handle_swipe_right_$i", ACTION_OPEN_SIDEBAR) ?: ACTION_OPEN_SIDEBAR
+            val swipeLeft = prefs.getString("handle_swipe_left_$i", if (edge == HandleEdge.RIGHT) ACTION_OPEN_SIDEBAR else ACTION_NONE) ?: if (edge == HandleEdge.RIGHT) ACTION_OPEN_SIDEBAR else ACTION_NONE
+            val swipeRight = prefs.getString("handle_swipe_right_$i", if (edge == HandleEdge.LEFT) ACTION_OPEN_SIDEBAR else ACTION_NONE) ?: if (edge == HandleEdge.LEFT) ACTION_OPEN_SIDEBAR else ACTION_NONE
             val swipeUp = prefs.getString("handle_swipe_up_$i", ACTION_NONE) ?: ACTION_NONE
             val swipeDown = prefs.getString("handle_swipe_down_$i", ACTION_NONE) ?: ACTION_NONE
 
@@ -220,13 +244,20 @@ class HandleManager(private val context: Context) {
                     id = "handle_1",
                     name = "Primary Handle",
                     enabled = true,
-                    edge = HandleEdge.LEFT,
+                    edge = HandleEdge.RIGHT,
                     positionPercent = 0.5f,
-                    widthDp = 18,
+                    widthDp = 12,
                     heightDp = 120,
-                    color = Color.parseColor("#99444444"),
-                    shape = HandleShape.ROUNDED_RECT,
-                    alphaPercent = 80
+                    color = Color.parseColor("#242962ff"),
+                    shape = HandleShape.SLANTED_BLOCK,
+                    alphaPercent = 14,
+                    onTapAction = ACTION_NONE,
+                    onDoubleTapAction = ACTION_NONE,
+                    onLongPressAction = ACTION_MOVE_HANDLE,
+                    onSwipeLeftAction = ACTION_OPEN_SIDEBAR,
+                    onSwipeRightAction = ACTION_NONE,
+                    onSwipeUpAction = ACTION_NONE,
+                    onSwipeDownAction = ACTION_NONE
                 )
             )
         }
@@ -251,13 +282,20 @@ class HandleManager(private val context: Context) {
                     id = "handle_1",
                     name = "Primary Handle",
                     enabled = true,
-                    edge = HandleEdge.LEFT,
+                    edge = HandleEdge.RIGHT,
                     positionPercent = 0.5f,
-                    widthDp = 18,
+                    widthDp = 12,
                     heightDp = 120,
-                    color = Color.parseColor("#99444444"),
-                    shape = HandleShape.ROUNDED_RECT,
-                    alphaPercent = 80
+                    color = Color.parseColor("#242962ff"),
+                    shape = HandleShape.SLANTED_BLOCK,
+                    alphaPercent = 14,
+                    onTapAction = ACTION_NONE,
+                    onDoubleTapAction = ACTION_NONE,
+                    onLongPressAction = ACTION_MOVE_HANDLE,
+                    onSwipeLeftAction = ACTION_OPEN_SIDEBAR,
+                    onSwipeRightAction = ACTION_NONE,
+                    onSwipeUpAction = ACTION_NONE,
+                    onSwipeDownAction = ACTION_NONE
                 )
             }
             return null
@@ -265,21 +303,30 @@ class HandleManager(private val context: Context) {
 
         val enabled = prefs.getBoolean("handle_enabled_$index", index == 1)
         val name = prefs.getString("handle_name_$index", "Handle $index") ?: "Handle $index"
-        val edgeStr = prefs.getString("handle_edge_$index", if (index == 1) "LEFT" else "RIGHT") ?: "LEFT"
-        val edge = try { HandleEdge.valueOf(edgeStr) } catch (e: Exception) { HandleEdge.LEFT }
+        val edgeStr = prefs.getString("handle_edge_$index", "RIGHT") ?: "RIGHT"
+        val edge = HandleEdge.fromString(edgeStr)
         val posPercent = prefs.getFloat("handle_pos_$index", 0.5f)
-        val widthDp = prefs.getInt("handle_width_$index", 18)
-        val heightDp = prefs.getInt("handle_height_$index", 120)
-        val color = prefs.getInt("handle_color_$index", Color.parseColor("#99444444"))
-        val shapeStr = prefs.getString("handle_shape_$index", "ROUNDED_RECT") ?: "ROUNDED_RECT"
-        val shape = try { HandleShape.valueOf(shapeStr) } catch (e: Exception) { HandleShape.ROUNDED_RECT }
-        val alpha = prefs.getInt("handle_alpha_$index", 80)
+        val widthDp = try { prefs.getInt("handle_width_$index", 12) } catch (_: Exception) { 12 }
+        val heightDp = try { prefs.getInt("handle_height_$index", 120) } catch (_: Exception) { 120 }
+        val color = try {
+            val raw = prefs.all["handle_color_$index"]
+            when (raw) {
+                is Int -> raw
+                is String -> Color.parseColor(raw)
+                else -> Color.parseColor("#242962ff")
+            }
+        } catch (e: Exception) {
+            Color.parseColor("#242962ff")
+        }
+        val shapeStr = prefs.getString("handle_shape_$index", "SLANTED_BLOCK") ?: "SLANTED_BLOCK"
+        val shape = HandleShape.fromString(shapeStr)
+        val alpha = try { prefs.getInt("handle_alpha_$index", 14) } catch (_: Exception) { 14 }
 
-        val tap = prefs.getString("handle_tap_$index", ACTION_OPEN_SIDEBAR) ?: ACTION_OPEN_SIDEBAR
+        val tap = prefs.getString("handle_tap_$index", ACTION_NONE) ?: ACTION_NONE
         val doubleTap = prefs.getString("handle_double_tap_$index", ACTION_NONE) ?: ACTION_NONE
         val longPress = prefs.getString("handle_long_press_$index", ACTION_MOVE_HANDLE) ?: ACTION_MOVE_HANDLE
-        val swipeLeft = prefs.getString("handle_swipe_left_$index", ACTION_OPEN_SIDEBAR) ?: ACTION_OPEN_SIDEBAR
-        val swipeRight = prefs.getString("handle_swipe_right_$index", ACTION_OPEN_SIDEBAR) ?: ACTION_OPEN_SIDEBAR
+        val swipeLeft = prefs.getString("handle_swipe_left_$index", if (edge == HandleEdge.RIGHT) ACTION_OPEN_SIDEBAR else ACTION_NONE) ?: if (edge == HandleEdge.RIGHT) ACTION_OPEN_SIDEBAR else ACTION_NONE
+        val swipeRight = prefs.getString("handle_swipe_right_$index", if (edge == HandleEdge.LEFT) ACTION_OPEN_SIDEBAR else ACTION_NONE) ?: if (edge == HandleEdge.LEFT) ACTION_OPEN_SIDEBAR else ACTION_NONE
         val swipeUp = prefs.getString("handle_swipe_up_$index", ACTION_NONE) ?: ACTION_NONE
         val swipeDown = prefs.getString("handle_swipe_down_$index", ACTION_NONE) ?: ACTION_NONE
 
