@@ -1,8 +1,10 @@
 package com.example.core
 
+import android.app.Activity
 import android.app.Application
 import android.content.Context
 import android.os.Build
+import android.os.Bundle
 import android.os.Process
 import android.util.Log
 import java.io.File
@@ -34,7 +36,12 @@ object LogKeeper {
     @Volatile
     private var cachedProcessName: String? = null
 
+    @Volatile
+    private var appContext: Context? = null
+
     fun init(context: Context) {
+        val app = context.applicationContext
+        appContext = app
         cachedProcessName = getProcessName(context)
         val defaultHandler = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
@@ -42,6 +49,24 @@ object LogKeeper {
             defaultHandler?.uncaughtException(thread, throwable)
         }
         log(context, "LogKeeper", "Initialized logger in process: $cachedProcessName")
+
+        if (app is Application) {
+            app.registerActivityLifecycleCallbacks(object : Application.ActivityLifecycleCallbacks {
+                override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) {}
+                override fun onActivityStarted(activity: Activity) {
+                    log(activity, "Lifecycle", "Activity started: ${activity.javaClass.simpleName}")
+                }
+                override fun onActivityResumed(activity: Activity) {}
+                override fun onActivityPaused(activity: Activity) {}
+                override fun onActivityStopped(activity: Activity) {
+                    log(activity, "Lifecycle", "Activity stopped: ${activity.javaClass.simpleName}")
+                }
+                override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) {}
+                override fun onActivityDestroyed(activity: Activity) {
+                    log(activity, "Lifecycle", "Activity destroyed: ${activity.javaClass.simpleName}")
+                }
+            })
+        }
     }
 
     fun setMasterEnabled(enabled: Boolean) {
@@ -69,6 +94,17 @@ object LogKeeper {
 
     fun writeLog(tag: String, message: String) {
         Log.d(tag, message)
+        appContext?.let { ctx ->
+            log(ctx, tag, message)
+        }
+    }
+
+    /**
+     * Records a lifecycle event (started, stopped, restarted, etc.) to the diagnostic log.
+     */
+    fun logLifecycle(context: Context, component: String, event: String, details: String = "") {
+        val msg = if (details.isNotEmpty()) "$event - $details" else event
+        log(context, "Lifecycle", "[$component] $msg")
     }
 
     /**

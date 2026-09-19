@@ -73,13 +73,16 @@ class NotificationHistoryActivity : ComponentActivity() {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun NotificationHistoryScreen(onBack: () -> Unit, onExport: (List<NotificationHistory>) -> Unit) {
-    LaunchedEffect(Unit) {
-        com.example.core.LogKeeper.writeLog("History", "Notification history viewed")
-    }
-
     val context = LocalContext.current
     val dao = remember { AppDatabase.getDatabase(context).notificationHistoryDao() }
     val scope = rememberCoroutineScope()
+
+    LaunchedEffect(Unit) {
+        com.example.core.LogKeeper.writeLog("History", "Notification history viewed")
+        kotlinx.coroutines.withContext(Dispatchers.IO) {
+            com.example.data.NotificationHistoryBuffer.ingestPending(context, dao)
+        }
+    }
     
     var history by remember { mutableStateOf<List<NotificationHistory>>(emptyList()) }
     var isSearching by remember { mutableStateOf(false) }
@@ -157,6 +160,7 @@ fun NotificationHistoryScreen(onBack: () -> Unit, onExport: (List<NotificationHi
                         }
                         IconButton(onClick = {
                             scope.launch(Dispatchers.IO) {
+                                com.example.data.NotificationHistoryBuffer.clearBuffer(context)
                                 dao.deleteAll()
                             }
                         }) {

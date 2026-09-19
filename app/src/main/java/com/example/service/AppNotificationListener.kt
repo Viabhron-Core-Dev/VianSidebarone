@@ -54,28 +54,16 @@ class AppNotificationListener : NotificationListenerService() {
                 
                 CoroutineScope(Dispatchers.IO).launch {
                     try {
-                        val dao = com.example.data.AppDatabase.getDatabase(applicationContext).notificationHistoryDao()
-                        
-                        // Prevent repetitive spam in history for ongoing notifications (e.g. NetSpeed indicator, downloads, music timestamps)
-                        // If same package & same title exists and was recorded recently, update in-place instead of creating hundreds of duplicate records
-                        val existing = dao.findLatestByPackageAndTitle(packageName, title)
-                        val now = System.currentTimeMillis()
-                        
-                        if (existing != null && (isOngoing || (now - existing.timestamp < 15_000L && existing.title == title))) {
-                            // Update existing record in-place
-                            dao.update(existing.copy(text = text, timestamp = now))
-                        } else {
-                            val history = com.example.data.NotificationHistory(
-                                packageName = packageName,
-                                appName = appName,
-                                title = title,
-                                text = text,
-                                timestamp = now
-                            )
-                            dao.insert(history)
-                        }
+                        com.example.data.NotificationHistoryBuffer.record(
+                            context = applicationContext,
+                            packageName = packageName,
+                            appName = appName,
+                            title = title,
+                            text = text,
+                            isOngoing = isOngoing
+                        )
                     } catch (e: Exception) {
-                        Log.e("AppNotificationListener", "Error inserting/updating notification", e)
+                        Log.e("AppNotificationListener", "Error buffering notification", e)
                     }
                 }
             }

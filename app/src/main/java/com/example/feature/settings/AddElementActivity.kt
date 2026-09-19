@@ -200,9 +200,11 @@ class AddElementActivity : ComponentActivity() {
                     val titleStr = titleInput.text.toString().takeIf { it.isNotEmpty() } ?: "Link"
                     val urlStr = urlInput.text.toString().takeIf { it.isNotEmpty() } ?: "https://"
                     val uuid = java.util.UUID.randomUUID().toString()
+                    val meta = com.example.feature.sidebar.ElementMetadataStore.saveLinkElement(this, uuid, urlStr, titleStr)
                     val linkJson = JSONObject().apply {
                         put("url", urlStr)
                         put("label", titleStr)
+                        put("iconPath", meta.iconPath)
                     }
                     finishWithId("link:$uuid:${linkJson.toString()}")
                 }

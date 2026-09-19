@@ -919,8 +919,13 @@ class AppsPageView(
                 }
             } else if (item is SidebarItem.Link) {
                 icon.setBackgroundColor(android.graphics.Color.TRANSPARENT)
-                icon.setImageResource(android.R.drawable.ic_menu_set_as) // Generic link icon
-                icon.setColorFilter(android.graphics.Color.WHITE)
+                val cached = manager.getIconBitmap(item.id)
+                if (cached != null) {
+                    icon.setImageBitmap(cached)
+                } else {
+                    icon.setImageResource(android.R.drawable.ic_menu_set_as)
+                    icon.setColorFilter(android.graphics.Color.WHITE)
+                }
             }
         }
     }

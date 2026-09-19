@@ -7,6 +7,7 @@ import android.content.IntentFilter
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
@@ -25,9 +26,14 @@ sealed class SidebarItem {
 
     data class App(
         val packageName: String,
-        override val label: String
+        override val label: String,
+        val iconPath: String? = null,
+        val isLaunchable: Boolean = true,
+        override var id: String = "app:$packageName"
     ) : SidebarItem() {
-        override var id = "app:$packageName"
+        constructor(packageName: String, label: String) : this(packageName, label, null, true, "app:$packageName")
+        constructor(packageName: String, label: String, iconPath: String?) : this(packageName, label, iconPath, true, "app:$packageName")
+        constructor(packageName: String, label: String, iconPath: String?, id: String) : this(packageName, label, iconPath, true, id)
     }
 
     data class SystemAction(
@@ -112,8 +118,11 @@ sealed class SidebarItem {
         val uuid: String,
         val url: String,
         override val label: String,
+        val iconPath: String? = null,
         override var id: String = "link:$uuid"
-    ) : SidebarItem()
+    ) : SidebarItem() {
+        constructor(uuid: String, url: String, label: String, id: String) : this(uuid, url, label, null, id)
+    }
 
     data class Spacer(
         val uuid: String,
@@ -259,8 +268,8 @@ class SidebarAppsManager(
     var activeItems = listOf<SidebarItem>()
         private set
 
-    var allInstalledApps = listOf<AppInfo>()
-        private set
+    val allInstalledApps: List<AppInfo>
+        get() = emptyList()
 
     private var hasLoadedOnce = false
 
@@ -295,19 +304,6 @@ class SidebarAppsManager(
         }
     }
 
-    private val packageReceiver = object : BroadcastReceiver() {
-        override fun onReceive(context: Context?, intent: Intent?) {
-            coroutineScope.launch {
-                iconCache.evictAll()
-                loadAllAppsFromPackageManager()
-                loadActiveApps()
-                withContext(Dispatchers.Main) {
-                    notifyUpdated()
-                }
-            }
-        }
-    }
-
     private val prefsListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
         if (key == prefKey || key == "sidebar_apps" || (key != null && key.startsWith("sidebar_apps_"))) {
             coroutineScope.launch {
@@ -320,28 +316,20 @@ class SidebarAppsManager(
     }
 
     init {
-        val filter = IntentFilter().apply {
-            addAction(Intent.ACTION_PACKAGE_ADDED)
-            addAction(Intent.ACTION_PACKAGE_REMOVED)
-            addAction(Intent.ACTION_PACKAGE_CHANGED)
-            addDataScheme("package")
-        }
-        context.registerReceiver(packageReceiver, filter)
         try {
             prefs.registerOnSharedPreferenceChangeListener(prefsListener)
         } catch (e: Exception) {}
+        coroutineScope.launch(Dispatchers.IO) {
+            ElementMetadataStore.migrateLegacyElements(context)
+        }
     }
 
     fun destroy() {
-        try {
-            context.unregisterReceiver(packageReceiver)
-        } catch (e: Exception) {}
         try {
             prefs.unregisterOnSharedPreferenceChangeListener(prefsListener)
         } catch (e: Exception) {}
         iconCache.evictAll()
         updateListeners.clear()
-        allInstalledApps = emptyList()
         activeItems = emptyList()
         hasLoadedOnce = false
     }
@@ -353,7 +341,6 @@ class SidebarAppsManager(
     fun ensureLoaded() {
         if (!hasLoadedOnce) {
             coroutineScope.launch {
-                loadAllAppsFromPackageManager()
                 loadActiveApps()
                 hasLoadedOnce = true
                 withContext(Dispatchers.Main) {
@@ -363,20 +350,6 @@ class SidebarAppsManager(
         } else {
             notifyUpdated()
         }
-    }
-
-    private suspend fun loadAllAppsFromPackageManager() = withContext(Dispatchers.IO) {
-        val launcherApps = context.getSystemService(Context.LAUNCHER_APPS_SERVICE) as android.content.pm.LauncherApps
-        val userHandle = android.os.Process.myUserHandle()
-        val apps = launcherApps.getActivityList(null, userHandle)
-        val result = mutableListOf<AppInfo>()
-        for (activityInfo in apps) {
-            val packageName = activityInfo.applicationInfo.packageName
-            val label = activityInfo.label.toString()
-            result.add(AppInfo(packageName, label))
-        }
-        val distinctResult = result.distinctBy { it.packageName }.sortedBy { it.label.lowercase() }
-        allInstalledApps = distinctResult
     }
 
     
@@ -609,8 +582,24 @@ class SidebarAppsManager(
             }
             if (b != null) return b
         }
+        iconCache.get(id)?.let { return it }
+
+        val meta = ElementMetadataStore.get(context, id)
+        if (meta != null && meta.iconPath.isNotEmpty()) {
+            val iconFile = java.io.File(meta.iconPath)
+            if (iconFile.exists() && iconFile.length() > 0) {
+                try {
+                    val bmp = BitmapFactory.decodeFile(iconFile.absolutePath)
+                    if (bmp != null) {
+                        iconCache.put(id, bmp)
+                        return bmp
+                    }
+                } catch (e: Exception) {}
+            }
+        }
+
         if (id.startsWith("app:")) {
-            val pkg = id.substringAfter("app:")
+            val pkg = id.substringAfter("app:").substringBefore(":")
             iconCache.get(pkg)?.let { return it }
             com.example.core.IconCacheManager.getCachedBitmap(context, pkg)?.let {
                 iconCache.put(pkg, it)
@@ -680,20 +669,33 @@ class SidebarAppsManager(
     
     private fun parseIdInternal(id: String): SidebarItem? {
         if (id.startsWith("app:")) {
-            val pkg = id.substringAfter("app:")
-            val appInfo = allInstalledApps.find { it.packageName == pkg }
-            if (appInfo != null) {
-                return SidebarItem.App(appInfo.packageName, appInfo.label)
-            } else {
-                try {
-                    val pm = context.packageManager
-                    val info = pm.getApplicationInfo(pkg, 0)
-                    val label = pm.getApplicationLabel(info).toString()
-                    return SidebarItem.App(pkg, label)
-                } catch(e: Exception) {
-                    return SidebarItem.App(pkg, pkg)
-                }
+            val pkg = id.substringAfter("app:").substringBefore(":")
+            val meta = ElementMetadataStore.get(context, id)
+            val launchable = ElementMetadataStore.isPackageLaunchable(context, pkg)
+            if (meta != null) {
+                return SidebarItem.App(
+                    packageName = meta.target,
+                    label = meta.label,
+                    iconPath = meta.iconPath,
+                    isLaunchable = launchable,
+                    id = id
+                )
             }
+            // Fallback for unmigrated legacy item: capture once and persist
+            var label = pkg
+            try {
+                val pm = context.packageManager
+                val info = pm.getApplicationInfo(pkg, 0)
+                label = pm.getApplicationLabel(info).toString()
+            } catch (e: Exception) {}
+            val savedMeta = ElementMetadataStore.saveAppElement(context, pkg, label, id)
+            return SidebarItem.App(
+                packageName = pkg,
+                label = label,
+                iconPath = savedMeta.iconPath,
+                isLaunchable = launchable,
+                id = id
+            )
         } else if (id.startsWith("intent:")) {
             val parts = id.split(":", limit = 4)
             if (parts.size >= 3) {
@@ -806,16 +808,37 @@ class SidebarAppsManager(
                     e.printStackTrace() 
                 }
         } else if (id.startsWith("link:")) {
+            val meta = ElementMetadataStore.get(context, id)
+            if (meta != null) {
+                val uuid = id.split(":", limit = 3).getOrNull(1) ?: id
+                return SidebarItem.Link(
+                    uuid = uuid,
+                    url = meta.target,
+                    label = meta.label,
+                    iconPath = meta.iconPath,
+                    id = id
+                )
+            }
             try {
                 val parts = id.split(":", limit = 3)
                 val uuid = parts[1]
-                val linkDataStr = parts[2]
+                val linkDataStr = if (parts.size >= 3) parts[2] else "{}"
                 val obj = org.json.JSONObject(linkDataStr)
-                return SidebarItem.Link(uuid, obj.getString("url"), obj.getString("label"), id)
+                val url = obj.optString("url", "https://")
+                val label = obj.optString("label", "Link")
+                val iconPath = obj.optString("iconPath", "")
+                val savedMeta = ElementMetadataStore.saveLinkElement(context, uuid, url, label, "link:$uuid")
+                return SidebarItem.Link(
+                    uuid = uuid,
+                    url = url,
+                    label = label,
+                    iconPath = if (iconPath.isNotEmpty()) iconPath else savedMeta.iconPath,
+                    id = id
+                )
             } catch (e: Exception) { 
-                    com.example.core.LogKeeper.writeLog("SidebarAppsManager", "Error parsing folder id: $id - ${e.message}")
-                    e.printStackTrace() 
-                }
+                com.example.core.LogKeeper.writeLog("SidebarAppsManager", "Error parsing link id: $id - ${e.message}")
+                e.printStackTrace() 
+            }
         } else if (id.startsWith("spacer:")) {
             try {
                 val parts = id.split(":", limit = 3)
@@ -876,13 +899,7 @@ class SidebarAppsManager(
                 result.add(parsed)
                 continue
             }
-            if (id.startsWith("app:")) {
-                val pkg = id.substringAfter("app:")
-                val appInfo = allInstalledApps.find { it.packageName == pkg }
-                if (appInfo != null) {
-                    result.add(SidebarItem.App(appInfo.packageName, appInfo.label))
-                }
-            } else if (id.startsWith("intent:")) {
+            if (id.startsWith("intent:")) {
                 val parts = id.split(":", limit = 4)
                 if (parts.size >= 3) {
                     val encodedLabel = parts[1]

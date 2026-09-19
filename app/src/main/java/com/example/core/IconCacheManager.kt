@@ -73,7 +73,7 @@ object IconCacheManager {
         }
     }
 
-    private fun getCacheDir(context: Context): File {
+    fun getCacheDir(context: Context): File {
         val dir = File(context.filesDir, CACHE_DIR_NAME)
         if (!dir.exists()) {
             dir.mkdirs()
@@ -81,9 +81,37 @@ object IconCacheManager {
         return dir
     }
 
-    private fun getIconFile(context: Context, packageName: String): File {
+    fun getIconFile(context: Context, packageName: String): File {
         val safeName = packageName.replace(Regex("[^a-zA-Z0-9._-]"), "_")
         return File(getCacheDir(context), "$safeName.webp")
+    }
+
+    fun captureAndSavePackageIcon(context: Context, packageName: String): String? {
+        val file = getIconFile(context, packageName)
+        if (file.exists() && file.length() > 0) {
+            return file.absolutePath
+        }
+        val bmp = cachePackageIcon(context, packageName)
+        return if (bmp != null) file.absolutePath else null
+    }
+
+    fun captureAndSaveLinkIcon(context: Context, uuid: String, iconResId: Int = android.R.drawable.ic_menu_set_as): String? {
+        try {
+            val safeName = "link_${uuid.replace(Regex("[^a-zA-Z0-9._-]"), "_")}"
+            val file = File(getCacheDir(context), "$safeName.webp")
+            if (file.exists() && file.length() > 0) {
+                return file.absolutePath
+            }
+            val drawable = androidx.core.content.ContextCompat.getDrawable(context, iconResId) ?: return null
+            val downsampled = downsampleDrawable(context, drawable) ?: return null
+            FileOutputStream(file).use { out ->
+                downsampled.compress(Bitmap.CompressFormat.WEBP, 85, out)
+            }
+            memoryCache.put("link:$uuid", downsampled)
+            return file.absolutePath
+        } catch (e: Exception) {
+            return null
+        }
     }
 
     fun getCachedBitmap(context: Context, packageName: String): Bitmap? {

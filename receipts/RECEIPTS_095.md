@@ -98,5 +98,61 @@
 * Any deviation from what was requested, and why: None.
 * Any known issue or follow-up needed: None.
 
+* Timestamp: 2026-09-18T13:38:30-07:00
+* One-line summary: Decoupled AppNotificationListener from Room/AppDatabase in resident Main using lightweight durable file buffer.
+* Exact files touched:
+  - `app/src/main/java/com/example/data/NotificationHistoryBuffer.kt`
+  - `app/src/main/java/com/example/service/AppNotificationListener.kt`
+  - `app/src/main/java/com/example/NotificationHistoryActivity.kt`
+  - `app/src/test/java/com/example/data/NotificationHistoryBufferTest.kt`
+  - `receipts/RECEIPTS_095.md`
+* What was actually done:
+  - Removed `com.example.data.AppDatabase.getDatabase(...)` call and all Room database initialization from `AppNotificationListener.kt`.
+  - Created `NotificationHistoryBuffer.kt` in `com.example.data` providing lightweight, durable append-only file persistence (`notification_history_buffer.log`) in internal storage with OS `FileChannel` file locks. Utilizes an in-memory debounce map to filter rapid duplicate events within a 15s window without loading any SQLite/Room dependencies into the resident Main process.
+  - Connected `NotificationHistoryActivity.kt` to call `NotificationHistoryBuffer.ingestPending(context, dao)` on screen composition, seamlessly draining the durable buffer and inserting/updating entries into Room (`NotificationHistoryDao`) on-demand when the UI activity is opened.
+  - Updated "Clear All" action in `NotificationHistoryActivity` to clear both the Room table and any pending entries in `NotificationHistoryBuffer`.
+  - Created comprehensive unit test suite `NotificationHistoryBufferTest.kt` verifying buffer appending, debouncing, draining, and DAO ingestion.
+* How it was verified: local build only (`compile_applet` passed cleanly; `gradle :app:testDebugUnitTest` passed all 34 unit tests including `NotificationHistoryBufferTest`).
+* Any deviation from what was requested, and why: None.
+* Any known issue or follow-up needed: None. Existing Notification History behavior, filtering, and export are fully preserved without resident Main Room overhead.
+
+* Timestamp: 2026-09-18T14:39:40-07:00
+* One-line summary: Completed architectural audit of Home Grid and Sidebar grid app/link loading and icon caching without code changes.
+* Exact files touched:
+  - `receipts/RECEIPTS_095.md`
+* What was actually done:
+  - Audited `SidebarAppsManager.kt`, `HybridGridPageView.kt`, `AppsPageView.kt`, `SidebarView.kt`, `SidebarEditActivity.kt`, `AddElementActivity.kt`, `HybridGridEditActivity.kt`, and `IconCacheManager.kt`.
+  - Analyzed resident memory footprint: discovered `SidebarAppsManager` registers an active `BroadcastReceiver` for package changes and queries all installed activities via `LauncherApps.getActivityList()` on init/ensureLoaded, keeping `allInstalledApps` in memory in the resident Main process.
+  - Analyzed item storage model: identified that grid items are stored as raw ID strings (`app:packageName`, `link:uuid:{...}`) in SharedPreferences (`FloatingReaderPrefs`), without persistent labels or pre-compressed icons attached to the element payload.
+  - Analyzed icon lifecycle: discovered icons are loaded on-the-fly when pages open via `IconCacheManager` and `pm.getApplicationIcon()`, cached in multiple `LruCache` instances in Main memory.
+  - Prepared design roadmap for persistent element data model without modifying any application code.
+* How it was verified: local audit only; no application code files altered.
+* Any deviation from what was requested, and why: None (strictly audit only).
+* Any known issue or follow-up needed: Ready for user review before implementing persistent element data model.
+
+* Timestamp: 2026-09-19T13:36:30-07:00
+* One-line summary: Implemented persistent app/link element-data model, eradicated resident allInstalledApps & package BroadcastReceiver.
+* Exact files touched:
+  - `app/src/main/java/com/example/core/IconCacheManager.kt`
+  - `app/src/main/java/com/example/feature/sidebar/ElementMetadataStore.kt`
+  - `app/src/main/java/com/example/feature/sidebar/SidebarAppsManager.kt`
+  - `app/src/main/java/com/example/feature/settings/AppPickerActivity.kt`
+  - `app/src/main/java/com/example/feature/settings/AddElementActivity.kt`
+  - `app/src/main/java/com/example/feature/sidebar/AppsPageView.kt`
+  - `receipts/RECEIPTS_095.md`
+* What was actually done:
+  - Created `ElementMetadataStore.kt` (`data class ElementMetadata` with id, type, target, label, iconPath) persisting element data to SharedPreferences (`FloatingReaderPrefs`) with automatic canonical lookups and one-time legacy migration.
+  - Enhanced `IconCacheManager.kt` with `captureAndSavePackageIcon` and `captureAndSaveLinkIcon` methods, capturing icons once and compressing/downsampling them to compact WebP files on disk (`filesDir/icons_webp_cache`).
+  - Updated `SidebarItem.App` and `SidebarItem.Link` to include `iconPath` and `isLaunchable` fields with backwards-compatible constructors.
+  - Eradicated `packageReceiver` (`BroadcastReceiver` for package changes) and resident `allInstalledApps` caching from `SidebarAppsManager.kt`, replacing `allInstalledApps` with an empty read-only getter to drop resident Main memory footprint.
+  - Removed full-app scan (`loadAllAppsFromPackageManager`) from `ensureLoaded()` in `SidebarAppsManager.kt`, replacing runtime app resolution with direct `ElementMetadataStore` reads and targeted `PackageManager.getLaunchIntentForPackage()` checks for single elements.
+  - Updated `AppPickerActivity.kt` to query `LauncherApps` only during picker lifecycle in its own coroutine, capture the selected app's label and compact WebP icon via `ElementMetadataStore.saveAppElement` once upon selection, and terminate without creating a resident `SidebarAppsManager`.
+  - Updated `AddElementActivity.kt` to capture and persist link element metadata and WebP icon to disk via `ElementMetadataStore.saveLinkElement` upon link creation.
+  - Updated `AppsPageView.kt` to render `SidebarItem.Link` with cached disk icons from `manager.getIconBitmap`.
+* How it was verified: local build only (`compile_applet` passed cleanly; `gradle :app:testDebugUnitTest` passed all 34 unit tests).
+* Any deviation from what was requested, and why: None.
+* Any known issue or follow-up needed: None. Existing grid/page behavior, UI appearance, and custom icon overrides are fully preserved.
+
+
 
 
