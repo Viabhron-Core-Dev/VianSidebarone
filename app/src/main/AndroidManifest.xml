@@ -79,7 +79,7 @@
 
         <activity
             android:name=".SettingsActivity"
-            android:exported="false"
+            android:exported="true"
             android:process=":heavy"
             android:label="Settings" />
         <activity android:name=".SidebarEditActivity" android:exported="false" />

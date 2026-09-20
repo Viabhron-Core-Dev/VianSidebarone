@@ -10,6 +10,8 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.platform.LocalContext
 import com.example.MainActivity
+import com.example.SettingsActivity
+import com.example.core.HandleManager
 import com.example.core.HandleService
 import com.example.feature.settings.PermissionManagerScreen
 import java.util.concurrent.atomic.AtomicBoolean
@@ -31,7 +33,9 @@ class WelcomeActivity : ComponentActivity() {
             MaterialTheme(colorScheme = lightColorScheme()) {
                 WelcomeScreen(
                     onContinue = {
-                        val intent = Intent(this, MainActivity::class.java)
+                        val prefs = getSharedPreferences(HandleManager.PREFS_NAME, Context.MODE_PRIVATE)
+                        prefs.edit().putBoolean("setup_completed", true).apply()
+                        val intent = Intent(this, SettingsActivity::class.java)
                         startActivity(intent)
                         finish()
                     }

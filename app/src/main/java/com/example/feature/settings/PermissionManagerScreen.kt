@@ -21,6 +21,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -215,7 +216,10 @@ fun PermissionManagerScreen(onContinue: () -> Unit, isFirstLaunch: Boolean = tru
         if (isFirstLaunch) {
             Button(
                 onClick = onContinue,
-                modifier = Modifier.fillMaxWidth().height(56.dp)
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(56.dp)
+                    .testTag("continue_button")
             ) {
                 Text("Continue to Sidebar", style = MaterialTheme.typography.titleMedium)
             }
