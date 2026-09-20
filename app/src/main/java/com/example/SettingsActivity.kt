@@ -1,3 +1,32 @@
 package com.example
-import android.app.Activity
-class SettingsActivity : Activity()
+
+import android.os.Bundle
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.lightColorScheme
+import com.example.core.HandleService
+import com.example.feature.settings.handle.HandleSettingsScreen
+
+/**
+ * SettingsActivity: Dedicated Settings management activity running in the Heavy process (:heavy).
+ * Manages floating Handles, multi-gesture bindings, and independent Container identities.
+ */
+class SettingsActivity : ComponentActivity() {
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+
+        // Ensure Main lightweight resident runtime is started if overlay permission is granted
+        HandleService.startIfConfigured(this)
+
+        setContent {
+            MaterialTheme(colorScheme = lightColorScheme()) {
+                HandleSettingsScreen(
+                    onNavigateBack = { finish() }
+                )
+            }
+        }
+    }
+}
+

@@ -52,14 +52,31 @@ class WidgetPickerActivity : ComponentActivity() {
         
         appWidgetManager = AppWidgetManager.getInstance(this)
         val allProviders = mutableListOf<AppWidgetProviderInfo>()
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-            val userManager = getSystemService(android.content.Context.USER_SERVICE) as android.os.UserManager
-            for (profile in userManager.userProfiles) {
-                allProviders.addAll(appWidgetManager.getInstalledProvidersForProfile(profile))
+        try {
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                val userManager = getSystemService(android.content.Context.USER_SERVICE) as? android.os.UserManager
+                val profiles = userManager?.userProfiles
+                if (!profiles.isNullOrEmpty()) {
+                    for (profile in profiles) {
+                        try {
+                            allProviders.addAll(appWidgetManager.getInstalledProvidersForProfile(profile))
+                        } catch (e: Exception) {
+                            e.printStackTrace()
+                        }
+                    }
+                }
             }
-        } else {
-            allProviders.addAll(appWidgetManager.installedProviders)
+        } catch (e: Exception) {
+            e.printStackTrace()
         }
+        if (allProviders.isEmpty()) {
+            try {
+                allProviders.addAll(appWidgetManager.installedProviders ?: emptyList())
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+        val distinctProviders = allProviders.distinctBy { it.provider }
         
         val host = AppWidgetHelper.getHost(this)
         appWidgetId = host.allocateAppWidgetId()
@@ -67,7 +84,7 @@ class WidgetPickerActivity : ComponentActivity() {
         setContent {
             MaterialTheme(colorScheme = darkColorScheme()) {
                 WidgetPickerScreen(
-                    providers = allProviders,
+                    providers = distinctProviders,
                     actionType = intent.getStringExtra("ACTION_TYPE") ?: "",
                     onWidgetSelected = { provider ->
                         handleWidgetSelected(provider)
@@ -138,14 +155,18 @@ class WidgetPickerActivity : ComponentActivity() {
     
     private fun finishWithSuccess(widgetId: Int) {
         val actionType = intent.getStringExtra("ACTION_TYPE") ?: "ADD_ELEMENT"
-        
+        val info = appWidgetManager.getAppWidgetInfo(widgetId)
+        val density = resources.displayMetrics.density
+
         if (actionType == "ADD_ELEMENT") {
-            val info = appWidgetManager.getAppWidgetInfo(widgetId)
             val label = info?.loadLabel(packageManager) ?: "Widget"
+            val (spanX, spanY) = calculateWidgetSpan(info, 4, 0, density)
             
             val json = JSONObject()
             json.put("widgetId", widgetId)
             json.put("label", label)
+            json.put("cols", spanX)
+            json.put("rows", spanY)
             val id = "widget:${widgetId}:${json.toString()}"
             
             val data = Intent().apply {
@@ -156,9 +177,32 @@ class WidgetPickerActivity : ComponentActivity() {
         } else if (actionType == "ADD_TO_WIDGETS_GRID") {
             val pageId = intent.getStringExtra("PAGE_ID") ?: ""
             val prefs = getSharedPreferences("FloatingReaderPrefs", android.content.Context.MODE_PRIVATE)
+            val totalCols = prefs.getInt("widgets_grid_cols_$pageId", 4)
+            val (spanX, spanY) = calculateWidgetSpan(info, totalCols, 0, density)
+
             val currentStr = prefs.getString("widgets_grid_$pageId", "[]") ?: "[]"
             val current = org.json.JSONArray(currentStr)
-            current.put(widgetId)
+
+            var targetY = 0
+            for (i in 0 until current.length()) {
+                val obj = current.optJSONObject(i)
+                if (obj != null) {
+                    val y = obj.optInt("y", 0)
+                    val r = obj.optInt("rows", 2)
+                    targetY = maxOf(targetY, y + r)
+                } else {
+                    targetY += 2
+                }
+            }
+
+            val newObj = JSONObject().apply {
+                put("id", "widget:$widgetId")
+                put("cols", spanX)
+                put("rows", spanY)
+                put("x", 0)
+                put("y", targetY)
+            }
+            current.put(newObj)
             prefs.edit().putString("widgets_grid_$pageId", current.toString()).apply()
             
             val broadcastIntent = Intent("WIDGET_ADDED_TO_GRID")
@@ -170,17 +214,8 @@ class WidgetPickerActivity : ComponentActivity() {
             broadcastIntent.putExtra("WIDGET_ID", widgetId)
             broadcastIntent.setPackage(packageName); sendBroadcast(broadcastIntent)
         } else if (actionType == "RETURN_ID") {
-            val info = appWidgetManager.getAppWidgetInfo(widgetId)
             val label = info?.loadLabel(packageManager) ?: "Widget"
-            
-            val spanX = if (info != null) {
-                val cw = if (android.os.Build.VERSION.SDK_INT >= 31) info.targetCellWidth else 0
-                if (cw > 0) cw else Math.max(1, Math.round(info.minWidth / 70.0).toInt())
-            } else 2
-            val spanY = if (info != null) {
-                val ch = if (android.os.Build.VERSION.SDK_INT >= 31) info.targetCellHeight else 0
-                if (ch > 0) ch else Math.max(1, Math.round(info.minHeight / 70.0).toInt())
-            } else 2
+            val (spanX, spanY) = calculateWidgetSpan(info, 4, 0, density)
             
             val json = JSONObject()
             json.put("widgetId", widgetId)
@@ -195,6 +230,51 @@ class WidgetPickerActivity : ComponentActivity() {
         
         finish()
     }
+}
+
+fun calculateWidgetSpan(
+    info: AppWidgetProviderInfo?,
+    totalCols: Int,
+    cellWidthPx: Int,
+    density: Float
+): Pair<Int, Int> {
+    if (info == null) return Pair(minOf(2, totalCols), 2)
+    
+    val targetCols = if (android.os.Build.VERSION.SDK_INT >= 31 && info.targetCellWidth > 0) {
+        info.targetCellWidth
+    } else 0
+    
+    val targetRows = if (android.os.Build.VERSION.SDK_INT >= 31 && info.targetCellHeight > 0) {
+        info.targetCellHeight
+    } else 0
+    
+    val cellWidthDp = if (cellWidthPx > 0 && density > 0) (cellWidthPx / density).toInt() else 60
+    val effectiveCellWidthDp = maxOf(40, cellWidthDp)
+    val effectiveCellHeightDp = effectiveCellWidthDp
+    
+    val spanX = if (targetCols > 0) {
+        targetCols
+    } else {
+        val minW = if (android.os.Build.VERSION.SDK_INT >= 16 && info.minResizeWidth > 0) {
+            minOf(info.minWidth, info.minResizeWidth)
+        } else {
+            info.minWidth
+        }
+        Math.ceil(minW.toDouble() / effectiveCellWidthDp).toInt()
+    }.coerceIn(1, totalCols)
+    
+    val spanY = if (targetRows > 0) {
+        targetRows
+    } else {
+        val minH = if (android.os.Build.VERSION.SDK_INT >= 16 && info.minResizeHeight > 0) {
+            minOf(info.minHeight, info.minResizeHeight)
+        } else {
+            info.minHeight
+        }
+        Math.ceil(minH.toDouble() / effectiveCellHeightDp).toInt()
+    }.coerceAtLeast(1)
+    
+    return Pair(spanX, spanY)
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -295,8 +375,7 @@ fun WidgetPickerScreen(
                                 Spacer(modifier = Modifier.height(4.dp))
                             }
                             items(appGroup.widgets, key = { it.provider.flattenToString() + "_" + it.loadLabel(pm) }) { provider ->
-                                val spanX = if (android.os.Build.VERSION.SDK_INT >= 31) provider.targetCellWidth else Math.max(1, Math.round(provider.minWidth / 70.0).toInt())
-                                val spanY = if (android.os.Build.VERSION.SDK_INT >= 31) provider.targetCellHeight else Math.max(1, Math.round(provider.minHeight / 70.0).toInt())
+                                val (spanX, spanY) = calculateWidgetSpan(provider, 4, 0, context.resources.displayMetrics.density)
                                 val enabled = true
                                 
                                 Row(

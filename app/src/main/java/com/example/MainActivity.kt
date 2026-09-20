@@ -1,6 +1,8 @@
 package com.example
 
+import android.content.Intent
 import android.os.Bundle
+import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.material3.MaterialTheme
@@ -22,11 +24,25 @@ class MainActivity : ComponentActivity() {
         // Ensure Main lightweight resident runtime is started if overlay permission is granted
         HandleService.startIfConfigured(this)
 
+        if (Settings.canDrawOverlays(this)) {
+            val intent = Intent(this, SettingsActivity::class.java)
+            startActivity(intent)
+            finish()
+            return
+        }
+
         setContent {
             MaterialTheme(colorScheme = lightColorScheme()) {
-                WelcomeScreen()
+                WelcomeScreen(
+                    onContinue = {
+                        val intent = Intent(this@MainActivity, SettingsActivity::class.java)
+                        startActivity(intent)
+                        finish()
+                    }
+                )
             }
         }
     }
 }
+
 

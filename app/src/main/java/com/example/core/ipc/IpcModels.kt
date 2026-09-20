@@ -226,6 +226,7 @@ enum class IpcErrorCode(val code: Int) {
     MARSHAL_ERROR(3),
     REJECTED(4),
     DEAD_BINDER(5),
+    COMMAND_FAILED(6),
     UNKNOWN_ERROR(99);
 
     companion object {
@@ -260,8 +261,8 @@ data class IpcResult(
             return IpcResult(true, IpcErrorCode.OK, message, data)
         }
 
-        fun error(code: IpcErrorCode, message: String): IpcResult {
-            return IpcResult(false, code, message)
+        fun error(code: IpcErrorCode, message: String, data: Map<String, String> = emptyMap()): IpcResult {
+            return IpcResult(false, code, message, data)
         }
 
         fun fromJson(json: String): IpcResult {

@@ -1,6 +1,7 @@
 package com.example.core
 
 import android.content.Context
+import android.content.Intent
 import android.content.SharedPreferences
 import android.graphics.Color
 import com.example.util.HandleEdge
@@ -89,7 +90,31 @@ data class HandleConfig(
         HandleGestures.SWIPE_DOWN -> onSwipeDownAction
         else -> HandleManager.ACTION_NONE
     }
+
+    fun withGestureAction(gesture: String, action: String): HandleConfig = when (gesture) {
+        HandleGestures.TAP -> copy(onTapAction = action)
+        HandleGestures.DOUBLE_TAP -> copy(onDoubleTapAction = action)
+        HandleGestures.LONG_PRESS -> copy(onLongPressAction = action)
+        HandleGestures.SWIPE_LEFT -> copy(onSwipeLeftAction = action)
+        HandleGestures.SWIPE_RIGHT -> copy(onSwipeRightAction = action)
+        HandleGestures.SWIPE_UP -> copy(onSwipeUpAction = action)
+        HandleGestures.SWIPE_DOWN -> copy(onSwipeDownAction = action)
+        else -> this
+    }
 }
+
+/**
+ * HandleGestureInfo: Summary representation of a configured gesture and its container relationship.
+ */
+data class HandleGestureInfo(
+    val gesture: String,
+    val action: String,
+    val isEnabled: Boolean,
+    val isContainerTarget: Boolean,
+    val containerId: String,
+    val pageCount: Int,
+    val selectedPageId: String?
+)
 
 /**
  * HandleManager: Lightweight coordinator for floating trigger handle configurations.
@@ -104,6 +129,7 @@ class HandleManager(private val context: Context) {
     companion object {
         const val PREFS_NAME = "FloatingReaderPrefs"
         const val KEY_HANDLES_COUNT = "handles_count"
+        const val KEY_HANDLE_IDS = "handle_ids"
         const val KEY_DEFAULT_HANDLE_ENABLED = "handle_enabled_1"
 
         const val ACTION_OPEN_SIDEBAR = "open_sidebar"
@@ -117,6 +143,20 @@ class HandleManager(private val context: Context) {
          * Contract requirement: "${handleId}_${gesture}"
          */
         fun getContainerId(handleId: String, gesture: String): String = "${handleId}_${gesture}"
+
+        /**
+         * Resolves SharedPreferences key for the gesture action on a handle index.
+         */
+        fun getGesturePrefKey(index: Int, gesture: String): String = when (gesture) {
+            HandleGestures.TAP -> "handle_tap_$index"
+            HandleGestures.DOUBLE_TAP -> "handle_double_tap_$index"
+            HandleGestures.LONG_PRESS -> "handle_long_press_$index"
+            HandleGestures.SWIPE_LEFT -> "handle_swipe_left_$index"
+            HandleGestures.SWIPE_RIGHT -> "handle_swipe_right_$index"
+            HandleGestures.SWIPE_UP -> "handle_swipe_up_$index"
+            HandleGestures.SWIPE_DOWN -> "handle_swipe_down_$index"
+            else -> "handle_${gesture}_$index"
+        }
 
         /**
          * SharedPreferences key for the page stack of a specific container.
@@ -162,106 +202,75 @@ class HandleManager(private val context: Context) {
         }
     }
 
-    fun getActiveHandles(): List<HandleConfig> {
-        val handles = mutableListOf<HandleConfig>()
+    /**
+     * Retrieves the list of tracked handle IDs, falling back to legacy 1..handles_count.
+     */
+    fun getHandleIds(): List<String> {
+        val raw = prefs.getString(KEY_HANDLE_IDS, null)
+        if (!raw.isNullOrBlank()) {
+            val list = raw.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+            if (list.isNotEmpty()) return list
+        }
         val count = prefs.getInt(KEY_HANDLES_COUNT, 1)
+        val ids = (1..maxOf(1, count)).map { "handle_$it" }
+        prefs.edit().putString(KEY_HANDLE_IDS, ids.joinToString(",")).apply()
+        return ids
+    }
 
-        // Self-heal stale default from earlier run if still uncustomized template values
-        if (prefs.getInt("handle_color_1", 0) == Color.parseColor("#99444444") &&
-            prefs.getString("handle_shape_1", null) == "ROUNDED_RECT" &&
-            prefs.getString("handle_edge_1", null) == "LEFT") {
-            prefs.edit()
-                .putString("handle_color_1", "#242962ff")
-                .putString("handle_shape_1", "SLANTED_BLOCK")
-                .putString("handle_edge_1", "RIGHT")
-                .putInt("handle_width_1", 12)
-                .putInt("handle_height_1", 120)
-                .putString("handle_tap_1", ACTION_NONE)
-                .putString("handle_swipe_left_1", ACTION_OPEN_SIDEBAR)
-                .apply()
-        }
+    private fun saveHandleIds(ids: List<String>) {
+        prefs.edit()
+            .putString(KEY_HANDLE_IDS, ids.joinToString(","))
+            .putInt(KEY_HANDLES_COUNT, ids.size)
+            .apply()
+    }
 
-        for (i in 1..count) {
-            val enabled = prefs.getBoolean("handle_enabled_$i", i == 1)
-            if (!enabled) continue
-
-            val id = "handle_$i"
-            val name = prefs.getString("handle_name_$i", "Handle $i") ?: "Handle $i"
-            val edgeStr = prefs.getString("handle_edge_$i", "RIGHT") ?: "RIGHT"
-            val edge = HandleEdge.fromString(edgeStr)
-            val posPercent = prefs.getFloat("handle_pos_$i", 0.5f)
-            val widthDp = try { prefs.getInt("handle_width_$i", 12) } catch (_: Exception) { 12 }
-            val heightDp = try { prefs.getInt("handle_height_$i", 120) } catch (_: Exception) { 120 }
-            val color = try {
-                val raw = prefs.all["handle_color_$i"]
-                when (raw) {
-                    is Int -> raw
-                    is String -> Color.parseColor(raw)
-                    else -> Color.parseColor("#242962ff")
-                }
-            } catch (e: Exception) {
-                Color.parseColor("#242962ff")
+    /**
+     * Returns all configured handles (both enabled and disabled) for Settings management.
+     */
+    fun getAllHandles(): List<HandleConfig> {
+        val ids = getHandleIds()
+        val handles = mutableListOf<HandleConfig>()
+        for (id in ids) {
+            val handle = getHandle(id)
+            if (handle != null) {
+                handles.add(handle)
             }
-            val shapeStr = prefs.getString("handle_shape_$i", "SLANTED_BLOCK") ?: "SLANTED_BLOCK"
-            val shape = HandleShape.fromString(shapeStr)
-            val alpha = try { prefs.getInt("handle_alpha_$i", 14) } catch (_: Exception) { 14 }
-
-            val tap = prefs.getString("handle_tap_$i", ACTION_NONE) ?: ACTION_NONE
-            val doubleTap = prefs.getString("handle_double_tap_$i", ACTION_NONE) ?: ACTION_NONE
-            val longPress = prefs.getString("handle_long_press_$i", ACTION_MOVE_HANDLE) ?: ACTION_MOVE_HANDLE
-            val swipeLeft = prefs.getString("handle_swipe_left_$i", if (edge == HandleEdge.RIGHT) ACTION_OPEN_SIDEBAR else ACTION_NONE) ?: if (edge == HandleEdge.RIGHT) ACTION_OPEN_SIDEBAR else ACTION_NONE
-            val swipeRight = prefs.getString("handle_swipe_right_$i", if (edge == HandleEdge.LEFT) ACTION_OPEN_SIDEBAR else ACTION_NONE) ?: if (edge == HandleEdge.LEFT) ACTION_OPEN_SIDEBAR else ACTION_NONE
-            val swipeUp = prefs.getString("handle_swipe_up_$i", ACTION_NONE) ?: ACTION_NONE
-            val swipeDown = prefs.getString("handle_swipe_down_$i", ACTION_NONE) ?: ACTION_NONE
-
-            handles.add(
-                HandleConfig(
-                    id = id,
-                    name = name,
-                    enabled = enabled,
-                    edge = edge,
-                    positionPercent = posPercent,
-                    widthDp = widthDp,
-                    heightDp = heightDp,
-                    color = color,
-                    shape = shape,
-                    alphaPercent = alpha,
-                    onTapAction = tap,
-                    onDoubleTapAction = doubleTap,
-                    onLongPressAction = longPress,
-                    onSwipeLeftAction = swipeLeft,
-                    onSwipeRightAction = swipeRight,
-                    onSwipeUpAction = swipeUp,
-                    onSwipeDownAction = swipeDown
-                )
-            )
         }
-
         if (handles.isEmpty()) {
-            // Guarantee at least 1 default active handle
-            handles.add(
-                HandleConfig(
-                    id = "handle_1",
-                    name = "Primary Handle",
-                    enabled = true,
-                    edge = HandleEdge.RIGHT,
-                    positionPercent = 0.5f,
-                    widthDp = 12,
-                    heightDp = 120,
-                    color = Color.parseColor("#242962ff"),
-                    shape = HandleShape.SLANTED_BLOCK,
-                    alphaPercent = 14,
-                    onTapAction = ACTION_NONE,
-                    onDoubleTapAction = ACTION_NONE,
-                    onLongPressAction = ACTION_MOVE_HANDLE,
-                    onSwipeLeftAction = ACTION_OPEN_SIDEBAR,
-                    onSwipeRightAction = ACTION_NONE,
-                    onSwipeUpAction = ACTION_NONE,
-                    onSwipeDownAction = ACTION_NONE
-                )
-            )
+            handles.add(createDefaultHandleConfig("handle_1"))
         }
         return handles
+    }
+
+    /**
+     * Returns all currently enabled handles for Main runtime attachment.
+     */
+    fun getActiveHandles(): List<HandleConfig> {
+        val all = getAllHandles()
+        val active = all.filter { it.enabled }
+        return active
+    }
+
+    private fun createDefaultHandleConfig(id: String): HandleConfig {
+        return HandleConfig(
+            id = id,
+            name = "Primary Handle",
+            enabled = true,
+            edge = HandleEdge.RIGHT,
+            positionPercent = 0.5f,
+            widthDp = 12,
+            heightDp = 120,
+            color = Color.parseColor("#242962ff"),
+            shape = HandleShape.SLANTED_BLOCK,
+            alphaPercent = 14,
+            onTapAction = ACTION_NONE,
+            onDoubleTapAction = ACTION_NONE,
+            onLongPressAction = ACTION_MOVE_HANDLE,
+            onSwipeLeftAction = ACTION_OPEN_SIDEBAR,
+            onSwipeRightAction = ACTION_NONE,
+            onSwipeUpAction = ACTION_NONE,
+            onSwipeDownAction = ACTION_NONE
+        )
     }
 
     fun updateHandlePosition(handleId: String, newPercent: Float) {
@@ -274,30 +283,8 @@ class HandleManager(private val context: Context) {
      */
     fun getHandle(handleId: String): HandleConfig? {
         val index = handleId.substringAfter("handle_").toIntOrNull() ?: return null
-        val count = prefs.getInt(KEY_HANDLES_COUNT, 1)
-        if (index < 1 || index > count) {
-            // Fallback for default primary handle
-            if (handleId == "handle_1") {
-                return HandleConfig(
-                    id = "handle_1",
-                    name = "Primary Handle",
-                    enabled = true,
-                    edge = HandleEdge.RIGHT,
-                    positionPercent = 0.5f,
-                    widthDp = 12,
-                    heightDp = 120,
-                    color = Color.parseColor("#242962ff"),
-                    shape = HandleShape.SLANTED_BLOCK,
-                    alphaPercent = 14,
-                    onTapAction = ACTION_NONE,
-                    onDoubleTapAction = ACTION_NONE,
-                    onLongPressAction = ACTION_MOVE_HANDLE,
-                    onSwipeLeftAction = ACTION_OPEN_SIDEBAR,
-                    onSwipeRightAction = ACTION_NONE,
-                    onSwipeUpAction = ACTION_NONE,
-                    onSwipeDownAction = ACTION_NONE
-                )
-            }
+        val exists = prefs.contains("handle_name_$index") || prefs.contains("handle_enabled_$index") || handleId == "handle_1"
+        if (!exists) {
             return null
         }
 
@@ -352,6 +339,240 @@ class HandleManager(private val context: Context) {
     }
 
     /**
+     * Creates and persists a new Handle with distinct ID and safe defaults.
+     */
+    fun createHandle(name: String? = null, edge: HandleEdge = HandleEdge.RIGHT): HandleConfig {
+        val currentIds = getHandleIds().toMutableList()
+        var nextIndex = 1
+        while (currentIds.contains("handle_$nextIndex")) {
+            nextIndex++
+        }
+        val newId = "handle_$nextIndex"
+        val handleName = name ?: "Handle $nextIndex"
+        val config = HandleConfig(
+            id = newId,
+            name = handleName,
+            enabled = true,
+            edge = edge,
+            positionPercent = 0.5f,
+            widthDp = 12,
+            heightDp = 120,
+            color = Color.parseColor("#242962ff"),
+            shape = HandleShape.SLANTED_BLOCK,
+            alphaPercent = 14,
+            onTapAction = ACTION_NONE,
+            onDoubleTapAction = ACTION_NONE,
+            onLongPressAction = ACTION_MOVE_HANDLE,
+            onSwipeLeftAction = if (edge == HandleEdge.RIGHT) ACTION_OPEN_SIDEBAR else ACTION_NONE,
+            onSwipeRightAction = if (edge == HandleEdge.LEFT) ACTION_OPEN_SIDEBAR else ACTION_NONE,
+            onSwipeUpAction = ACTION_NONE,
+            onSwipeDownAction = ACTION_NONE
+        )
+        currentIds.add(newId)
+        saveHandleIds(currentIds)
+        saveHandle(config)
+        return config
+    }
+
+    /**
+     * Persists all fields of a HandleConfig to SharedPreferences.
+     */
+    fun saveHandle(config: HandleConfig) {
+        val index = config.id.substringAfter("handle_").toIntOrNull() ?: return
+        val currentIds = getHandleIds().toMutableList()
+        if (!currentIds.contains(config.id)) {
+            currentIds.add(config.id)
+            saveHandleIds(currentIds)
+        }
+
+        prefs.edit()
+            .putString("handle_name_$index", config.name)
+            .putBoolean("handle_enabled_$index", config.enabled)
+            .putString("handle_edge_$index", config.edge.name)
+            .putFloat("handle_pos_$index", config.positionPercent)
+            .putInt("handle_width_$index", config.widthDp)
+            .putInt("handle_height_$index", config.heightDp)
+            .putInt("handle_color_$index", config.color)
+            .putString("handle_shape_$index", config.shape.name)
+            .putInt("handle_alpha_$index", config.alphaPercent)
+            .putString("handle_tap_$index", config.onTapAction)
+            .putString("handle_double_tap_$index", config.onDoubleTapAction)
+            .putString("handle_long_press_$index", config.onLongPressAction)
+            .putString("handle_swipe_left_$index", config.onSwipeLeftAction)
+            .putString("handle_swipe_right_$index", config.onSwipeRightAction)
+            .putString("handle_swipe_up_$index", config.onSwipeUpAction)
+            .putString("handle_swipe_down_$index", config.onSwipeDownAction)
+            .apply()
+
+        // Ensure container pages key is seeded for any configured open_sidebar gesture
+        for (gesture in HandleGestures.ALL) {
+            if (config.getActionForGesture(gesture) == ACTION_OPEN_SIDEBAR) {
+                val containerId = getContainerId(config.id, gesture)
+                val pagesKey = getContainerPagesKey(containerId)
+                if (!prefs.contains(pagesKey)) {
+                    prefs.edit().putString(pagesKey, DEFAULT_PAGE_HYBRID).apply()
+                }
+            }
+        }
+
+        notifyMainReload(context)
+    }
+
+    /**
+     * Toggles enabled state for a handle.
+     */
+    fun setHandleEnabled(handleId: String, enabled: Boolean) {
+        val index = handleId.substringAfter("handle_").toIntOrNull() ?: return
+        prefs.edit().putBoolean("handle_enabled_$index", enabled).apply()
+        notifyMainReload(context)
+    }
+
+    /**
+     * Safely deletes a handle and cleans up only its associated container data.
+     * Guarantees other handles and containers remain unaffected.
+     */
+    fun deleteHandle(handleId: String): Boolean {
+        val currentIds = getHandleIds().toMutableList()
+        if (!currentIds.contains(handleId)) return false
+
+        val index = handleId.substringAfter("handle_").toIntOrNull()
+
+        // 1. Clean up container data (pages, selected page, elements) for all gestures on this handle
+        for (gesture in HandleGestures.ALL) {
+            val containerId = getContainerId(handleId, gesture)
+            cleanContainerData(containerId)
+        }
+
+        // 2. Remove handle-specific preference keys
+        val editor = prefs.edit()
+        if (index != null) {
+            editor.remove("handle_name_$index")
+            editor.remove("handle_enabled_$index")
+            editor.remove("handle_edge_$index")
+            editor.remove("handle_pos_$index")
+            editor.remove("handle_width_$index")
+            editor.remove("handle_height_$index")
+            editor.remove("handle_color_$index")
+            editor.remove("handle_shape_$index")
+            editor.remove("handle_alpha_$index")
+            for (gesture in HandleGestures.ALL) {
+                editor.remove(getGesturePrefKey(index, gesture))
+            }
+        }
+
+        // 3. Update tracked IDs
+        currentIds.remove(handleId)
+        if (currentIds.isEmpty()) {
+            val fallback = "handle_1"
+            currentIds.add(fallback)
+            editor.putBoolean("handle_enabled_1", true)
+            editor.putString("handle_name_1", "Primary Handle")
+        }
+
+        editor.putString(KEY_HANDLE_IDS, currentIds.joinToString(","))
+        editor.putInt(KEY_HANDLES_COUNT, currentIds.size)
+        editor.apply()
+
+        notifyMainReload(context)
+        return true
+    }
+
+    /**
+     * Purges only the container-specific keys for a given container identity.
+     */
+    fun cleanContainerData(containerId: String) {
+        val editor = prefs.edit()
+        editor.remove(getContainerPagesKey(containerId))
+        editor.remove(getContainerSelectedPageKey(containerId))
+
+        val prefix = "handle_${containerId}_"
+        val allKeys = prefs.all.keys
+        for (key in allKeys) {
+            if (key.startsWith(prefix)) {
+                editor.remove(key)
+            }
+        }
+        editor.apply()
+    }
+
+    /**
+     * Configures the action for a specific gesture on a handle.
+     */
+    fun configureGesture(handleId: String, gesture: String, action: String) {
+        val index = handleId.substringAfter("handle_").toIntOrNull() ?: return
+        val key = getGesturePrefKey(index, gesture)
+        prefs.edit().putString(key, action).apply()
+
+        if (action == ACTION_OPEN_SIDEBAR) {
+            val containerId = getContainerId(handleId, gesture)
+            val pagesKey = getContainerPagesKey(containerId)
+            if (!prefs.contains(pagesKey)) {
+                prefs.edit().putString(pagesKey, DEFAULT_PAGE_HYBRID).apply()
+            }
+        }
+        notifyMainReload(context)
+    }
+
+    /**
+     * Safely resets/removes a gesture action and optionally cleans its container data.
+     */
+    fun removeGesture(handleId: String, gesture: String, cleanContainerData: Boolean = false) {
+        val index = handleId.substringAfter("handle_").toIntOrNull() ?: return
+        prefs.edit().putString(getGesturePrefKey(index, gesture), ACTION_NONE).apply()
+        if (cleanContainerData) {
+            val containerId = getContainerId(handleId, gesture)
+            cleanContainerData(containerId)
+        }
+        notifyMainReload(context)
+    }
+
+    /**
+     * Returns structured gesture information for all gestures of a handle.
+     */
+    fun getGesturesForHandle(handleId: String): List<HandleGestureInfo> {
+        val handle = getHandle(handleId) ?: return emptyList()
+        val list = mutableListOf<HandleGestureInfo>()
+        for (gesture in HandleGestures.ALL) {
+            val action = handle.getActionForGesture(gesture)
+            val isEnabled = action != ACTION_NONE
+            val isContainerTarget = action == ACTION_OPEN_SIDEBAR
+            val containerId = getContainerId(handleId, gesture)
+            val pages = if (isContainerTarget) getPagesForContainer(containerId) else emptyList()
+            val selectedPage = if (isContainerTarget) getSelectedPageForContainer(containerId) else null
+            list.add(
+                HandleGestureInfo(
+                    gesture = gesture,
+                    action = action,
+                    isEnabled = isEnabled,
+                    isContainerTarget = isContainerTarget,
+                    containerId = containerId,
+                    pageCount = pages.size,
+                    selectedPageId = selectedPage
+                )
+            )
+        }
+        return list
+    }
+
+    /**
+     * Sends reload request to Main process to synchronize runtime triggers.
+     */
+    fun notifyMainReload(context: Context) {
+        try {
+            val intent = Intent(context, HandleService::class.java).apply {
+                action = HandleService.ACTION_RELOAD_HANDLES
+            }
+            context.startService(intent)
+        } catch (ignored: Exception) {}
+        try {
+            val bIntent = Intent(HandleService.ACTION_RELOAD_HANDLES).apply {
+                setPackage(context.packageName)
+            }
+            context.sendBroadcast(bIntent)
+        } catch (ignored: Exception) {}
+    }
+
+    /**
      * Resolves the independent SidebarContainer belonging to a specific Handle + Gesture.
      * Checks if the handle exists and whether the gesture action is configured to target a container
      * (i.e. ACTION_OPEN_SIDEBAR).
@@ -375,11 +596,13 @@ class HandleManager(private val context: Context) {
      * Retrieves an independent SidebarContainer by its containerId: "${handleId}_${gesture}".
      */
     fun getContainer(containerId: String): SidebarContainer? {
-        val lastUnderscore = containerId.lastIndexOf('_')
-        if (lastUnderscore <= 0) return null
-        val handleId = containerId.substring(0, lastUnderscore)
-        val gesture = containerId.substring(lastUnderscore + 1)
-        return resolveContainer(handleId, gesture)
+        for (gesture in HandleGestures.ALL) {
+            if (containerId.endsWith("_$gesture")) {
+                val handleId = containerId.removeSuffix("_$gesture")
+                return resolveContainer(handleId, gesture)
+            }
+        }
+        return null
     }
 
     /**
@@ -510,15 +733,10 @@ class HandleManager(private val context: Context) {
      * immediately so subsequent gesture containers never inherit or bleed into the same stack.
      */
     private fun checkAndMigrateLegacyPages(containerId: String): List<String>? {
-        val lastUnderscore = containerId.lastIndexOf('_')
-        if (lastUnderscore <= 0) return null
-        val handleId = containerId.substring(0, lastUnderscore)
-        val gesture = containerId.substring(lastUnderscore + 1)
-
-        // Only migrate for the default primary gesture (swipe_left)
-        if (gesture != HandleGestures.SWIPE_LEFT) {
+        if (!containerId.endsWith("_${HandleGestures.SWIPE_LEFT}")) {
             return null
         }
+        val handleId = containerId.removeSuffix("_${HandleGestures.SWIPE_LEFT}")
 
         val cleanHandleId = handleId.removePrefix("handle_")
         val possibleLegacyKeys = listOf(

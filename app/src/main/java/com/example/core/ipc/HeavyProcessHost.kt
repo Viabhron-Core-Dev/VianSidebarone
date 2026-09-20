@@ -43,6 +43,9 @@ class HeavyProcessHost internal constructor(private val context: Context? = null
     private var welcomeHostExtension: com.example.feature.welcome.HeavyWelcomeHostExtension =
         com.example.feature.welcome.DefaultHeavyWelcomeHostExtension(context)
 
+    @Volatile
+    private var moduleManager: com.example.feature.heavy.module.HeavyModuleManager? = null
+
     private fun safeLog(tag: String, msg: String) {
         context?.let { LogKeeper.log(it, tag, msg) }
     }
@@ -65,6 +68,18 @@ class HeavyProcessHost internal constructor(private val context: Context? = null
             safeLog("HeavyProcessHost", "Routing SHOW_WELCOME to WelcomeHostExtension")
             welcomeHostExtension.onShowWelcome(cmd)
         }
+    }
+
+    fun getModuleManager(): com.example.feature.heavy.module.HeavyModuleManager {
+        return moduleManager ?: synchronized(this) {
+            moduleManager ?: com.example.feature.heavy.module.HeavyModuleManager.getInstance(context).also {
+                moduleManager = it
+            }
+        }
+    }
+
+    fun setModuleManager(manager: com.example.feature.heavy.module.HeavyModuleManager) {
+        this.moduleManager = manager
     }
 
     fun setCallHostExtension(extension: com.example.feature.call.HeavyCallHostExtension) {
@@ -136,10 +151,23 @@ class HeavyProcessHost internal constructor(private val context: Context? = null
 
     // --- IHeavyHostHandler Implementation ---
 
+    private fun isModuleCommand(cmd: HeavyCommand): Boolean {
+        val action = cmd.payload["action"]
+        return action in listOf("mount", "use", "unmount", "unmountAll") ||
+                cmd.payload.containsKey("capabilityId") ||
+                cmd.payload.containsKey("moduleId")
+    }
+
     override fun onSendCommand(commandJson: String): String {
         return try {
             val command = HeavyCommand.fromJson(commandJson)
             safeLog("HeavyProcessHost", "Received command ${command.type} (id=${command.commandId})")
+
+            if (isModuleCommand(command)) {
+                safeLog("HeavyProcessHost", "Routing module command '${command.commandId}' to HeavyModuleManager")
+                val moduleRes = getModuleManager().handleIpcCommand(command)
+                return moduleRes.toJson()
+            }
 
             val handlers = commandHandlers[command.type]
             if (handlers.isNullOrEmpty()) {

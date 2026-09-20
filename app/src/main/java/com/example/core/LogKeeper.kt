@@ -46,6 +46,12 @@ object LogKeeper {
         val defaultHandler = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
             logCrash(context, thread.name, throwable)
+            logLifecycle(context, "Process", "UNCAUGHT_CRASH", "Uncaught exception in thread '${thread.name}': ${throwable.javaClass.name}")
+            try {
+                MainProcessRecovery.handleProcessCrash(context, thread.name, throwable)
+            } catch (e: Exception) {
+                // Ensure failure in recovery scheduling never blocks fatal crash reporting
+            }
             defaultHandler?.uncaughtException(thread, throwable)
         }
         log(context, "LogKeeper", "Initialized logger in process: $cachedProcessName")

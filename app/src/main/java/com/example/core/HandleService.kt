@@ -56,18 +56,27 @@ class HandleService : Service(), SharedPreferences.OnSharedPreferenceChangeListe
             when (intent.action) {
                 Intent.ACTION_SCREEN_ON -> {
                     isScreenOn = true
+                    LogKeeper.logLifecycle(context, "HandleService", "SCREEN_ON", "Handles attached, NetSpeed resumed")
                     netSpeedManager?.setScreenState(true)
                     attachHandles()
                 }
                 Intent.ACTION_SCREEN_OFF -> {
                     isScreenOn = false
+                    LogKeeper.logLifecycle(context, "HandleService", "SCREEN_OFF", "Handles detached, Sidebar closed, NetSpeed suspended, CallSensor active")
                     netSpeedManager?.setScreenState(false)
                     SidebarManager.getInstance(this@HandleService).closeContainer()
                     detachHandles()
                 }
                 Intent.ACTION_USER_PRESENT -> {
                     isScreenOn = true
+                    LogKeeper.logLifecycle(context, "HandleService", "USER_PRESENT", "Keyguard unlocked - ensuring handles attached")
                     if (activeHandleViews.isEmpty()) {
+                        attachHandles()
+                    }
+                }
+                ACTION_RELOAD_HANDLES -> {
+                    LogKeeper.logLifecycle(context, "HandleService", "RELOAD_HANDLES", "Reloading handles on configuration change")
+                    if (isScreenOn) {
                         attachHandles()
                     }
                 }
@@ -111,7 +120,7 @@ class HandleService : Service(), SharedPreferences.OnSharedPreferenceChangeListe
     override fun onCreate() {
         super.onCreate()
         serviceStartTime = System.currentTimeMillis()
-        LogKeeper.log(this, "StartupDiagnostics", "HandleService onCreate start (t=0ms)")
+        LogKeeper.logLifecycle(this, "HandleService", "CREATED")
 
         notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         createNotificationChannel()
@@ -122,13 +131,11 @@ class HandleService : Service(), SharedPreferences.OnSharedPreferenceChangeListe
         }
 
         // 1. Build initial foreground notification with initial display state
-        val tBuild = System.currentTimeMillis() - serviceStartTime
-        LogKeeper.log(this, "StartupDiagnostics", "buildNotification start (t=${tBuild}ms)")
         val initialTitle = "Data: ${getTodayDataFormatted()} • ${formatElapsedTime()}"
         val initialIconResId = SpeedIconProvider.resolve("0", "kB/s").resId
         val initialNotification = buildNotification(initialIconResId, initialTitle, "Down: 0 kB/s   Up: 0 kB/s")
 
-        // 2. Start Foreground IMMEDIATELY
+        // 2. Start Foreground IMMEDIATELY to satisfy system startForegroundService contract
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             startForeground(
                 NOTIFICATION_ID,
@@ -138,22 +145,27 @@ class HandleService : Service(), SharedPreferences.OnSharedPreferenceChangeListe
         } else {
             startForeground(NOTIFICATION_ID, initialNotification)
         }
-        val tFg = System.currentTimeMillis() - serviceStartTime
-        LogKeeper.log(this, "StartupDiagnostics", "startForeground completed (t=${tFg}ms)")
 
-        // 3. Initialize Net Speed Monitor immediately after entering foreground
-        val tNetSetup = System.currentTimeMillis() - serviceStartTime
-        LogKeeper.log(this, "StartupDiagnostics", "setupNetSpeedManager start (t=${tNetSetup}ms)")
+        // 3. Validate runtime configuration and overlay permissions
+        val autoStart = prefs.getBoolean("auto_start_on_boot", true)
+        val canDraw = Settings.canDrawOverlays(this)
+        if (!autoStart || !canDraw) {
+            LogKeeper.log(this, "HandleService", "Stopping service in onCreate: auto_start_on_boot=$autoStart, canDrawOverlays=$canDraw")
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            stopSelf()
+            return
+        }
+
+        // 4. Initialize Net Speed Monitor immediately after entering foreground
         isSpeedMonitorEnabled = prefs.getBoolean(KEY_NET_SPEED_ENABLED, true)
         setupNetSpeedManager()
-        val tNetStarted = System.currentTimeMillis() - serviceStartTime
-        LogKeeper.log(this, "StartupDiagnostics", "NetSpeedManager.start completed (t=${tNetStarted}ms)")
 
-        // 4. Secondary component registrations
+        // 5. Secondary component registrations
         val filter = IntentFilter().apply {
             addAction(Intent.ACTION_SCREEN_ON)
             addAction(Intent.ACTION_SCREEN_OFF)
             addAction(Intent.ACTION_USER_PRESENT)
+            addAction(ACTION_RELOAD_HANDLES)
         }
         registerReceiver(screenStateReceiver, filter)
         prefs.registerOnSharedPreferenceChangeListener(this)
@@ -166,25 +178,32 @@ class HandleService : Service(), SharedPreferences.OnSharedPreferenceChangeListe
         SidebarManager.getInstance(this).registerReceiver(this)
         com.example.feature.element.ElementActionRegistry.getInstance(this).registerReceiver(this)
 
-        // 5. Non-essential diagnostic logging moved after service and speed monitor are active
-        val metrics = resources.displayMetrics
-        val calc24dp = (24f * metrics.density).toInt()
-        LogKeeper.log(
-            this,
-            "IconDiagnostics",
-            "Display Metrics: density=${metrics.density}, densityDpi=${metrics.densityDpi}, " +
-            "widthPixels=${metrics.widthPixels}, heightPixels=${metrics.heightPixels}, " +
-            "scaledDensity=${metrics.scaledDensity}, 24dp_target=${calc24dp}px"
-        )
+        // 6. Notify MainProcessRecovery of successful startup to monitor stable runtime
+        MainProcessRecovery.onServiceStarted(this)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action == ACTION_RELOAD_HANDLES) {
+        if (intent == null) {
+            LogKeeper.logLifecycle(this, "HandleService", "SERVICE_RECREATED_STICKY", "Recreated by Android framework after process termination (START_STICKY)")
+            if (isScreenOn && activeHandleViews.isEmpty()) {
+                attachHandles()
+            }
+        } else if (intent.action == ACTION_RELOAD_HANDLES) {
             if (isScreenOn) {
+                attachHandles()
+            }
+        } else {
+            if (isScreenOn && activeHandleViews.isEmpty()) {
                 attachHandles()
             }
         }
         return START_STICKY
+    }
+
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        super.onTaskRemoved(rootIntent)
+        LogKeeper.logLifecycle(this, "HandleService", "TASK_REMOVED", "App task removed from recent apps - ensuring service remains active")
+        startIfConfigured(this)
     }
 
     private fun setupNetSpeedManager() {
@@ -345,19 +364,32 @@ class HandleService : Service(), SharedPreferences.OnSharedPreferenceChangeListe
         // Remove existing attached views
         detachHandles()
 
+        if (!Settings.canDrawOverlays(this)) {
+            LogKeeper.log(this, "HandleService", "attachHandles skipped: SYSTEM_ALERT_WINDOW permission not granted")
+            return
+        }
+
         val configs = handleManager.getActiveHandles()
         for (config in configs) {
             val handleView = TriggerHandleView(this, config) { actionKey, gesture, handleConfig ->
                 handleGestureAction(actionKey, gesture, handleConfig)
             }
-            handleView.attachToWindow()
-            activeHandleViews.add(handleView)
+            try {
+                handleView.attachToWindow()
+                activeHandleViews.add(handleView)
+            } catch (e: Exception) {
+                LogKeeper.logError(this, "HandleService", "Failed to attach handle view ${config.id}", e)
+            }
         }
     }
 
     private fun detachHandles() {
         for (view in activeHandleViews) {
-            view.detachFromWindow()
+            try {
+                view.detachFromWindow()
+            } catch (e: Exception) {
+                // Ignore if already detached
+            }
         }
         activeHandleViews.clear()
     }
@@ -413,6 +445,7 @@ class HandleService : Service(), SharedPreferences.OnSharedPreferenceChangeListe
 
     override fun onDestroy() {
         super.onDestroy()
+        LogKeeper.logLifecycle(this, "HandleService", "DESTROYED")
         prefs.unregisterOnSharedPreferenceChangeListener(this)
         try {
             unregisterReceiver(screenStateReceiver)
@@ -428,6 +461,7 @@ class HandleService : Service(), SharedPreferences.OnSharedPreferenceChangeListe
         SidebarManager.getInstance(this).unregisterReceiver(this)
         com.example.feature.element.ElementActionRegistry.getInstance(this).unregisterReceiver(this)
         detachHandles()
+        MainProcessRecovery.onServiceDestroyed()
     }
 
     override fun onBind(intent: Intent?): IBinder? = null

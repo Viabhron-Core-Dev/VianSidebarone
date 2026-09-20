@@ -27,6 +27,22 @@
     <uses-permission
         android:name="android.permission.PACKAGE_USAGE_STATS"
         tools:ignore="ProtectedPermissions" />
+    <uses-permission
+        android:name="android.permission.QUERY_ALL_PACKAGES"
+        tools:ignore="QueryAllPackagesPermission" />
+
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+        </intent>
+        <intent>
+            <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+        </intent>
+    </queries>
 
     <application
         android:name=".App"
@@ -61,7 +77,11 @@
             android:process=":heavy"
             android:label="Log Keeper" />
 
-        <activity android:name=".SettingsActivity" android:exported="false" />
+        <activity
+            android:name=".SettingsActivity"
+            android:exported="false"
+            android:process=":heavy"
+            android:label="Settings" />
         <activity android:name=".SidebarEditActivity" android:exported="false" />
         <activity android:name=".HybridGridEditActivity" android:exported="false" />
         <activity android:name=".WidgetsGridEditActivity" android:exported="false" />
@@ -136,6 +156,7 @@
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="com.example.action.RECOVER_MAIN" />
             </intent-filter>
         </receiver>
 

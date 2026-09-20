@@ -49,6 +49,8 @@ class HybridGridPageView(
 
     private val gridLayout = FrameLayout(context).apply {
         layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT)
+        clipChildren = false
+        clipToPadding = false
     }
 
     private val receiver = object : BroadcastReceiver() {
@@ -75,8 +77,12 @@ class HybridGridPageView(
     init {
         appsManager.ensureLoaded()
         com.example.core.LogKeeper.writeLog("HybridGrid", "Opened widgets grid page")
+        clipChildren = false
+        clipToPadding = false
         val scrollView = ScrollView(context).apply {
             layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT)
+            clipChildren = false
+            clipToPadding = false
             addView(gridLayout)
         }
         addView(scrollView)
@@ -176,20 +182,56 @@ class HybridGridPageView(
 
     private fun addWidgetIdToPrefs(widgetId: Int) {
         val items = getWidgetItems().toMutableList()
-        // Prevent duplicate addition if already exists
-        if (items.none { it.id == "widget:$widgetId" }) {
-            items.add(GridWidgetItem("widget:$widgetId", 2, 2, 0, 0))
+        if (items.none { it.id == "widget:$widgetId" || it.id.startsWith("widget:$widgetId:") }) {
+            val appWidgetManager = AppWidgetManager.getInstance(context)
+            val info = appWidgetManager.getAppWidgetInfo(widgetId)
+            val totalCols = prefs.getInt("hybrid_grid_cols_$pageId", 4)
+            val density = context.resources.displayMetrics.density
+            val cellW = if (width > 0) width / totalCols else (60 * density).toInt()
+            val (cols, rows) = com.example.calculateWidgetSpan(info, totalCols, cellW, density)
+            var targetY = 0
+            for (it in items) {
+                targetY = maxOf(targetY, it.y + it.rows)
+            }
+            items.add(GridWidgetItem("widget:$widgetId", cols, rows, 0, targetY))
             saveWidgetItems(items)
-            com.example.core.LogKeeper.writeLog("HybridGrid", "Added widget:$widgetId to page $pageId")
+            com.example.core.LogKeeper.writeLog("HybridGrid", "Added widget:$widgetId (${cols}x${rows}) to page $pageId")
         }
     }
     
     private fun addElementIdToPrefs(elementId: String) {
         val items = getWidgetItems().toMutableList()
         if (items.none { it.id == elementId }) {
-            items.add(GridWidgetItem(elementId, 1, 1, 0, 0))
+            var cols = 1
+            var rows = 1
+            if (elementId.startsWith("widget:")) {
+                val wId = elementId.removePrefix("widget:").substringBefore(":").toIntOrNull()
+                try {
+                    val parts = elementId.split(":", limit = 3)
+                    if (parts.size >= 3) {
+                        val json = JSONObject(parts[2])
+                        if (json.has("cols")) cols = json.getInt("cols")
+                        if (json.has("rows")) rows = json.getInt("rows")
+                    }
+                } catch (e: Exception) {}
+                if (wId != null && (cols <= 1 || rows <= 1)) {
+                    val appWidgetManager = AppWidgetManager.getInstance(context)
+                    val info = appWidgetManager.getAppWidgetInfo(wId)
+                    val totalCols = prefs.getInt("hybrid_grid_cols_$pageId", 4)
+                    val density = context.resources.displayMetrics.density
+                    val cellW = if (width > 0) width / totalCols else (60 * density).toInt()
+                    val (calcCols, calcRows) = com.example.calculateWidgetSpan(info, totalCols, cellW, density)
+                    cols = maxOf(cols, calcCols)
+                    rows = maxOf(rows, calcRows)
+                }
+            }
+            var targetY = 0
+            for (it in items) {
+                targetY = maxOf(targetY, it.y + it.rows)
+            }
+            items.add(GridWidgetItem(elementId, cols, rows, 0, targetY))
             saveWidgetItems(items)
-            com.example.core.LogKeeper.writeLog("HybridGrid", "Added element:$elementId to page $pageId")
+            com.example.core.LogKeeper.writeLog("HybridGrid", "Added element:$elementId (${cols}x${rows}) to page $pageId")
         }
     }
 
@@ -260,22 +302,47 @@ class HybridGridPageView(
                         if (info != null) {
                             val hostView = host.createView(context, wId, info)
                             hostView.setPadding(0, 0, 0, 0)
+                            hostView.clipChildren = false
+                            hostView.clipToPadding = false
                             
-                            val wCols = minOf(item.cols, totalCols)
-                            val wRows = item.rows
+                            val density = context.resources.displayMetrics.density
+                            val cellWidthDp = if (cellWidth > 0) (cellWidth / density).toInt() else 60
+                            val cellHeightDp = if (cellHeight > 0) (cellHeight / density).toInt() else 60
                             
-                            val params = FrameLayout.LayoutParams(cellWidth * wCols, cellHeight * wRows).apply {
+                            val minWdp = if (android.os.Build.VERSION.SDK_INT >= 16 && info.minResizeWidth > 0) {
+                                minOf(info.minWidth, info.minResizeWidth)
+                            } else {
+                                info.minWidth
+                            }
+                            val minHdp = if (android.os.Build.VERSION.SDK_INT >= 16 && info.minResizeHeight > 0) {
+                                minOf(info.minHeight, info.minResizeHeight)
+                            } else {
+                                info.minHeight
+                            }
+                            val reqCols = if (cellWidthDp > 0 && minWdp > 0) Math.ceil(minWdp.toDouble() / cellWidthDp).toInt() else 1
+                            val reqRows = if (cellHeightDp > 0 && minHdp > 0) Math.ceil(minHdp.toDouble() / cellHeightDp).toInt() else 1
+                            
+                            val wCols = minOf(totalCols, maxOf(item.cols, reqCols))
+                            val wRows = maxOf(item.rows, reqRows)
+                            
+                            val widgetWidth = cellWidth * wCols
+                            val widgetHeight = cellHeight * wRows
+                            
+                            val params = FrameLayout.LayoutParams(widgetWidth, widgetHeight).apply {
                                 leftMargin = item.x * cellWidth
                                 topMargin = item.y * cellHeight
                             }
                             gridLayout.addView(hostView, params)
-                            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.JELLY_BEAN) {
-                                val density = context.resources.displayMetrics.density
-                                val minW = ((cellWidth * wCols) / density).toInt()
-                                val minH = ((cellHeight * wRows) / density).toInt()
-                                hostView.updateAppWidgetSize(null, minW, minH, minW, minH)
+                            
+                            hostView.post {
+                                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.JELLY_BEAN) {
+                                    val curDensity = context.resources.displayMetrics.density
+                                    val wDp = if (hostView.width > 0) (hostView.width / curDensity).toInt() else (widgetWidth / curDensity).toInt()
+                                    val hDp = if (hostView.height > 0) (hostView.height / curDensity).toInt() else (widgetHeight / curDensity).toInt()
+                                    hostView.updateAppWidgetSize(null, wDp, hDp, wDp, hDp)
+                                }
                             }
-                            maxHeight = max(maxHeight, item.y * cellHeight + cellHeight * wRows)
+                            maxHeight = max(maxHeight, item.y * cellHeight + widgetHeight)
                             
                             hostView.setOnLongClickListener {
                                 val actionList = mutableListOf("App Info", "Remove")

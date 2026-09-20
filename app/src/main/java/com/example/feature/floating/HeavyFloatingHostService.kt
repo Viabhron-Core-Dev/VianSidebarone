@@ -26,8 +26,21 @@ class HeavyFloatingHostService : Service() {
         host = HeavyFloatingHost.getInstance(this)
         ipcHost = com.example.core.ipc.HeavyProcessHost.getInstance(this)
 
+        // Listen for HeavyModuleManager becoming idle
+        com.example.feature.heavy.module.HeavyModuleManager.getInstance(this).setIdleListener {
+            checkDisposableTeardown()
+        }
+
         // Wire incoming Binder commands to HeavyFloatingHost
         ipcHost.registerCommandHandler(com.example.core.ipc.HeavyCommandType.START_OPERATION) { cmd ->
+            val action = cmd.payload["action"]
+            if (action in listOf("mount", "use", "unmount", "unmountAll") ||
+                cmd.payload.containsKey("capabilityId") ||
+                cmd.payload.containsKey("moduleId") ||
+                (!cmd.payload.containsKey("instance_id") && !cmd.payload.containsKey("app_type"))
+            ) {
+                return@registerCommandHandler com.example.core.ipc.IpcResult.success()
+            }
             val instanceId = cmd.targetId ?: cmd.payload["instance_id"] ?: ""
             val appType = cmd.payload["app_type"] ?: "generic"
             val bx = cmd.payload["bounds_x"]?.toIntOrNull() ?: 100
@@ -44,6 +57,14 @@ class HeavyFloatingHostService : Service() {
         }
 
         ipcHost.registerCommandHandler(com.example.core.ipc.HeavyCommandType.STOP_OPERATION) { cmd ->
+            val action = cmd.payload["action"]
+            if (action in listOf("mount", "use", "unmount", "unmountAll") ||
+                cmd.payload.containsKey("capabilityId") ||
+                cmd.payload.containsKey("moduleId") ||
+                (!cmd.payload.containsKey("instance_id") && !cmd.payload.containsKey("app_type"))
+            ) {
+                return@registerCommandHandler com.example.core.ipc.IpcResult.success()
+            }
             val instanceId = cmd.targetId ?: cmd.payload["instance_id"] ?: ""
             if (instanceId.isNotEmpty()) {
                 host.stopInstance(instanceId)
@@ -55,6 +76,14 @@ class HeavyFloatingHostService : Service() {
         }
 
         ipcHost.registerCommandHandler(com.example.core.ipc.HeavyCommandType.PAUSE_OPERATION) { cmd ->
+            val action = cmd.payload["action"]
+            if (action in listOf("mount", "use", "unmount", "unmountAll") ||
+                cmd.payload.containsKey("capabilityId") ||
+                cmd.payload.containsKey("moduleId") ||
+                (!cmd.payload.containsKey("instance_id") && !cmd.payload.containsKey("app_type"))
+            ) {
+                return@registerCommandHandler com.example.core.ipc.IpcResult.success()
+            }
             val instanceId = cmd.targetId ?: cmd.payload["instance_id"] ?: ""
             if (instanceId.isNotEmpty()) {
                 host.pauseInstance(instanceId)
@@ -136,14 +165,17 @@ class HeavyFloatingHostService : Service() {
     }
 
     private fun checkDisposableTeardown() {
-        if (host.getActiveInstanceCount() == 0) {
-            LogKeeper.log(this, "HeavyFloatingHostService", "No active mini-apps in Heavy process; calling stopSelf()")
+        val activeFloating = host.getActiveInstanceCount()
+        val activeModules = com.example.feature.heavy.module.HeavyModuleManager.getInstance(this).getActiveSessionCount()
+        if (activeFloating == 0 && activeModules == 0) {
+            LogKeeper.log(this, "HeavyFloatingHostService", "No active mini-apps or modules in Heavy process; calling stopSelf()")
             stopSelf()
         }
     }
 
     override fun onDestroy() {
         super.onDestroy()
+        com.example.feature.heavy.module.HeavyModuleManager.getInstance(this).setIdleListener(null)
         LogKeeper.log(this, "HeavyFloatingHostService", "Heavy process floating service destroyed")
     }
 

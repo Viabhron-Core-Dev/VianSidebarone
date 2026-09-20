@@ -55,15 +55,49 @@ class AppPickerActivity : ComponentActivity() {
         setContentView(layout)
 
         scope.launch(Dispatchers.IO) {
-            val launcherApps = getSystemService(Context.LAUNCHER_APPS_SERVICE) as LauncherApps
-            val userHandle = Process.myUserHandle()
-            val activities = launcherApps.getActivityList(null, userHandle)
             val appList = mutableListOf<AppInfo>()
-            for (activityInfo in activities) {
-                val packageName = activityInfo.applicationInfo.packageName
-                val label = activityInfo.label.toString()
-                appList.add(AppInfo(packageName, label))
+            val pm = packageManager
+
+            // 1. Query LauncherApps across all user profiles
+            try {
+                val launcherApps = getSystemService(Context.LAUNCHER_APPS_SERVICE) as? LauncherApps
+                val userManager = getSystemService(Context.USER_SERVICE) as? android.os.UserManager
+                val profiles = userManager?.userProfiles ?: listOf(Process.myUserHandle())
+                if (launcherApps != null) {
+                    for (profile in profiles) {
+                        try {
+                            val activities = launcherApps.getActivityList(null, profile)
+                            for (activityInfo in activities) {
+                                val pkg = activityInfo.applicationInfo.packageName
+                                if (pkg == this@AppPickerActivity.packageName) continue
+                                val label = activityInfo.label?.toString() ?: pkg
+                                appList.add(AppInfo(pkg, label))
+                            }
+                        } catch (e: Exception) {
+                            e.printStackTrace()
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
             }
+
+            // 2. Query PackageManager launcher activities as well to ensure full discovery
+            try {
+                val launcherIntent = Intent(Intent.ACTION_MAIN).apply {
+                    addCategory(Intent.CATEGORY_LAUNCHER)
+                }
+                val resolveInfos = pm.queryIntentActivities(launcherIntent, 0)
+                for (ri in resolveInfos) {
+                    val pkg = ri.activityInfo?.packageName ?: continue
+                    if (pkg == this@AppPickerActivity.packageName) continue
+                    val label = ri.loadLabel(pm)?.toString() ?: pkg
+                    appList.add(AppInfo(pkg, label))
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+
             val distinctApps = appList.distinctBy { it.packageName }.sortedBy { it.label.lowercase() }
 
             withContext(Dispatchers.Main) {

@@ -95,10 +95,7 @@ class WidgetsGridEditActivity : ComponentActivity() {
                     } catch (e: Exception) {}
                 }
                 val totalCols = prefs.getInt("widgets_grid_cols_$pageId", 4)
-                if (defaultCols > totalCols) {
-                    android.widget.Toast.makeText(this, "Cannot add: Requires $defaultCols columns, but grid only has $totalCols.", android.widget.Toast.LENGTH_LONG).show()
-                    return
-                }
+                defaultCols = minOf(defaultCols, totalCols)
 
                 var targetX = 0
                 var targetY = 0

@@ -98,6 +98,9 @@ class HeavyProcessConnectionManager internal constructor(
     private val deathRecipient = IBinder.DeathRecipient {
         synchronized(lock) {
             safeLog("HeavyProcessConnectionManager", "Heavy process binder died (DeathRecipient triggered)")
+            context?.let { ctx ->
+                LogKeeper.logLifecycle(ctx, "HeavyProcess", "HEAVY_PROCESS_DIED", "DeathRecipient triggered: Binder connection to :heavy terminated")
+            }
             state = ConnectionState.DEAD
             remoteProxy = null
             remoteBinder = null
