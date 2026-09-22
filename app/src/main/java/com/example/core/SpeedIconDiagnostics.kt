@@ -33,6 +33,20 @@ object SpeedIconDiagnostics {
     private var isRecording = true
     private var systemMetricsReport: String = ""
 
+    private fun getNotificationIconSize(context: Context): Int {
+        val res = context.resources
+        val id = res.getIdentifier("status_bar_icon_size", "dimen", "android")
+        return if (id > 0) {
+            try {
+                res.getDimensionPixelSize(id)
+            } catch (e: Exception) {
+                (24 * res.displayMetrics.density).toInt().coerceAtLeast(48)
+            }
+        } else {
+            (24 * res.displayMetrics.density).toInt().coerceAtLeast(48)
+        }
+    }
+
     fun captureComprehensiveSystemMetrics(context: Context) {
         val dm = context.resources.displayMetrics
         val res = context.resources
@@ -59,7 +73,7 @@ object SpeedIconDiagnostics {
             else -> "Not Created / Unknown"
         }
 
-        val calculatedIconPx = DynamicSpeedIconGenerator.getNotificationIconSize(context)
+        val calculatedIconPx = getNotificationIconSize(context)
 
         systemMetricsReport = """
             --- [DEVICE & DISPLAY HARDWARE] ---
@@ -146,7 +160,7 @@ object SpeedIconDiagnostics {
 
         sb.appendLine("--- [BLUR / DEGRADATION FORENSIC FINDINGS] ---")
         val dm = context.resources.displayMetrics
-        val calculatedIconPx = DynamicSpeedIconGenerator.getNotificationIconSize(context)
+        val calculatedIconPx = getNotificationIconSize(context)
         sb.appendLine("1. Status Bar SmallIcon Downscale:")
         sb.appendLine("   - Generated buffer is ${calculatedIconPx}x${calculatedIconPx} px.")
         sb.appendLine("   - In Android 12+, status bar small icon is clamped to ~24dp (approx ${(24 * dm.density).toInt()}px).")
