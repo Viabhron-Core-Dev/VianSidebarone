@@ -21,7 +21,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -216,10 +215,7 @@ fun PermissionManagerScreen(onContinue: () -> Unit, isFirstLaunch: Boolean = tru
         if (isFirstLaunch) {
             Button(
                 onClick = onContinue,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(56.dp)
-                    .testTag("continue_button")
+                modifier = Modifier.fillMaxWidth().height(56.dp)
             ) {
                 Text("Continue to Sidebar", style = MaterialTheme.typography.titleMedium)
             }
@@ -276,6 +272,7 @@ private fun checkUsageAccess(context: Context): Boolean {
 }
 
 private fun isAccessibilityServiceEnabled(context: Context): Boolean {
+    // Assuming VianSideAccessibilityService is in service package
     val expectedComponentName = ComponentName(context, "com.example.feature.system_hub.VianSideAccessibilityService")
     val enabledServicesSetting = Settings.Secure.getString(context.contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES)
     if (enabledServicesSetting == null) return false

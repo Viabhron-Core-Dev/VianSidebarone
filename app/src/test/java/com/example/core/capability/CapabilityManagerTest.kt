@@ -245,6 +245,18 @@ class CapabilityManagerTest {
         assertEquals(ConnectionState.DEAD, connManager.state)
     }
 
+    @Test
+    fun testInvalidOrNullPackageContextFailsGracefullyWithoutNpe() {
+        val invalidContext = object : ContextWrapper(null) {
+            override fun getApplicationContext(): Context = this
+            override fun getPackageName(): String? = null
+        }
+        val connManager = HeavyProcessConnectionManager(invalidContext)
+        val connected = connManager.connect(autoCreate = true)
+        assertFalse("Connection with null package name must fail gracefully returning false", connected)
+        assertEquals(ConnectionState.DISCONNECTED, connManager.state)
+    }
+
     // 5. Verify Owner-Scoped Batch Unmount (e.g. When Element or Page is Released)
     @Test
     fun testOwnerScopedBatchUnmount() {

@@ -190,6 +190,12 @@ class HeavyProcessConnectionManager internal constructor(
             state = ConnectionState.DISCONNECTED
             return false
         }
+        val pkgName = try { ctx.packageName } catch (_: Exception) { null }
+        if (pkgName.isNullOrBlank()) {
+            safeLog("HeavyProcessConnectionManager", "Connection aborted: Context package name is null or blank")
+            state = ConnectionState.DISCONNECTED
+            return false
+        }
         synchronized(lock) {
             if (state == ConnectionState.CONNECTED) return true
             if (state == ConnectionState.CONNECTING) return true
@@ -197,7 +203,7 @@ class HeavyProcessConnectionManager internal constructor(
             state = ConnectionState.CONNECTING
             return try {
                 val intent = Intent().setClassName(
-                    ctx.packageName,
+                    pkgName,
                     "com.example.feature.floating.HeavyFloatingHostService"
                 )
                 val flags = if (autoCreate) Context.BIND_AUTO_CREATE else 0
@@ -208,7 +214,7 @@ class HeavyProcessConnectionManager internal constructor(
                 }
                 bound
             } catch (e: Throwable) {
-                safeLogCrash("HeavyProcessConnectionManager", e)
+                safeLog("HeavyProcessConnectionManager", "bindService failed: ${e.message}")
                 state = ConnectionState.DISCONNECTED
                 false
             }

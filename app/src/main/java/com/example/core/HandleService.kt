@@ -76,9 +76,13 @@ class HandleService : Service(), SharedPreferences.OnSharedPreferenceChangeListe
                 }
                 ACTION_RELOAD_HANDLES -> {
                     LogKeeper.logLifecycle(context, "HandleService", "RELOAD_HANDLES", "Reloading handles on configuration change")
-                    if (isScreenOn) {
+                    if (isScreenOn && Settings.canDrawOverlays(this@HandleService)) {
                         attachHandles()
                     }
+                }
+                OverlaySyncManager.ACTION_SYNC_PREF -> {
+                    LogKeeper.logLifecycle(context, "HandleService", "ACTION_SYNC_PREF", "Syncing preferences from Heavy process")
+                    handleSyncPrefIntent(intent)
                 }
             }
         }
@@ -146,11 +150,10 @@ class HandleService : Service(), SharedPreferences.OnSharedPreferenceChangeListe
             startForeground(NOTIFICATION_ID, initialNotification)
         }
 
-        // 3. Validate runtime configuration and overlay permissions
+        // 3. Validate runtime configuration
         val autoStart = prefs.getBoolean("auto_start_on_boot", true)
-        val canDraw = Settings.canDrawOverlays(this)
-        if (!autoStart || !canDraw) {
-            LogKeeper.log(this, "HandleService", "Stopping service in onCreate: auto_start_on_boot=$autoStart, canDrawOverlays=$canDraw")
+        if (!autoStart) {
+            LogKeeper.log(this, "HandleService", "Stopping service in onCreate: auto_start_on_boot=false")
             stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf()
             return
@@ -166,12 +169,13 @@ class HandleService : Service(), SharedPreferences.OnSharedPreferenceChangeListe
             addAction(Intent.ACTION_SCREEN_OFF)
             addAction(Intent.ACTION_USER_PRESENT)
             addAction(ACTION_RELOAD_HANDLES)
+            addAction(OverlaySyncManager.ACTION_SYNC_PREF)
         }
         registerReceiver(screenStateReceiver, filter)
         prefs.registerOnSharedPreferenceChangeListener(this)
 
         handleManager = HandleManager.getInstance(this)
-        if (isScreenOn) {
+        if (isScreenOn && Settings.canDrawOverlays(this)) {
             attachHandles()
         }
         CallRecorderManager.getInstance(this).startListening()
@@ -183,18 +187,38 @@ class HandleService : Service(), SharedPreferences.OnSharedPreferenceChangeListe
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        val powerManager = getSystemService(Context.POWER_SERVICE) as? PowerManager
+        if (powerManager != null) {
+            isScreenOn = powerManager.isInteractive
+        }
+        val autoStart = prefs.getBoolean("auto_start_on_boot", true)
+        if (!autoStart) {
+            LogKeeper.log(this, "HandleService", "Stopping service in onStartCommand: auto_start_on_boot=false")
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            stopSelf()
+            return START_NOT_STICKY
+        }
+
         if (intent == null) {
             LogKeeper.logLifecycle(this, "HandleService", "SERVICE_RECREATED_STICKY", "Recreated by Android framework after process termination (START_STICKY)")
-            if (isScreenOn && activeHandleViews.isEmpty()) {
-                attachHandles()
-            }
-        } else if (intent.action == ACTION_RELOAD_HANDLES) {
-            if (isScreenOn) {
+            if (isScreenOn && Settings.canDrawOverlays(this)) {
                 attachHandles()
             }
         } else {
-            if (isScreenOn && activeHandleViews.isEmpty()) {
-                attachHandles()
+            when (intent.action) {
+                OverlaySyncManager.ACTION_SYNC_PREF -> {
+                    handleSyncPrefIntent(intent)
+                }
+                ACTION_RELOAD_HANDLES -> {
+                    if (isScreenOn && Settings.canDrawOverlays(this)) {
+                        attachHandles()
+                    }
+                }
+                else -> {
+                    if (isScreenOn && Settings.canDrawOverlays(this)) {
+                        attachHandles()
+                    }
+                }
             }
         }
         return START_STICKY
@@ -357,6 +381,40 @@ class HandleService : Service(), SharedPreferences.OnSharedPreferenceChangeListe
                 enableLights(false)
             }
             notificationManager.createNotificationChannel(channel)
+        }
+    }
+
+    private fun handleSyncPrefIntent(intent: Intent) {
+        val key = intent.getStringExtra(OverlaySyncManager.EXTRA_KEY) ?: ""
+        val value = intent.getStringExtra(OverlaySyncManager.EXTRA_VALUE) ?: ""
+        val type = intent.getStringExtra(OverlaySyncManager.EXTRA_TYPE) ?: ""
+
+        when (type) {
+            "STRING" -> prefs.edit().putString(key, value).commit()
+            "INT" -> prefs.edit().putInt(key, value.toIntOrNull() ?: 0).commit()
+            "BOOLEAN" -> prefs.edit().putBoolean(key, value.toBoolean()).commit()
+            "FLOAT" -> prefs.edit().putFloat(key, value.toFloatOrNull() ?: 0f).commit()
+            "REMOVE" -> prefs.edit().remove(key).commit()
+            "SYNC_HANDLE" -> {
+                val bundle = intent.extras
+                if (bundle != null) {
+                    val editor = prefs.edit()
+                    for (k in bundle.keySet()) {
+                        if (k.startsWith("handle_") || k == HandleManager.KEY_HANDLE_IDS || k == HandleManager.KEY_HANDLES_COUNT) {
+                            when (val v = bundle.get(k)) {
+                                is String -> editor.putString(k, v)
+                                is Boolean -> editor.putBoolean(k, v)
+                                is Int -> editor.putInt(k, v)
+                                is Float -> editor.putFloat(k, v)
+                            }
+                        }
+                    }
+                    editor.commit()
+                }
+            }
+        }
+        if (isScreenOn && Settings.canDrawOverlays(this)) {
+            attachHandles()
         }
     }
 

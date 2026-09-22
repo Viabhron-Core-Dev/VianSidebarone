@@ -29,7 +29,7 @@ class MainActivity : ComponentActivity() {
         val prefs = getSharedPreferences(HandleManager.PREFS_NAME, Context.MODE_PRIVATE)
         val setupCompleted = prefs.getBoolean("setup_completed", false)
 
-        if (Settings.canDrawOverlays(this) || setupCompleted) {
+        if (setupCompleted) {
             val intent = Intent(this, SettingsActivity::class.java)
             startActivity(intent)
             finish()
@@ -40,9 +40,9 @@ class MainActivity : ComponentActivity() {
             MaterialTheme(colorScheme = lightColorScheme()) {
                 WelcomeScreen(
                     onContinue = {
-                        prefs.edit().putBoolean("setup_completed", true).apply()
-                        val intent = Intent(this@MainActivity, SettingsActivity::class.java)
-                        startActivity(intent)
+                        val p = getSharedPreferences(HandleManager.PREFS_NAME, Context.MODE_PRIVATE)
+                        p.edit().putBoolean("setup_completed", true).commit()
+                        HandleService.start(this@MainActivity)
                         finish()
                     }
                 )

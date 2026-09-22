@@ -212,6 +212,29 @@ object LogKeeper {
                     } catch (ignored: Exception) {}
                 }
             }
+
+            // Also mirror to download-accessible location so logs are visible without root/app-private access
+            try {
+                val downloadsDir = context.getExternalFilesDir(android.os.Environment.DIRECTORY_DOWNLOADS)
+                if (downloadsDir != null) {
+                    val mirrorFile = File(downloadsDir, fileName)
+                    FileOutputStream(mirrorFile, true).use { fos ->
+                        fos.write(text.toByteArray(Charsets.UTF_8))
+                        fos.flush()
+                    }
+                }
+            } catch (ignored: Exception) {}
+
+            try {
+                val publicDir = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS)
+                if (publicDir != null && publicDir.exists() && publicDir.canWrite()) {
+                    val pubFile = File(publicDir, fileName)
+                    FileOutputStream(pubFile, true).use { fos ->
+                        fos.write(text.toByteArray(Charsets.UTF_8))
+                        fos.flush()
+                    }
+                }
+            } catch (ignored: Exception) {}
         } catch (e: Exception) {
             Log.e(TAG, "Failed to write to $fileName", e)
         }

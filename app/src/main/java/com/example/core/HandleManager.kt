@@ -415,7 +415,7 @@ class HandleManager(private val context: Context) {
             }
         }
 
-        notifyMainReload(context)
+        notifyMainReload(context, config)
     }
 
     /**
@@ -424,7 +424,7 @@ class HandleManager(private val context: Context) {
     fun setHandleEnabled(handleId: String, enabled: Boolean) {
         val index = handleId.substringAfter("handle_").toIntOrNull() ?: return
         prefs.edit().putBoolean("handle_enabled_$index", enabled).apply()
-        notifyMainReload(context)
+        notifyMainReload(context, getHandle(handleId))
     }
 
     /**
@@ -557,18 +557,72 @@ class HandleManager(private val context: Context) {
     /**
      * Sends reload request to Main process to synchronize runtime triggers.
      */
-    fun notifyMainReload(context: Context) {
+    fun notifyMainReload(context: Context, config: HandleConfig? = null) {
         try {
             val intent = Intent(context, HandleService::class.java).apply {
-                action = HandleService.ACTION_RELOAD_HANDLES
+                action = OverlaySyncManager.ACTION_SYNC_PREF
+                putExtra(OverlaySyncManager.EXTRA_TYPE, "SYNC_HANDLE")
+                if (config != null) {
+                    val index = config.id.substringAfter("handle_").toIntOrNull() ?: 1
+                    putExtra("handle_name_$index", config.name)
+                    putExtra("handle_enabled_$index", config.enabled)
+                    putExtra("handle_edge_$index", config.edge.name)
+                    putExtra("handle_pos_$index", config.positionPercent)
+                    putExtra("handle_width_$index", config.widthDp)
+                    putExtra("handle_height_$index", config.heightDp)
+                    putExtra("handle_color_$index", config.color)
+                    putExtra("handle_shape_$index", config.shape.name)
+                    putExtra("handle_alpha_$index", config.alphaPercent)
+                    putExtra("handle_tap_$index", config.onTapAction)
+                    putExtra("handle_double_tap_$index", config.onDoubleTapAction)
+                    putExtra("handle_long_press_$index", config.onLongPressAction)
+                    putExtra("handle_swipe_left_$index", config.onSwipeLeftAction)
+                    putExtra("handle_swipe_right_$index", config.onSwipeRightAction)
+                    putExtra("handle_swipe_up_$index", config.onSwipeUpAction)
+                    putExtra("handle_swipe_down_$index", config.onSwipeDownAction)
+                }
+                val ids = getHandleIds()
+                putExtra(KEY_HANDLE_IDS, ids.joinToString(","))
+                putExtra(KEY_HANDLES_COUNT, ids.size)
             }
             context.startService(intent)
         } catch (ignored: Exception) {}
+
         try {
-            val bIntent = Intent(HandleService.ACTION_RELOAD_HANDLES).apply {
+            val bIntent = Intent(OverlaySyncManager.ACTION_SYNC_PREF).apply {
                 setPackage(context.packageName)
+                putExtra(OverlaySyncManager.EXTRA_TYPE, "SYNC_HANDLE")
+                if (config != null) {
+                    val index = config.id.substringAfter("handle_").toIntOrNull() ?: 1
+                    putExtra("handle_name_$index", config.name)
+                    putExtra("handle_enabled_$index", config.enabled)
+                    putExtra("handle_edge_$index", config.edge.name)
+                    putExtra("handle_pos_$index", config.positionPercent)
+                    putExtra("handle_width_$index", config.widthDp)
+                    putExtra("handle_height_$index", config.heightDp)
+                    putExtra("handle_color_$index", config.color)
+                    putExtra("handle_shape_$index", config.shape.name)
+                    putExtra("handle_alpha_$index", config.alphaPercent)
+                    putExtra("handle_tap_$index", config.onTapAction)
+                    putExtra("handle_double_tap_$index", config.onDoubleTapAction)
+                    putExtra("handle_long_press_$index", config.onLongPressAction)
+                    putExtra("handle_swipe_left_$index", config.onSwipeLeftAction)
+                    putExtra("handle_swipe_right_$index", config.onSwipeRightAction)
+                    putExtra("handle_swipe_up_$index", config.onSwipeUpAction)
+                    putExtra("handle_swipe_down_$index", config.onSwipeDownAction)
+                }
+                val ids = getHandleIds()
+                putExtra(KEY_HANDLE_IDS, ids.joinToString(","))
+                putExtra(KEY_HANDLES_COUNT, ids.size)
             }
             context.sendBroadcast(bIntent)
+        } catch (ignored: Exception) {}
+
+        try {
+            val legacyIntent = Intent(HandleService.ACTION_RELOAD_HANDLES).apply {
+                setPackage(context.packageName)
+            }
+            context.sendBroadcast(legacyIntent)
         } catch (ignored: Exception) {}
     }
 

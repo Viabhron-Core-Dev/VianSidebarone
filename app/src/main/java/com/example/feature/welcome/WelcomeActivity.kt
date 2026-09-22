@@ -33,10 +33,11 @@ class WelcomeActivity : ComponentActivity() {
             MaterialTheme(colorScheme = lightColorScheme()) {
                 WelcomeScreen(
                     onContinue = {
+                        com.example.core.LogKeeper.log(this@WelcomeActivity, "WelcomeActivity", "onContinue triggered: saving setup_completed=true")
                         val prefs = getSharedPreferences(HandleManager.PREFS_NAME, Context.MODE_PRIVATE)
-                        prefs.edit().putBoolean("setup_completed", true).apply()
-                        val intent = Intent(this, SettingsActivity::class.java)
-                        startActivity(intent)
+                        prefs.edit().putBoolean("setup_completed", true).commit()
+                        com.example.core.LogKeeper.log(this@WelcomeActivity, "WelcomeActivity", "Starting HandleService and finishing cleanly")
+                        HandleService.start(this@WelcomeActivity)
                         finish()
                     }
                 )
