@@ -73,7 +73,11 @@ class SettingsActivity : ComponentActivity() {
 @Composable
 fun SettingsNavigationApp(initialRoute: String, onFinish: () -> Unit) {
     val backStack = remember {
-        mutableStateListOf(if (initialRoute != "main") initialRoute else "main")
+        val stack = mutableStateListOf("main")
+        if (initialRoute != "main") {
+            stack.add(initialRoute)
+        }
+        stack
     }
     val currentRoute = backStack.lastOrNull() ?: "main"
 

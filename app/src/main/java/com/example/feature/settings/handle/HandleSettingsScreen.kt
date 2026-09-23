@@ -22,6 +22,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.core.HandleConfig
@@ -89,10 +90,13 @@ fun ReferenceHandlesListScreen(
             )
         },
         floatingActionButton = {
-            FloatingActionButton(onClick = {
-                handleManager.createHandle("Handle ${handles.size + 1}")
-                refresh()
-            }) {
+            FloatingActionButton(
+                onClick = {
+                    handleManager.createHandle("Handle ${handles.size + 1}")
+                    refresh()
+                },
+                modifier = Modifier.testTag("add_handle_button")
+            ) {
                 Icon(Icons.Default.Add, contentDescription = "Add Handle")
             }
         }
@@ -102,6 +106,7 @@ fun ReferenceHandlesListScreen(
                 .padding(padding)
                 .fillMaxSize()
                 .padding(16.dp)
+                .testTag("handles_list")
         ) {
             items(handles, key = { it.id }) { handle ->
                 ReferenceHandleItem(
@@ -177,7 +182,9 @@ private fun ReferenceHandleItem(
     }
 
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("handle_card_${handle.id}"),
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
     ) {
         Column {
@@ -197,7 +204,8 @@ private fun ReferenceHandleItem(
                     onCheckedChange = { isChecked ->
                         handleManager.setHandleEnabled(handle.id, isChecked)
                         onRefresh()
-                    }
+                    },
+                    modifier = Modifier.testTag("handle_switch_${handle.id}")
                 )
                 Box {
                     IconButton(onClick = { showMenu = true }) {
@@ -319,7 +327,9 @@ private fun ReferenceHandleItem(
                     Spacer(modifier = Modifier.height(16.dp))
                     Button(
                         onClick = { showAddGestureDialog = true },
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("add_gesture_button")
                     ) {
                         Icon(Icons.Default.Add, contentDescription = "Add")
                         Spacer(modifier = Modifier.width(8.dp))
@@ -397,13 +407,16 @@ private fun ReferenceHandleItem(
             },
             confirmButton = {
                 if (availableGestures.isNotEmpty()) {
-                    TextButton(onClick = {
-                        if (selectedGesture.isNotEmpty()) {
-                            handleManager.configureGesture(handle.id, selectedGesture, selectedAction)
-                            onRefresh()
-                        }
-                        showAddGestureDialog = false
-                    }) {
+                    TextButton(
+                        onClick = {
+                            if (selectedGesture.isNotEmpty()) {
+                                handleManager.configureGesture(handle.id, selectedGesture, selectedAction)
+                                onRefresh()
+                            }
+                            showAddGestureDialog = false
+                        },
+                        modifier = Modifier.testTag("dialog_confirm_add_gesture")
+                    ) {
                         Text("Add")
                     }
                 }

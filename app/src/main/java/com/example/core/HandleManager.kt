@@ -510,7 +510,7 @@ class HandleManager(private val context: Context) {
                 prefs.edit().putString(pagesKey, DEFAULT_PAGE_HYBRID).apply()
             }
         }
-        notifyMainReload(context)
+        notifyMainReload(context, getHandle(handleId))
     }
 
     /**
@@ -523,7 +523,7 @@ class HandleManager(private val context: Context) {
             val containerId = getContainerId(handleId, gesture)
             cleanContainerData(containerId)
         }
-        notifyMainReload(context)
+        notifyMainReload(context, getHandle(handleId))
     }
 
     /**
@@ -558,28 +558,29 @@ class HandleManager(private val context: Context) {
      * Sends reload request to Main process to synchronize runtime triggers.
      */
     fun notifyMainReload(context: Context, config: HandleConfig? = null) {
+        val configsToSync = if (config != null) listOf(config) else getAllHandles()
         try {
             val intent = Intent(context, HandleService::class.java).apply {
                 action = OverlaySyncManager.ACTION_SYNC_PREF
                 putExtra(OverlaySyncManager.EXTRA_TYPE, "SYNC_HANDLE")
-                if (config != null) {
-                    val index = config.id.substringAfter("handle_").toIntOrNull() ?: 1
-                    putExtra("handle_name_$index", config.name)
-                    putExtra("handle_enabled_$index", config.enabled)
-                    putExtra("handle_edge_$index", config.edge.name)
-                    putExtra("handle_pos_$index", config.positionPercent)
-                    putExtra("handle_width_$index", config.widthDp)
-                    putExtra("handle_height_$index", config.heightDp)
-                    putExtra("handle_color_$index", config.color)
-                    putExtra("handle_shape_$index", config.shape.name)
-                    putExtra("handle_alpha_$index", config.alphaPercent)
-                    putExtra("handle_tap_$index", config.onTapAction)
-                    putExtra("handle_double_tap_$index", config.onDoubleTapAction)
-                    putExtra("handle_long_press_$index", config.onLongPressAction)
-                    putExtra("handle_swipe_left_$index", config.onSwipeLeftAction)
-                    putExtra("handle_swipe_right_$index", config.onSwipeRightAction)
-                    putExtra("handle_swipe_up_$index", config.onSwipeUpAction)
-                    putExtra("handle_swipe_down_$index", config.onSwipeDownAction)
+                for (c in configsToSync) {
+                    val index = c.id.substringAfter("handle_").toIntOrNull() ?: continue
+                    putExtra("handle_name_$index", c.name)
+                    putExtra("handle_enabled_$index", c.enabled)
+                    putExtra("handle_edge_$index", c.edge.name)
+                    putExtra("handle_pos_$index", c.positionPercent)
+                    putExtra("handle_width_$index", c.widthDp)
+                    putExtra("handle_height_$index", c.heightDp)
+                    putExtra("handle_color_$index", c.color)
+                    putExtra("handle_shape_$index", c.shape.name)
+                    putExtra("handle_alpha_$index", c.alphaPercent)
+                    putExtra("handle_tap_$index", c.onTapAction)
+                    putExtra("handle_double_tap_$index", c.onDoubleTapAction)
+                    putExtra("handle_long_press_$index", c.onLongPressAction)
+                    putExtra("handle_swipe_left_$index", c.onSwipeLeftAction)
+                    putExtra("handle_swipe_right_$index", c.onSwipeRightAction)
+                    putExtra("handle_swipe_up_$index", c.onSwipeUpAction)
+                    putExtra("handle_swipe_down_$index", c.onSwipeDownAction)
                 }
                 val ids = getHandleIds()
                 putExtra(KEY_HANDLE_IDS, ids.joinToString(","))
@@ -592,24 +593,24 @@ class HandleManager(private val context: Context) {
             val bIntent = Intent(OverlaySyncManager.ACTION_SYNC_PREF).apply {
                 setPackage(context.packageName)
                 putExtra(OverlaySyncManager.EXTRA_TYPE, "SYNC_HANDLE")
-                if (config != null) {
-                    val index = config.id.substringAfter("handle_").toIntOrNull() ?: 1
-                    putExtra("handle_name_$index", config.name)
-                    putExtra("handle_enabled_$index", config.enabled)
-                    putExtra("handle_edge_$index", config.edge.name)
-                    putExtra("handle_pos_$index", config.positionPercent)
-                    putExtra("handle_width_$index", config.widthDp)
-                    putExtra("handle_height_$index", config.heightDp)
-                    putExtra("handle_color_$index", config.color)
-                    putExtra("handle_shape_$index", config.shape.name)
-                    putExtra("handle_alpha_$index", config.alphaPercent)
-                    putExtra("handle_tap_$index", config.onTapAction)
-                    putExtra("handle_double_tap_$index", config.onDoubleTapAction)
-                    putExtra("handle_long_press_$index", config.onLongPressAction)
-                    putExtra("handle_swipe_left_$index", config.onSwipeLeftAction)
-                    putExtra("handle_swipe_right_$index", config.onSwipeRightAction)
-                    putExtra("handle_swipe_up_$index", config.onSwipeUpAction)
-                    putExtra("handle_swipe_down_$index", config.onSwipeDownAction)
+                for (c in configsToSync) {
+                    val index = c.id.substringAfter("handle_").toIntOrNull() ?: continue
+                    putExtra("handle_name_$index", c.name)
+                    putExtra("handle_enabled_$index", c.enabled)
+                    putExtra("handle_edge_$index", c.edge.name)
+                    putExtra("handle_pos_$index", c.positionPercent)
+                    putExtra("handle_width_$index", c.widthDp)
+                    putExtra("handle_height_$index", c.heightDp)
+                    putExtra("handle_color_$index", c.color)
+                    putExtra("handle_shape_$index", c.shape.name)
+                    putExtra("handle_alpha_$index", c.alphaPercent)
+                    putExtra("handle_tap_$index", c.onTapAction)
+                    putExtra("handle_double_tap_$index", c.onDoubleTapAction)
+                    putExtra("handle_long_press_$index", c.onLongPressAction)
+                    putExtra("handle_swipe_left_$index", c.onSwipeLeftAction)
+                    putExtra("handle_swipe_right_$index", c.onSwipeRightAction)
+                    putExtra("handle_swipe_up_$index", c.onSwipeUpAction)
+                    putExtra("handle_swipe_down_$index", c.onSwipeDownAction)
                 }
                 val ids = getHandleIds()
                 putExtra(KEY_HANDLE_IDS, ids.joinToString(","))

@@ -43,6 +43,8 @@ class MainActivity : ComponentActivity() {
                         val p = getSharedPreferences(HandleManager.PREFS_NAME, Context.MODE_PRIVATE)
                         p.edit().putBoolean("setup_completed", true).commit()
                         HandleService.start(this@MainActivity)
+                        val intent = Intent(this@MainActivity, SettingsActivity::class.java)
+                        startActivity(intent)
                         finish()
                     }
                 )

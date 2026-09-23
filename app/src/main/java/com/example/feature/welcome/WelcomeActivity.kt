@@ -36,8 +36,10 @@ class WelcomeActivity : ComponentActivity() {
                         com.example.core.LogKeeper.log(this@WelcomeActivity, "WelcomeActivity", "onContinue triggered: saving setup_completed=true")
                         val prefs = getSharedPreferences(HandleManager.PREFS_NAME, Context.MODE_PRIVATE)
                         prefs.edit().putBoolean("setup_completed", true).commit()
-                        com.example.core.LogKeeper.log(this@WelcomeActivity, "WelcomeActivity", "Starting HandleService and finishing cleanly")
+                        com.example.core.LogKeeper.log(this@WelcomeActivity, "WelcomeActivity", "Starting HandleService and routing to SettingsActivity")
                         HandleService.start(this@WelcomeActivity)
+                        val intent = Intent(this@WelcomeActivity, SettingsActivity::class.java)
+                        startActivity(intent)
                         finish()
                     }
                 )

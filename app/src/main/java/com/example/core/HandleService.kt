@@ -16,6 +16,7 @@ import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
 import android.provider.Settings
+import androidx.core.content.ContextCompat
 import com.example.MainActivity
 import com.example.R
 import com.example.feature.sidebar.SidebarManager
@@ -171,7 +172,12 @@ class HandleService : Service(), SharedPreferences.OnSharedPreferenceChangeListe
             addAction(ACTION_RELOAD_HANDLES)
             addAction(OverlaySyncManager.ACTION_SYNC_PREF)
         }
-        registerReceiver(screenStateReceiver, filter)
+        ContextCompat.registerReceiver(
+            this,
+            screenStateReceiver,
+            filter,
+            ContextCompat.RECEIVER_NOT_EXPORTED
+        )
         prefs.registerOnSharedPreferenceChangeListener(this)
 
         handleManager = HandleManager.getInstance(this)
