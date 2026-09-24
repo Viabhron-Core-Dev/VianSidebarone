@@ -66,6 +66,7 @@ class SidebarView(
     } else {
         max(0, defaultPageIndex)
     }
+    private val pageHeights = mutableMapOf<String, Int>()
 
     fun setDimmed(dimmed: Boolean) {
         if (dimmed) {
@@ -358,7 +359,7 @@ class SidebarView(
                 val frame = FrameLayout(parent.context).apply {
                     layoutParams = ViewGroup.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT,
-                        if (wrapContent) ViewGroup.LayoutParams.WRAP_CONTENT else ViewGroup.LayoutParams.MATCH_PARENT
+                        ViewGroup.LayoutParams.MATCH_PARENT
                     )
                 }
                 return SidebarPageViewHolder(frame)
@@ -553,9 +554,38 @@ class SidebarView(
             true
         }
 
+        val screenHeight = context.resources.displayMetrics.heightPixels
+        val maxAllowedHeight = (screenHeight * 0.85f).toInt() - headerHeight
+
         val targetContentHeightPx = if (page.useCustomSettings && page.height > 0) {
             (page.height * density).toInt()
-        } else if (!isPageWrap) {
+        } else if (isPageWrap) {
+            val lastMeasured = pageHeights[page.id]
+            if (lastMeasured != null && lastMeasured > 0) {
+                lastMeasured.coerceIn((60 * density).toInt(), maxAllowedHeight)
+            } else {
+                val childHeight = queryChildPageHeight(actualPosition)
+                if (childHeight > 0) {
+                    pageHeights[page.id] = childHeight
+                    childHeight.coerceIn((60 * density).toInt(), maxAllowedHeight)
+                } else {
+                    val compactInitialDp = when (page.type) {
+                        "calculator" -> 260
+                        "compass" -> 270
+                        "resources_tracker" -> 160
+                        "media_player" -> 100
+                        "scheduler" -> 200
+                        "notifications", "notification" -> 160
+                        "app_tracker" -> 180
+                        "apps" -> 140
+                        "widgets_grid", "widget" -> 140
+                        "hybrid_grid", "default_hybrid" -> 140
+                        else -> 140
+                    }
+                    (compactInitialDp * density).toInt()
+                }
+            }
+        } else {
             val targetHeightDp = when (page.type) {
                 "calculator" -> 260
                 "compass" -> 270
@@ -569,15 +599,9 @@ class SidebarView(
                 else -> prefs.getInt("handle_${containerId}_sidebar_height", prefs.getInt("sidebar_height", 280))
             }
             (targetHeightDp * density).toInt()
-        } else {
-            ViewGroup.LayoutParams.WRAP_CONTENT
         }
 
-        val targetHeightPx = if (isPageWrap) {
-            WindowManager.LayoutParams.WRAP_CONTENT
-        } else {
-            headerHeight + targetContentHeightPx
-        }
+        val targetHeightPx = headerHeight + targetContentHeightPx
 
         val legacyEdge = if (prefs.getBoolean("sidebar_position_left", false)) "left" else "right"
         val isRight = prefs.getString("handle_${physicalHandleId}_edge", if (physicalHandleId == "sidebar") legacyEdge else "right") == "right"
@@ -620,10 +644,34 @@ class SidebarView(
         }
     }
 
+    private fun queryChildPageHeight(actualPosition: Int): Int {
+        val rcv = viewPager.getChildAt(0) as? androidx.recyclerview.widget.RecyclerView ?: return 0
+        for (i in 0 until rcv.childCount) {
+            val child = rcv.getChildAt(i)
+            val holder = rcv.getChildViewHolder(child) as? SidebarPageViewHolder ?: continue
+            val pos = holder.bindingAdapterPosition
+            val actPos = if (isLooping && pos != -1) pos % pageConfigs.size else pos
+            if (actPos == actualPosition) {
+                val pv = holder.pageView ?: continue
+                return when (pv) {
+                    is AppsPageView -> pv.getCurrentHeightPx()
+                    is HybridGridPageView -> pv.getCurrentHeightPx()
+                    is WidgetsGridPageView -> pv.getCurrentHeightPx()
+                    is WidgetPageView -> pv.getCurrentHeightPx()
+                    else -> pv.height
+                }
+            }
+        }
+        return 0
+    }
+
     private fun handleChildHeightChange(bindingAdapterPosition: Int, newHeight: Int) {
         val actualPosition = if (isLooping) viewPager.currentItem % pageConfigs.size else viewPager.currentItem
-        val page = pageConfigs.getOrNull(actualPosition)
-        val isPageWrap = if (page?.useCustomSettings == true) {
+        val page = pageConfigs.getOrNull(actualPosition) ?: return
+        if (newHeight > 0) {
+            pageHeights[page.id] = newHeight
+        }
+        val isPageWrap = if (page.useCustomSettings) {
             page.wrapContentHeight
         } else {
             true

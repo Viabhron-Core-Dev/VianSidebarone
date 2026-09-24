@@ -192,6 +192,24 @@
 * Any deviation from what was requested, and why: None.
 * Any known issue or follow-up needed: None. Ready for combined on-device testing.
 
+* Timestamp: 2026-09-24T21:44:00Z
+* One-line summary: Resolved ViewPager2 IllegalStateException crash by restoring MATCH_PARENT for page ViewHolder roots and implementing wrap-content at Sidebar/window measurement level.
+* Exact files touched:
+  - `app/src/main/java/com/example/feature/sidebar/SidebarView.kt`
+  - `receipts/RECEIPTS_095.md`
+* What was actually done:
+  - Reverted child frame in `SidebarView.SidebarPageViewHolder.onCreateViewHolder` to strictly use `ViewGroup.LayoutParams(MATCH_PARENT, MATCH_PARENT)`, satisfying ViewPager2's internal contract (`Pages must fill the whole ViewPager2 (use match_parent)`) and resolving the `IllegalStateException` crash upon sidebar swipe-open.
+  - Implemented wrap-content behavior cleanly at the window and ViewPager2 measurement level:
+    - Added `pageHeights: MutableMap<String, Int>` cache tracking actual measured content heights per page.
+    - Implemented `queryChildPageHeight(actualPosition)` querying `getCurrentHeightPx()` directly from active child page views (`AppsPageView`, `HybridGridPageView`, `WidgetsGridPageView`, `WidgetPageView`).
+    - Updated `updateWindowForPage` to set `viewPager.layoutParams.height` to the measured content height (or compact initial height) and `layoutParams.height` to `headerHeight + contentHeight`, allowing ViewPager2 to wrap content cleanly while all direct child pages maintain `MATCH_PARENT`.
+    - Maintained dynamic height updates via `handleChildHeightChange`, bounding heights to 85% of screen height (`maxAllowedHeight`) with safe internal vertical scrolling for tall content.
+    - Preserved custom fixed-height page configurations, stick alignments (top/center/bottom), lazy page loading, infinite loop navigation, and widget measurements.
+* How it was verified: local build only (`compile_applet` passed cleanly; `gradle :app:testDebugUnitTest` executed and passed all unit test suites).
+* Any deviation from what was requested, and why: None.
+* Any known issue or follow-up needed: None.
+
+
 
 
 
