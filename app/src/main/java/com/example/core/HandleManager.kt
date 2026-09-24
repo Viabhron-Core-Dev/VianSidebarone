@@ -265,7 +265,7 @@ class HandleManager(private val context: Context) {
             alphaPercent = 14,
             onTapAction = ACTION_NONE,
             onDoubleTapAction = ACTION_NONE,
-            onLongPressAction = ACTION_MOVE_HANDLE,
+            onLongPressAction = ACTION_NONE,
             onSwipeLeftAction = ACTION_OPEN_SIDEBAR,
             onSwipeRightAction = ACTION_NONE,
             onSwipeUpAction = ACTION_NONE,
@@ -309,11 +309,14 @@ class HandleManager(private val context: Context) {
         val shape = HandleShape.fromString(shapeStr)
         val alpha = try { prefs.getInt("handle_alpha_$index", 14) } catch (_: Exception) { 14 }
 
+        val isFirstHandle = (handleId == "handle_1")
         val tap = prefs.getString("handle_tap_$index", ACTION_NONE) ?: ACTION_NONE
         val doubleTap = prefs.getString("handle_double_tap_$index", ACTION_NONE) ?: ACTION_NONE
-        val longPress = prefs.getString("handle_long_press_$index", ACTION_MOVE_HANDLE) ?: ACTION_MOVE_HANDLE
-        val swipeLeft = prefs.getString("handle_swipe_left_$index", if (edge == HandleEdge.RIGHT) ACTION_OPEN_SIDEBAR else ACTION_NONE) ?: if (edge == HandleEdge.RIGHT) ACTION_OPEN_SIDEBAR else ACTION_NONE
-        val swipeRight = prefs.getString("handle_swipe_right_$index", if (edge == HandleEdge.LEFT) ACTION_OPEN_SIDEBAR else ACTION_NONE) ?: if (edge == HandleEdge.LEFT) ACTION_OPEN_SIDEBAR else ACTION_NONE
+        val rawLongPress = prefs.getString("handle_long_press_$index", ACTION_NONE) ?: ACTION_NONE
+        val longPress = if (rawLongPress == ACTION_MOVE_HANDLE) ACTION_NONE else rawLongPress
+        val defaultSwipeLeft = if (isFirstHandle) ACTION_OPEN_SIDEBAR else ACTION_NONE
+        val swipeLeft = prefs.getString("handle_swipe_left_$index", defaultSwipeLeft) ?: defaultSwipeLeft
+        val swipeRight = prefs.getString("handle_swipe_right_$index", ACTION_NONE) ?: ACTION_NONE
         val swipeUp = prefs.getString("handle_swipe_up_$index", ACTION_NONE) ?: ACTION_NONE
         val swipeDown = prefs.getString("handle_swipe_down_$index", ACTION_NONE) ?: ACTION_NONE
 
@@ -362,9 +365,9 @@ class HandleManager(private val context: Context) {
             alphaPercent = 14,
             onTapAction = ACTION_NONE,
             onDoubleTapAction = ACTION_NONE,
-            onLongPressAction = ACTION_MOVE_HANDLE,
-            onSwipeLeftAction = if (edge == HandleEdge.RIGHT) ACTION_OPEN_SIDEBAR else ACTION_NONE,
-            onSwipeRightAction = if (edge == HandleEdge.LEFT) ACTION_OPEN_SIDEBAR else ACTION_NONE,
+            onLongPressAction = ACTION_NONE,
+            onSwipeLeftAction = ACTION_NONE,
+            onSwipeRightAction = ACTION_NONE,
             onSwipeUpAction = ACTION_NONE,
             onSwipeDownAction = ACTION_NONE
         )

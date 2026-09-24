@@ -2,6 +2,7 @@ package com.example.feature.settings.handle
 
 import android.content.Context
 import android.graphics.Color as AndroidColor
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -11,6 +12,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -20,6 +22,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
@@ -163,7 +166,6 @@ private fun ReferenceHandleItem(
     val actionLabels = remember {
         mapOf(
             HandleManager.ACTION_OPEN_SIDEBAR to "Sidebar (Default / Active Page)",
-            HandleManager.ACTION_MOVE_HANDLE to "Move Handle",
             "action_screenshot" to "Action: Take Screenshot",
             "action_long_screenshot" to "Action: Long Screenshot",
             "action_lock_screen" to "Action: Lock Screen",
@@ -553,12 +555,28 @@ fun ReferenceHandleEditScreen(
         OverlaySyncManager.syncString(context, "handle_${updated.id}_edge", updated.edge.name.lowercase())
     }
 
+    val handleBack = {
+        syncAndSave(
+            currentHandle.copy(
+                edge = edge,
+                positionPercent = (yPos / 100f).coerceIn(0.05f, 0.95f),
+                widthDp = sizeWidth.toInt(),
+                heightDp = sizeHeight.toInt(),
+                color = colorInt,
+                shape = shape
+            )
+        )
+        onBack()
+    }
+
+    BackHandler(onBack = handleBack)
+
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text("Edit Handle") },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    IconButton(onClick = handleBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 }
@@ -572,6 +590,85 @@ fun ReferenceHandleEditScreen(
                 .verticalScroll(rememberScrollState())
                 .padding(16.dp)
         ) {
+            // Live responsive visual preview (updates locally/in memory immediately during dragging)
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(200.dp)
+                    .testTag("handle_preview_card"),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                ),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(12.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .border(
+                                width = 1.dp,
+                                color = MaterialTheme.colorScheme.outlineVariant,
+                                shape = RoundedCornerShape(8.dp)
+                            )
+                            .clip(RoundedCornerShape(8.dp))
+                    ) {
+                        Text(
+                            text = if (edge == HandleEdge.LEFT) "← Left Screen Edge" else "Right Screen Edge →",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                            modifier = Modifier
+                                .align(if (edge == HandleEdge.LEFT) Alignment.TopStart else Alignment.TopEnd)
+                                .padding(8.dp)
+                        )
+
+                        val previewHeightDp = (sizeHeight * 0.4f).coerceIn(16f, 120f).dp
+                        val previewWidthDp = (sizeWidth * 0.5f).coerceIn(4f, 24f).dp
+                        val handleCornerShape = when (shape) {
+                            HandleShape.SLANTED_BLOCK -> if (edge == HandleEdge.LEFT) {
+                                RoundedCornerShape(topStart = 0.dp, bottomStart = 0.dp, topEnd = 8.dp, bottomEnd = 2.dp)
+                            } else {
+                                RoundedCornerShape(topStart = 8.dp, bottomStart = 2.dp, topEnd = 0.dp, bottomEnd = 0.dp)
+                            }
+                            HandleShape.HALF_OVAL -> if (edge == HandleEdge.LEFT) {
+                                RoundedCornerShape(topStart = 0.dp, bottomStart = 0.dp, topEnd = 16.dp, bottomEnd = 16.dp)
+                            } else {
+                                RoundedCornerShape(topStart = 16.dp, bottomStart = 16.dp, topEnd = 0.dp, bottomEnd = 0.dp)
+                            }
+                            HandleShape.RECTANGLE -> RoundedCornerShape(2.dp)
+                            else -> RoundedCornerShape(4.dp)
+                        }
+
+                        Box(
+                            modifier = Modifier
+                                .fillMaxHeight()
+                                .align(if (edge == HandleEdge.LEFT) Alignment.CenterStart else Alignment.CenterEnd)
+                        ) {
+                            BoxWithConstraints(modifier = Modifier.fillMaxHeight()) {
+                                val availableH = maxHeight - previewHeightDp
+                                val topOffset = availableH * (yPos / 100f).coerceIn(0.05f, 0.95f)
+                                Box(
+                                    modifier = Modifier
+                                        .offset(y = topOffset)
+                                        .width(previewWidthDp)
+                                        .height(previewHeightDp)
+                                        .background(Color(colorInt), handleCornerShape)
+                                        .border(
+                                            width = 1.dp,
+                                            color = Color.White.copy(alpha = 0.3f),
+                                            shape = handleCornerShape
+                                        )
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
             Text("Appearance (Applies Instantly)", style = MaterialTheme.typography.titleMedium)
             Spacer(modifier = Modifier.height(12.dp))
 
@@ -595,9 +692,13 @@ fun ReferenceHandleEditScreen(
                 value = yPos,
                 onValueChange = {
                     yPos = it
-                    syncAndSave(currentHandle.copy(positionPercent = it / 100f))
+                    currentHandle = currentHandle.copy(positionPercent = (it / 100f).coerceIn(0.05f, 0.95f))
                 },
-                valueRange = 0f..100f
+                onValueChangeFinished = {
+                    syncAndSave(currentHandle.copy(positionPercent = (yPos / 100f).coerceIn(0.05f, 0.95f)))
+                },
+                valueRange = 5f..95f,
+                modifier = Modifier.testTag("handle_y_pos_slider")
             )
             Spacer(modifier = Modifier.height(8.dp))
 
@@ -606,9 +707,13 @@ fun ReferenceHandleEditScreen(
                 value = sizeWidth,
                 onValueChange = {
                     sizeWidth = it
-                    syncAndSave(currentHandle.copy(widthDp = it.toInt()))
+                    currentHandle = currentHandle.copy(widthDp = it.toInt())
                 },
-                valueRange = 2f..50f
+                onValueChangeFinished = {
+                    syncAndSave(currentHandle.copy(widthDp = sizeWidth.toInt()))
+                },
+                valueRange = 2f..50f,
+                modifier = Modifier.testTag("handle_width_slider")
             )
             Spacer(modifier = Modifier.height(8.dp))
 
@@ -617,9 +722,13 @@ fun ReferenceHandleEditScreen(
                 value = sizeHeight,
                 onValueChange = {
                     sizeHeight = it
-                    syncAndSave(currentHandle.copy(heightDp = it.toInt()))
+                    currentHandle = currentHandle.copy(heightDp = it.toInt())
                 },
-                valueRange = 20f..300f
+                onValueChangeFinished = {
+                    syncAndSave(currentHandle.copy(heightDp = sizeHeight.toInt()))
+                },
+                valueRange = 20f..300f,
+                modifier = Modifier.testTag("handle_height_slider")
             )
             Spacer(modifier = Modifier.height(12.dp))
 

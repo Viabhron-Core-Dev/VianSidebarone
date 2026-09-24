@@ -27,8 +27,6 @@ class TriggerHandleView(
     private val windowManager = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
     private val shapeDrawable = HandleShapeDrawable(config.shape, config.edge, config.color)
     private var isAttached = false
-    private var isDragging = false
-
     private val layoutParams = WindowManager.LayoutParams(
         WindowManager.LayoutParams.WRAP_CONTENT,
         WindowManager.LayoutParams.WRAP_CONTENT,
@@ -52,7 +50,7 @@ class TriggerHandleView(
         override fun onDown(e: MotionEvent): Boolean = true
 
         override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
-            if (!isDragging && !gestureHandled) {
+            if (!gestureHandled) {
                 if (config.onTapAction != HandleManager.ACTION_NONE) {
                     performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY)
                     onGestureAction(config.onTapAction, HandleGestures.TAP, config)
@@ -63,7 +61,7 @@ class TriggerHandleView(
         }
 
         override fun onDoubleTap(e: MotionEvent): Boolean {
-            if (!isDragging && !gestureHandled) {
+            if (!gestureHandled) {
                 if (config.onDoubleTapAction != HandleManager.ACTION_NONE) {
                     performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY)
                     onGestureAction(config.onDoubleTapAction, HandleGestures.DOUBLE_TAP, config)
@@ -75,10 +73,7 @@ class TriggerHandleView(
 
         override fun onLongPress(e: MotionEvent) {
             if (!gestureHandled) {
-                if (config.onLongPressAction == HandleManager.ACTION_MOVE_HANDLE) {
-                    isDragging = true
-                    performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
-                } else if (config.onLongPressAction != HandleManager.ACTION_NONE) {
+                if (config.onLongPressAction != HandleManager.ACTION_NONE && config.onLongPressAction != HandleManager.ACTION_MOVE_HANDLE) {
                     performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
                     onGestureAction(config.onLongPressAction, HandleGestures.LONG_PRESS, config)
                 }
@@ -91,7 +86,7 @@ class TriggerHandleView(
             velocityX: Float,
             velocityY: Float
         ): Boolean {
-            if (isDragging || gestureHandled) return false
+            if (gestureHandled) return false
             val startX = e1?.rawX ?: initialTouchX
             val startY = e1?.rawY ?: initialTouchY
             val dx = e2.rawX - startX
@@ -200,36 +195,6 @@ class TriggerHandleView(
 
     @SuppressLint("ClickableViewAccessibility")
     override fun onTouchEvent(event: MotionEvent): Boolean {
-        if (isDragging) {
-            when (event.actionMasked) {
-                MotionEvent.ACTION_MOVE -> {
-                    val dm = resources.displayMetrics
-                    if (config.edge == HandleEdge.LEFT || config.edge == HandleEdge.RIGHT) {
-                        val rawY = event.rawY
-                        val newPercent = (rawY / dm.heightPixels).coerceIn(0.05f, 0.95f)
-                        layoutParams.y = ((dm.heightPixels - layoutParams.height) * newPercent).toInt()
-                        windowManager.updateViewLayout(this, layoutParams)
-                    } else {
-                        val rawX = event.rawX
-                        val newPercent = (rawX / dm.widthPixels).coerceIn(0.05f, 0.95f)
-                        layoutParams.x = ((dm.widthPixels - layoutParams.width) * newPercent).toInt()
-                        windowManager.updateViewLayout(this, layoutParams)
-                    }
-                }
-                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                    isDragging = false
-                    val dm = resources.displayMetrics
-                    val finalPercent = if (config.edge == HandleEdge.LEFT || config.edge == HandleEdge.RIGHT) {
-                        (layoutParams.y.toFloat() / (dm.heightPixels - layoutParams.height)).coerceIn(0.05f, 0.95f)
-                    } else {
-                        (layoutParams.x.toFloat() / (dm.widthPixels - layoutParams.width)).coerceIn(0.05f, 0.95f)
-                    }
-                    HandleManager.getInstance(context).updateHandlePosition(config.id, finalPercent)
-                }
-            }
-            return true
-        }
-
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 initialTouchX = event.rawX

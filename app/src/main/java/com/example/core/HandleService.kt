@@ -141,14 +141,28 @@ class HandleService : Service(), SharedPreferences.OnSharedPreferenceChangeListe
         val initialNotification = buildNotification(initialIconResId, initialTitle, "Down: 0 kB/s   Up: 0 kB/s")
 
         // 2. Start Foreground IMMEDIATELY to satisfy system startForegroundService contract
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(
-                NOTIFICATION_ID,
-                initialNotification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
-            )
-        } else {
-            startForeground(NOTIFICATION_ID, initialNotification)
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(
+                    NOTIFICATION_ID,
+                    initialNotification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+                )
+            } else {
+                startForeground(NOTIFICATION_ID, initialNotification)
+            }
+        } catch (e: Exception) {
+            LogKeeper.logError(this, "HandleService", "Primary startForeground failed; retrying with guaranteed system fallback icon", e)
+            val fallbackNotification = buildNotification(R.drawable.ic_speed, initialTitle, "Down: 0 kB/s   Up: 0 kB/s")
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(
+                    NOTIFICATION_ID,
+                    fallbackNotification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+                )
+            } else {
+                startForeground(NOTIFICATION_ID, fallbackNotification)
+            }
         }
 
         // 3. Validate runtime configuration
@@ -346,6 +360,27 @@ class HandleService : Service(), SharedPreferences.OnSharedPreferenceChangeListe
         }
     }
 
+    private fun resolveSafeIconResId(candidateResId: Int): Int {
+        if (candidateResId > 0 && isValidDrawableResource(candidateResId)) {
+            return candidateResId
+        }
+        val speedZero = SpeedIconProvider.resolve("0", "kB/s").resId
+        if (speedZero > 0 && isValidDrawableResource(speedZero)) {
+            return speedZero
+        }
+        return R.drawable.ic_speed
+    }
+
+    private fun isValidDrawableResource(resId: Int): Boolean {
+        if (resId <= 0) return false
+        return try {
+            resources.getResourceName(resId)
+            true
+        } catch (_: Exception) {
+            false
+        }
+    }
+
     private fun buildNotification(
         iconResId: Int,
         titleText: String,
@@ -361,8 +396,10 @@ class HandleService : Service(), SharedPreferences.OnSharedPreferenceChangeListe
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
+        val safeIcon = resolveSafeIconResId(iconResId)
+
         return Notification.Builder(this, CHANNEL_ID)
-            .setSmallIcon(iconResId)
+            .setSmallIcon(safeIcon)
             .setContentTitle(titleText)
             .setContentText(contentText)
             .setContentIntent(pendingIntent)
