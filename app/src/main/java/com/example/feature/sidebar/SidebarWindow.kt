@@ -36,7 +36,7 @@ class SidebarWindow(
 
     init {
         val density = context.resources.displayMetrics.density
-        val widthPx = (198 * density).toInt()
+        val widthPx = (220 * density).toInt()
         val screenHeight = context.resources.displayMetrics.heightPixels
         val screenWidth = context.resources.displayMetrics.widthPixels
 
@@ -48,11 +48,11 @@ class SidebarWindow(
         )
 
         layoutParams.width = widthPx
-        layoutParams.height = WindowManager.LayoutParams.MATCH_PARENT
+        layoutParams.height = WindowManager.LayoutParams.WRAP_CONTENT
         layoutParams.gravity = if (edge == HandleEdge.RIGHT)
-            Gravity.END or Gravity.CENTER_VERTICAL
+            Gravity.END or Gravity.BOTTOM
         else
-            Gravity.START or Gravity.CENTER_VERTICAL
+            Gravity.START or Gravity.BOTTOM
         layoutParams.flags = WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
                 WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH or
                 WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED
@@ -65,7 +65,7 @@ class SidebarWindow(
             val prefs = context.getSharedPreferences("FloatingReaderPrefs", Context.MODE_PRIVATE)
             val wm = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
             val pages = pageConfigs ?: com.example.utils.PageManager.getPages(prefs, containerId)
-            sidebarView = SidebarView(
+            val sv = SidebarView(
                 context = context,
                 prefs = prefs,
                 windowManager = wm,
@@ -75,6 +75,11 @@ class SidebarWindow(
                 defaultPageIndex = defaultPageIndex,
                 onClose = onCloseRequested
             )
+            sidebarView = sv
+            val svParams = sv.sidebarLayoutParams
+            layoutParams.width = svParams.width
+            layoutParams.height = svParams.height
+            layoutParams.gravity = svParams.gravity
         }
         return sidebarView!!
     }

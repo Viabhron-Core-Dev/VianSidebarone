@@ -4,6 +4,7 @@ import android.app.AlarmManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
@@ -47,6 +48,7 @@ object MainProcessRecovery {
     fun onServiceStarted(context: Context) {
         cancelStableReset()
         cancelPendingRecovery(context)
+        LogKeeper.log(context, TAG, "onServiceStarted: HandleService active. Scheduling crash reset in ${STABLE_RUN_THRESHOLD_MS / 1000}s.")
         stableResetRunnable = Runnable {
             markStable(context)
         }.also {
@@ -185,12 +187,22 @@ object MainProcessRecovery {
                 )
 
                 val triggerAt = SystemClock.elapsedRealtime() + delayMillis
-                alarmManager.set(AlarmManager.ELAPSED_REALTIME_WAKEUP, triggerAt, pendingIntent)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    if (alarmManager.canScheduleExactAlarms()) {
+                        alarmManager.setExactAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, triggerAt, pendingIntent)
+                    } else {
+                        alarmManager.setAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, triggerAt, pendingIntent)
+                    }
+                } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    alarmManager.setExactAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, triggerAt, pendingIntent)
+                } else {
+                    alarmManager.set(AlarmManager.ELAPSED_REALTIME_WAKEUP, triggerAt, pendingIntent)
+                }
 
                 LogKeeper.log(
                     context,
                     TAG,
-                    "Scheduled system restart trigger via AlarmManager in ${delayMillis}ms (attempt $consecutiveCrashes/$MAX_CONSECUTIVE_CRASHES)."
+                    "Scheduled system restart trigger via AlarmManager in ${delayMillis}ms (attempt $consecutiveCrashes/$MAX_CONSECUTIVE_CRASHES, triggerAt=$triggerAt)."
                 )
             }
         } catch (e: Exception) {

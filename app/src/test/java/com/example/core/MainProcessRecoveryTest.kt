@@ -103,5 +103,45 @@ class MainProcessRecoveryTest {
         val callManager = CallRecorderManager(context = null)
         assertTrue("Call sensor must remain available during screen off", callManager.isAvailableDuringScreenOff)
     }
+
+    // 7. Verify SpeedIconProvider resolves critical speed values to non-zero resource IDs
+    @Test
+    fun testSpeedIconProviderResolution() {
+        val speed25k = SpeedIconProvider.resolve("25", "kB/s")
+        assertEquals("ic_stat_speed_25_k", speed25k.resName)
+        assertTrue("Speed 25 kB/s icon resource ID must be non-zero", speed25k.resId > 0)
+
+        val speedZero = SpeedIconProvider.resolve("0", "kB/s")
+        assertEquals("ic_stat_speed_0_k", speedZero.resName)
+        assertTrue("Speed 0 kB/s icon resource ID must be non-zero", speedZero.resId > 0)
+
+        val speedMb = SpeedIconProvider.resolve("25.0", "MB/s")
+        assertEquals("ic_stat_speed_25_0_m", speedMb.resName)
+        assertTrue("Speed 25.0 MB/s icon resource ID must be non-zero", speedMb.resId > 0)
+    }
+
+    // 8. Verify all pre-rendered speed icon files on disk have valid PNG headers
+    @Test
+    fun testAllSpeedIconAssetsValidPng() {
+        val resDir = java.io.File("src/main/res/drawable-xhdpi")
+        if (resDir.exists()) {
+            val pngFiles = resDir.listFiles { _, name -> name.startsWith("ic_stat_speed_") && name.endsWith(".png") }
+            assertNotNull("Speed icon directory should have files", pngFiles)
+            assertTrue("Should contain all 1421 speed icons", pngFiles!!.size >= 1421)
+
+            val pngSignature = byteArrayOf(
+                0x89.toByte(), 0x50.toByte(), 0x4E.toByte(), 0x47.toByte(),
+                0x0D.toByte(), 0x0A.toByte(), 0x1A.toByte(), 0x0A.toByte()
+            )
+            for (file in pngFiles) {
+                java.io.FileInputStream(file).use { fis ->
+                    val header = ByteArray(8)
+                    val read = fis.read(header)
+                    assertEquals("Header read length for ${file.name}", 8, read)
+                    assertTrue("Valid PNG signature for ${file.name}", header.contentEquals(pngSignature))
+                }
+            }
+        }
+    }
 }
 

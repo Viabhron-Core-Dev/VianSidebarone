@@ -153,6 +153,47 @@
 * Any deviation from what was requested, and why: None.
 * Any known issue or follow-up needed: None. Existing grid/page behavior, UI appearance, and custom icon overrides are fully preserved.
 
+* Timestamp: 2026-09-24T20:34:00Z
+* One-line summary: Fixed notification BadForegroundServiceNotificationException crash by restoring 33 corrupted PNG assets, added active runtime drawable validation, and hardened AlarmManager recovery triggers.
+* Exact files touched:
+  - `tools/generate_speed_icons.py`
+  - `app/src/main/res/drawable-xhdpi/ic_stat_speed_25_k.png` (and 32 other corrupted speed icons)
+  - `app/src/main/java/com/example/core/HandleService.kt`
+  - `app/src/main/java/com/example/core/MainProcessRecovery.kt`
+  - `app/src/main/java/com/example/service/BootReceiver.kt`
+  - `app/src/test/java/com/example/core/MainProcessRecoveryTest.kt`
+  - `receipts/RECEIPTS_095.md`
+* What was actually done:
+  - Discovered root cause of BadForegroundServiceNotificationException: 33 pre-rendered speed icon assets (including `ic_stat_speed_25_k.png`) were corrupted with UTF-8 replacement characters (`\xEF\xBF\xBD`) instead of the PNG magic header (`\x89PNG\r\n\x1a\n`). While AAPT2 indexed them in `resources.arsc` under ID `0x7f0601fe`, SystemUI failed to decode them into Drawables, throwing BadForegroundServiceNotificationException.
+  - Identified why `resolveSafeIconResId()` previously failed: `resources.getResourceName(candidateResId)` only queried the symbol table and never verified that the underlying resource could be decoded into a Drawable.
+  - Enhanced `tools/generate_speed_icons.py` with `is_valid_png()` check verifying the 8-byte PNG header, and regenerated all 33 corrupted icon files so that all 1,421 PNG assets on disk are genuine 96x96 PNG images.
+  - Updated `isValidDrawableResource()` in `HandleService.kt` to actively test decoding using `ContextCompat.getDrawable(this, resId)` backed by a concurrent cache (`validatedIconCache`), preventing any undecodable resource from ever being passed to `setSmallIcon()`.
+  - Added safe fallback substitution logging in `HandleService.buildNotification()` if an unusable icon candidate is ever resolved.
+  - Enhanced `MainProcessRecovery.kt` to use `setExactAndAllowWhileIdle()` / `setAndAllowWhileIdle()` on Android 6.0+ / 12+ instead of inexact `set()`, ensuring the recovery alarm fires even under background battery optimizations.
+  - Added comprehensive diagnostic lifecycle logs across `HandleService.kt`, `MainProcessRecovery.kt`, and `BootReceiver.kt` to distinguish sticky restarts, alarm triggers, receiver dispatches, and startup states.
+  - Added unit tests in `MainProcessRecoveryTest.kt` verifying `SpeedIconProvider` resolution and validating the 8-byte PNG signatures across all 1,421 assets.
+* How it was verified: local build only (`compile_applet` passed cleanly; `gradle :app:testDebugUnitTest` executed and passed all unit test suites).
+* Any deviation from what was requested, and why: None.
+* Any known issue or follow-up needed: None. All 1,421 pre-rendered speed icons, sampling, TrafficStats, and Handle behaviors are fully preserved.
+
+* Timestamp: 2026-09-24T21:09:00Z
+* One-line summary: Slightly widened Sidebar from 198dp to 220dp and enabled wrap_content by default across SidebarWindow, ViewPager frame, and updateWindowForPage.
+* Exact files touched:
+  - `app/src/main/java/com/example/feature/sidebar/SidebarView.kt`
+  - `app/src/main/java/com/example/feature/sidebar/SidebarWindow.kt`
+  - `receipts/RECEIPTS_095.md`
+* What was actually done:
+  - Adjusted default 3-column / baseline sidebar width from 198dp to 220dp in `SidebarView.kt` and `SidebarWindow.kt` (with <=2 cols scaled from 140dp to 155dp, and >=4 cols scaled from 240dp to 265dp) for a modest, comfortable increase while preserving the existing rounded shape, edge handling, and handle relationship.
+  - Eliminated hardcoded `MATCH_PARENT` height in `SidebarWindow.kt`, setting initial window height to `WindowManager.LayoutParams.WRAP_CONTENT` and synchronizing layout parameters from `SidebarView.sidebarLayoutParams`.
+  - Updated `onCreateViewHolder` in `SidebarView.kt` so the child page container FrameLayout uses `WRAP_CONTENT` height instead of `MATCH_PARENT` when wrap-content is active.
+  - Refactored `updateWindowForPage` in `SidebarView.kt` so that default wrap-content pages set `WRAP_CONTENT` for both `viewPager.layoutParams` and `layoutParams.height`, allowing pages (apps, hybrid grid, widgets grid, tools) to hug their content naturally rather than stretching to a fixed 280dp box.
+  - Preserved element sizes, item spacing, scrolling, and widget measurement behavior.
+* How it was verified: local build only (`compile_applet` passed cleanly; `gradle :app:testDebugUnitTest` executed and passed all unit tests).
+* Any deviation from what was requested, and why: None.
+* Any known issue or follow-up needed: None. Ready for combined on-device testing.
+
+
+
 
 
 

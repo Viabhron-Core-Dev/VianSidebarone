@@ -420,6 +420,15 @@ def generate_provider_kt(kb_items, mb_items):
         f.write("\n".join(lines))
     print(f"Generated {PROVIDER_FILE}")
 
+def is_valid_png(path):
+    try:
+        if not os.path.exists(path) or os.path.getsize(path) < 100:
+            return False
+        with open(path, "rb") as f:
+            return f.read(8) == b"\x89PNG\r\n\x1a\n"
+    except Exception:
+        return False
+
 def main():
     os.makedirs(OUT_DIR, exist_ok=True)
     force = "--force" in sys.argv
@@ -442,7 +451,7 @@ def main():
     for item in all_items:
         _, _, filename = item
         out_path = os.path.join(OUT_DIR, f"{filename}.png")
-        if force or not os.path.exists(out_path) or os.path.getsize(out_path) < 100:
+        if force or not is_valid_png(out_path):
             items_to_render.append(item)
 
     if items_to_render:

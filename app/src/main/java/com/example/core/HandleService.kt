@@ -99,8 +99,21 @@ class HandleService : Service(), SharedPreferences.OnSharedPreferenceChangeListe
             try {
                 val prefs = context.getSharedPreferences(HandleManager.PREFS_NAME, Context.MODE_PRIVATE)
                 val autoStart = prefs.getBoolean("auto_start_on_boot", true)
-                if (autoStart && Settings.canDrawOverlays(context)) {
+                val canOverlay = Settings.canDrawOverlays(context)
+                LogKeeper.log(
+                    context,
+                    "HandleService",
+                    "startIfConfigured called: autoStart=$autoStart, canDrawOverlays=$canOverlay"
+                )
+                if (autoStart && canOverlay) {
+                    LogKeeper.log(context, "HandleService", "startIfConfigured: launching service")
                     start(context)
+                } else {
+                    LogKeeper.log(
+                        context,
+                        "HandleService",
+                        "startIfConfigured skipped (autoStart=$autoStart, canOverlay=$canOverlay)"
+                    )
                 }
             } catch (e: Exception) {
                 LogKeeper.logError(context, "HandleService", "Failed to startIfConfigured", e)
@@ -151,6 +164,7 @@ class HandleService : Service(), SharedPreferences.OnSharedPreferenceChangeListe
             } else {
                 startForeground(NOTIFICATION_ID, initialNotification)
             }
+            LogKeeper.logLifecycle(this, "HandleService", "FOREGROUND_STARTED", "Primary startForeground succeeded (icon=$initialIconResId)")
         } catch (e: Exception) {
             LogKeeper.logError(this, "HandleService", "Primary startForeground failed; retrying with guaranteed system fallback icon", e)
             val fallbackNotification = buildNotification(R.drawable.ic_speed, initialTitle, "Down: 0 kB/s   Up: 0 kB/s")
@@ -163,6 +177,7 @@ class HandleService : Service(), SharedPreferences.OnSharedPreferenceChangeListe
             } else {
                 startForeground(NOTIFICATION_ID, fallbackNotification)
             }
+            LogKeeper.logLifecycle(this, "HandleService", "FOREGROUND_STARTED", "Fallback startForeground succeeded with R.drawable.ic_speed")
         }
 
         // 3. Validate runtime configuration
@@ -360,6 +375,8 @@ class HandleService : Service(), SharedPreferences.OnSharedPreferenceChangeListe
         }
     }
 
+    private val validatedIconCache = java.util.concurrent.ConcurrentHashMap<Int, Boolean>()
+
     private fun resolveSafeIconResId(candidateResId: Int): Int {
         if (candidateResId > 0 && isValidDrawableResource(candidateResId)) {
             return candidateResId
@@ -373,11 +390,14 @@ class HandleService : Service(), SharedPreferences.OnSharedPreferenceChangeListe
 
     private fun isValidDrawableResource(resId: Int): Boolean {
         if (resId <= 0) return false
-        return try {
-            resources.getResourceName(resId)
-            true
-        } catch (_: Exception) {
-            false
+        return validatedIconCache.getOrPut(resId) {
+            try {
+                // Actually verify that the Android framework can decode and create this drawable
+                val drawable = ContextCompat.getDrawable(this, resId)
+                drawable != null
+            } catch (_: Throwable) {
+                false
+            }
         }
     }
 
@@ -397,6 +417,13 @@ class HandleService : Service(), SharedPreferences.OnSharedPreferenceChangeListe
         )
 
         val safeIcon = resolveSafeIconResId(iconResId)
+        if (safeIcon != iconResId) {
+            LogKeeper.logError(
+                this,
+                "HandleService",
+                "Unsafe/unusable icon candidate detected (resId=$iconResId); substituted safe fallback icon (resId=$safeIcon)"
+            )
+        }
 
         return Notification.Builder(this, CHANNEL_ID)
             .setSmallIcon(safeIcon)

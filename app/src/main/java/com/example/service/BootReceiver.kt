@@ -19,6 +19,7 @@ class BootReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent) {
         val action = intent.action
+        LogKeeper.logLifecycle(context, "BootReceiver", "ON_RECEIVE", "Action received: $action")
         if (action == Intent.ACTION_BOOT_COMPLETED || 
             action == Intent.ACTION_MY_PACKAGE_REPLACED || 
             action == ACTION_RECOVER_MAIN) {
@@ -34,6 +35,7 @@ class BootReceiver : BroadcastReceiver() {
                         LogKeeper.logLifecycle(context, "BootReceiver", "RECOVER_MAIN", "One-shot crash recovery alarm triggered")
                     }
                 }
+                LogKeeper.log(context, "BootReceiver", "Dispatching HandleService.startIfConfigured()")
                 HandleService.startIfConfigured(context)
             } catch (e: Exception) {
                 LogKeeper.logError(context, "BootReceiver", "Failed to start service on $action", e)

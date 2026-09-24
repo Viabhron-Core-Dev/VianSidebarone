@@ -48,6 +48,7 @@ class SidebarView(
     }
     private val wrapContent = prefs.getBoolean("handle_${containerId}_sidebar_wrap_content", prefs.getBoolean("sidebar_wrap_content", true))
     private val layoutParams: WindowManager.LayoutParams
+    val sidebarLayoutParams: WindowManager.LayoutParams get() = layoutParams
     private val viewPager: ViewPager2
     private lateinit var container: FrameLayout
     private lateinit var dotsLayout: LinearLayout
@@ -99,25 +100,25 @@ class SidebarView(
                 "media_player" -> 300
                 "widgets_grid", "widget" -> {
                     val cols = prefs.getInt("widgets_grid_cols_${initialPage?.id}", 4)
-                    if (cols == 3) prefs.getInt("handle_${containerId}_sidebar_width", prefs.getInt("sidebar_width", 198))
-                    else if (cols <= 2) prefs.getInt("handle_${containerId}_sidebar_width", prefs.getInt("sidebar_width", 140))
-                    else prefs.getInt("handle_${containerId}_sidebar_width", prefs.getInt("sidebar_width", 240))
+                    if (cols == 3) prefs.getInt("handle_${containerId}_sidebar_width", prefs.getInt("sidebar_width", 220))
+                    else if (cols <= 2) prefs.getInt("handle_${containerId}_sidebar_width", prefs.getInt("sidebar_width", 155))
+                    else prefs.getInt("handle_${containerId}_sidebar_width", prefs.getInt("sidebar_width", 265))
                 }
                 "hybrid_grid", "default_hybrid" -> {
                     val cols = prefs.getInt("hybrid_grid_cols_${initialPage?.id}", 4)
-                    if (cols == 3) prefs.getInt("handle_${containerId}_sidebar_width", prefs.getInt("sidebar_width", 198))
-                    else if (cols <= 2) prefs.getInt("handle_${containerId}_sidebar_width", prefs.getInt("sidebar_width", 140))
-                    else prefs.getInt("handle_${containerId}_sidebar_width", prefs.getInt("sidebar_width", 240))
+                    if (cols == 3) prefs.getInt("handle_${containerId}_sidebar_width", prefs.getInt("sidebar_width", 220))
+                    else if (cols <= 2) prefs.getInt("handle_${containerId}_sidebar_width", prefs.getInt("sidebar_width", 155))
+                    else prefs.getInt("handle_${containerId}_sidebar_width", prefs.getInt("sidebar_width", 265))
                 }
                 "apps" -> {
                     val c = prefs.getInt("handle_${physicalHandleId}_page_${initialPage?.id}_columns", -1)
                     val defaultCols = prefs.getInt("handle_${physicalHandleId}_columns", prefs.getInt("sidebar_columns", 3))
                     val cols = if (initialPage?.useCustomSettings == true) initialPage.gridColumns else (if (c != -1) c else defaultCols)
-                    if (cols == 3) prefs.getInt("handle_${containerId}_sidebar_width", prefs.getInt("sidebar_width", 198))
-                    else if (cols <= 2) prefs.getInt("handle_${containerId}_sidebar_width", prefs.getInt("sidebar_width", 140))
-                    else prefs.getInt("handle_${containerId}_sidebar_width", prefs.getInt("sidebar_width", 240))
+                    if (cols == 3) prefs.getInt("handle_${containerId}_sidebar_width", prefs.getInt("sidebar_width", 220))
+                    else if (cols <= 2) prefs.getInt("handle_${containerId}_sidebar_width", prefs.getInt("sidebar_width", 155))
+                    else prefs.getInt("handle_${containerId}_sidebar_width", prefs.getInt("sidebar_width", 265))
                 }
-                else -> prefs.getInt("handle_${containerId}_sidebar_width", prefs.getInt("sidebar_width", 198))
+                else -> prefs.getInt("handle_${containerId}_sidebar_width", prefs.getInt("sidebar_width", 220))
             }
         }
         val widthPx = (targetWidthDp * density).toInt()
@@ -355,7 +356,10 @@ class SidebarView(
             }
             override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): SidebarPageViewHolder {
                 val frame = FrameLayout(parent.context).apply {
-                    layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+                    layoutParams = ViewGroup.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        if (wrapContent) ViewGroup.LayoutParams.WRAP_CONTENT else ViewGroup.LayoutParams.MATCH_PARENT
+                    )
                 }
                 return SidebarPageViewHolder(frame)
             }
@@ -520,25 +524,25 @@ class SidebarView(
                 "media_player" -> 300
                 "widgets_grid", "widget" -> {
                     val cols = prefs.getInt("widgets_grid_cols_${page.id}", 4)
-                    if (cols == 3) prefs.getInt("handle_${containerId}_sidebar_width", prefs.getInt("sidebar_width", 198))
-                    else if (cols <= 2) prefs.getInt("handle_${containerId}_sidebar_width", prefs.getInt("sidebar_width", 140))
-                    else prefs.getInt("handle_${containerId}_sidebar_width", prefs.getInt("sidebar_width", 240))
+                    if (cols == 3) prefs.getInt("handle_${containerId}_sidebar_width", prefs.getInt("sidebar_width", 220))
+                    else if (cols <= 2) prefs.getInt("handle_${containerId}_sidebar_width", prefs.getInt("sidebar_width", 155))
+                    else prefs.getInt("handle_${containerId}_sidebar_width", prefs.getInt("sidebar_width", 265))
                 }
                 "hybrid_grid", "default_hybrid" -> {
                     val cols = prefs.getInt("hybrid_grid_cols_${page.id}", 4)
-                    if (cols == 3) prefs.getInt("handle_${containerId}_sidebar_width", prefs.getInt("sidebar_width", 198))
-                    else if (cols <= 2) prefs.getInt("handle_${containerId}_sidebar_width", prefs.getInt("sidebar_width", 140))
-                    else prefs.getInt("handle_${containerId}_sidebar_width", prefs.getInt("sidebar_width", 240))
+                    if (cols == 3) prefs.getInt("handle_${containerId}_sidebar_width", prefs.getInt("sidebar_width", 220))
+                    else if (cols <= 2) prefs.getInt("handle_${containerId}_sidebar_width", prefs.getInt("sidebar_width", 155))
+                    else prefs.getInt("handle_${containerId}_sidebar_width", prefs.getInt("sidebar_width", 265))
                 }
                 "apps" -> {
                     val c = prefs.getInt("handle_${physicalHandleId}_page_${page.id}_columns", -1)
                     val defaultCols = prefs.getInt("handle_${physicalHandleId}_columns", prefs.getInt("sidebar_columns", 3))
                     val cols = if (page.useCustomSettings) page.gridColumns else (if (c != -1) c else defaultCols)
-                    if (cols == 3) prefs.getInt("handle_${containerId}_sidebar_width", prefs.getInt("sidebar_width", 198))
-                    else if (cols <= 2) prefs.getInt("handle_${containerId}_sidebar_width", prefs.getInt("sidebar_width", 140))
-                    else prefs.getInt("handle_${containerId}_sidebar_width", prefs.getInt("sidebar_width", 240))
+                    if (cols == 3) prefs.getInt("handle_${containerId}_sidebar_width", prefs.getInt("sidebar_width", 220))
+                    else if (cols <= 2) prefs.getInt("handle_${containerId}_sidebar_width", prefs.getInt("sidebar_width", 155))
+                    else prefs.getInt("handle_${containerId}_sidebar_width", prefs.getInt("sidebar_width", 265))
                 }
-                else -> prefs.getInt("handle_${containerId}_sidebar_width", prefs.getInt("sidebar_width", 198))
+                else -> prefs.getInt("handle_${containerId}_sidebar_width", prefs.getInt("sidebar_width", 220))
             }
         }
         val targetWidthPx = (targetWidthDp * density).toInt()
@@ -551,7 +555,7 @@ class SidebarView(
 
         val targetContentHeightPx = if (page.useCustomSettings && page.height > 0) {
             (page.height * density).toInt()
-        } else {
+        } else if (!isPageWrap) {
             val targetHeightDp = when (page.type) {
                 "calculator" -> 260
                 "compass" -> 270
@@ -565,9 +569,15 @@ class SidebarView(
                 else -> prefs.getInt("handle_${containerId}_sidebar_height", prefs.getInt("sidebar_height", 280))
             }
             (targetHeightDp * density).toInt()
+        } else {
+            ViewGroup.LayoutParams.WRAP_CONTENT
         }
 
-        val targetHeightPx = headerHeight + targetContentHeightPx
+        val targetHeightPx = if (isPageWrap) {
+            WindowManager.LayoutParams.WRAP_CONTENT
+        } else {
+            headerHeight + targetContentHeightPx
+        }
 
         val legacyEdge = if (prefs.getBoolean("sidebar_position_left", false)) "left" else "right"
         val isRight = prefs.getString("handle_${physicalHandleId}_edge", if (physicalHandleId == "sidebar") legacyEdge else "right") == "right"
