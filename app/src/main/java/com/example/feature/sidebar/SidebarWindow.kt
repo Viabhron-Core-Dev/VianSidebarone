@@ -56,6 +56,7 @@ class SidebarWindow(
         layoutParams.flags = WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
                 WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH or
                 WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED
+        layoutParams.softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
         layoutParams.x = 0
         layoutParams.y = 0
     }
@@ -80,6 +81,7 @@ class SidebarWindow(
             layoutParams.width = svParams.width
             layoutParams.height = svParams.height
             layoutParams.gravity = svParams.gravity
+            layoutParams.softInputMode = svParams.softInputMode
         }
         return sidebarView!!
     }

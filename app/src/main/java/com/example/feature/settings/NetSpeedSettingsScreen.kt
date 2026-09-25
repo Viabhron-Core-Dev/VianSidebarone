@@ -56,7 +56,13 @@ fun NetSpeedSettingsScreen(onBack: () -> Unit) {
     val prefs = remember { context.getSharedPreferences("FloatingReaderPrefs", Context.MODE_PRIVATE) }
     
     var speedIndicatorEnabled by remember { 
-        mutableStateOf(prefs.getBoolean("netspeed_enabled", prefs.getBoolean("speed_indicator_enabled", true))) 
+        mutableStateOf(
+            prefs.getBoolean("net_speed_enabled", 
+                prefs.getBoolean("netspeed_enabled", 
+                    prefs.getBoolean("speed_indicator_enabled", true)
+                )
+            )
+        ) 
     }
     var speedUnits by remember { mutableStateOf(prefs.getString("speed_units", "Auto") ?: "Auto") }
     var dataUnits by remember { mutableStateOf(prefs.getString("data_units", "Auto") ?: "Auto") }
@@ -115,9 +121,11 @@ fun NetSpeedSettingsScreen(onBack: () -> Unit) {
                             onCheckedChange = { enabled ->
                                 speedIndicatorEnabled = enabled
                                 prefs.edit()
+                                    .putBoolean("net_speed_enabled", enabled)
                                     .putBoolean("netspeed_enabled", enabled)
                                     .putBoolean("speed_indicator_enabled", enabled)
                                     .commit()
+                                com.example.core.OverlaySyncManager.syncBoolean(context, "net_speed_enabled", enabled)
                                 com.example.core.OverlaySyncManager.syncBoolean(context, "netspeed_enabled", enabled)
                                 com.example.core.OverlaySyncManager.syncBoolean(context, "speed_indicator_enabled", enabled)
                                 if (enabled && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {

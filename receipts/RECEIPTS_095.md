@@ -209,6 +209,31 @@
 * Any deviation from what was requested, and why: None.
 * Any known issue or follow-up needed: None.
 
+* Timestamp: 2026-09-25T07:20:00Z
+* One-line summary: Added Internet Speed Monitor Settings navigation in SettingsActivity and fixed Sidebar IME interaction to prevent soft keyboard input or dismissal from closing the Sidebar.
+* Exact files touched:
+  - `app/src/main/java/com/example/SettingsActivity.kt`
+  - `app/src/main/java/com/example/feature/settings/NetSpeedSettingsScreen.kt`
+  - `app/src/main/java/com/example/feature/sidebar/SidebarWindow.kt`
+  - `app/src/main/java/com/example/feature/sidebar/SidebarView.kt`
+  - `app/src/test/java/com/example/feature/sidebar/SidebarImeInteractionTest.kt`
+  - `receipts/RECEIPTS_095.md`
+* What was actually done:
+  - Inspected reference implementation in `Vian-Sidebar-main/app/src/main/java/com/example/feature/settings/NetSpeedSettingsScreen.kt` and adapted `NetSpeedSettingsScreen.kt` to ensure preference synchronization binds `net_speed_enabled` (matching `HandleService.KEY_NET_SPEED_ENABLED`) in tandem with `netspeed_enabled` and `speed_indicator_enabled` via `OverlaySyncManager`.
+  - Added "Internet Speed Monitor" as a dedicated configuration item in `SettingsActivity.kt` under `MainSettingsScreen` and mapped route `netspeed` (and alias `speed`) to `NetSpeedSettingsScreen(onBack = { navigateBack() })`.
+  - Preserved the existing Main-process NetSpeed runtime, TrafficStats polling, pre-rendered speed icons, and notification mechanism without moving anything to Heavy or creating duplicate runtimes.
+  - Inspected Sidebar overlay and IME interaction. Identified root cause of Sidebar closing when keyboard opened: `FLAG_WATCH_OUTSIDE_TOUCH` dispatched `ACTION_OUTSIDE` to `SidebarView.onTouchEvent` on every soft keyboard key tap, which unconditionally triggered `onClose()`. Furthermore, `setOnKeyListener` and `dispatchKeyEvent` closed the Sidebar immediately upon `KEYCODE_BACK`, even when the back press was intended to dismiss the keyboard.
+  - Configured `SidebarWindow` and `SidebarView` layout parameters with `FLAG_NOT_TOUCH_MODAL or FLAG_WATCH_OUTSIDE_TOUCH or FLAG_HARDWARE_ACCELERATED` without `FLAG_NOT_FOCUSABLE`, and added `softInputMode = SOFT_INPUT_ADJUST_RESIZE`.
+  - Implemented comprehensive keyboard state detection in `SidebarView` via `isKeyboardActive()` tracking focused `EditText` views, `WindowInsets.Type.ime()`, and display frame insets via `OnGlobalLayoutListener`.
+  - Updated `onTouchEvent` to ignore `ACTION_OUTSIDE` while `isKeyboardActive()` is true and during the 500ms post-dismissal transition window, allowing normal keyboard typing without closing the Sidebar.
+  - Updated `dispatchKeyEvent` and `setOnKeyListener` to intercept `KEYCODE_BACK` while the keyboard is open, invoking `hideKeyboard()` to dismiss the IME while keeping the Sidebar open.
+  - Implemented dynamic vertical offset compensation in `SidebarView` so bottom-anchored sidebars shift up above the keyboard (`layoutParams.y = keypadHeight`) when the IME appears and restore smoothly upon dismissal.
+  - Added unit test suite `SidebarImeInteractionTest.kt` covering window flags, IME mode, outside touch filtering, and back key keyboard-first dismissal.
+* How it was verified: local build only (`compile_applet` passed cleanly; `gradle :app:testDebugUnitTest` executed and passed all 35 unit test suites).
+* Any deviation from what was requested, and why: None.
+* Any known issue or follow-up needed: None. Ready for on-device manual verification.
+
+
 
 
 

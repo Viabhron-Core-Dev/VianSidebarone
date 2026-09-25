@@ -30,6 +30,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import com.example.core.HandleService
 import com.example.core.LogKeeper
+import com.example.feature.settings.NetSpeedSettingsScreen
 import com.example.feature.settings.PermissionManagerScreen
 import com.example.feature.settings.handle.HandleSettingsScreen
 
@@ -105,6 +106,11 @@ fun SettingsNavigationApp(initialRoute: String, onFinish: () -> Unit) {
                 onNavigateBack = { navigateBack() }
             )
         }
+        currentRoute == "netspeed" || currentRoute == "speed" -> {
+            NetSpeedSettingsScreen(
+                onBack = { navigateBack() }
+            )
+        }
         currentRoute == "permissions" -> {
             PermissionManagerScreen(
                 onContinue = { navigateBack() },
@@ -114,6 +120,7 @@ fun SettingsNavigationApp(initialRoute: String, onFinish: () -> Unit) {
         else -> {
             MainSettingsScreen(
                 onNavigateToHandles = { navigateTo("handles") },
+                onNavigateToNetSpeed = { navigateTo("netspeed") },
                 onNavigateToPermissions = { navigateTo("permissions") },
                 onBack = onFinish
             )
@@ -125,6 +132,7 @@ fun SettingsNavigationApp(initialRoute: String, onFinish: () -> Unit) {
 @Composable
 fun MainSettingsScreen(
     onNavigateToHandles: () -> Unit,
+    onNavigateToNetSpeed: () -> Unit,
     onNavigateToPermissions: () -> Unit,
     onBack: () -> Unit
 ) {
@@ -154,6 +162,16 @@ fun MainSettingsScreen(
                     modifier = Modifier
                         .clickable { onNavigateToHandles() }
                         .testTag("settings_item_handles")
+                )
+                Divider()
+            }
+            item {
+                ListItem(
+                    headlineContent = { Text("Internet Speed Monitor") },
+                    supportingContent = { Text("Configure status bar speed indicators, units, and app data usage") },
+                    modifier = Modifier
+                        .clickable { onNavigateToNetSpeed() }
+                        .testTag("settings_item_netspeed")
                 )
                 Divider()
             }
