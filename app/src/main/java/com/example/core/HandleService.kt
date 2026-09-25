@@ -148,10 +148,24 @@ class HandleService : Service(), SharedPreferences.OnSharedPreferenceChangeListe
             isScreenOn = powerManager.isInteractive
         }
 
-        // 1. Build initial foreground notification with initial display state
-        val initialTitle = "Data: ${getTodayDataFormatted()} • ${formatElapsedTime()}"
-        val initialIconResId = SpeedIconProvider.resolve("0", "kB/s").resId
-        val initialNotification = buildNotification(initialIconResId, initialTitle, "Down: 0 kB/s   Up: 0 kB/s")
+        // 1. Determine Net Speed Monitor state and build initial foreground notification
+        isSpeedMonitorEnabled = prefs.getBoolean(
+            KEY_NET_SPEED_ENABLED,
+            prefs.getBoolean("netspeed_enabled", prefs.getBoolean("speed_indicator_enabled", true))
+        )
+        val initialTitle: String
+        val initialIconResId: Int
+        val initialContentText: String
+        if (isSpeedMonitorEnabled) {
+            initialTitle = "Data: ${getTodayDataFormatted()} • ${formatElapsedTime()}"
+            initialIconResId = SpeedIconProvider.resolve("0", "kB/s").resId
+            initialContentText = "Down: 0 kB/s   Up: 0 kB/s"
+        } else {
+            initialTitle = "Handles Active"
+            initialIconResId = resolveSafeIconResId(R.drawable.ic_view_sidebar)
+            initialContentText = "Listening for edge gestures"
+        }
+        val initialNotification = buildNotification(initialIconResId, initialTitle, initialContentText)
 
         // 2. Start Foreground IMMEDIATELY to satisfy system startForegroundService contract
         try {
@@ -167,7 +181,7 @@ class HandleService : Service(), SharedPreferences.OnSharedPreferenceChangeListe
             LogKeeper.logLifecycle(this, "HandleService", "FOREGROUND_STARTED", "Primary startForeground succeeded (icon=$initialIconResId)")
         } catch (e: Exception) {
             LogKeeper.logError(this, "HandleService", "Primary startForeground failed; retrying with guaranteed system fallback icon", e)
-            val fallbackNotification = buildNotification(R.drawable.ic_speed, initialTitle, "Down: 0 kB/s   Up: 0 kB/s")
+            val fallbackNotification = buildNotification(R.drawable.ic_speed, initialTitle, initialContentText)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 startForeground(
                     NOTIFICATION_ID,
@@ -190,7 +204,6 @@ class HandleService : Service(), SharedPreferences.OnSharedPreferenceChangeListe
         }
 
         // 4. Initialize Net Speed Monitor immediately after entering foreground
-        isSpeedMonitorEnabled = prefs.getBoolean(KEY_NET_SPEED_ENABLED, true)
         setupNetSpeedManager()
 
         // 5. Secondary component registrations
@@ -278,11 +291,11 @@ class HandleService : Service(), SharedPreferences.OnSharedPreferenceChangeListe
         } else {
             netSpeedManager?.stop()
             netSpeedManager = null
-            // Update to a static standby notification
-            val standbyTitle = "Data: ${getTodayDataFormatted()} • ${formatElapsedTime()}"
-            val standbyIconResId = SpeedIconProvider.resolve("0", "kB/s").resId
-            val standbyNotification = buildNotification(standbyIconResId, standbyTitle, "Down: --   Up: --")
-            notificationManager.notify(NOTIFICATION_ID, standbyNotification)
+            // Update to a static handles active notification
+            val handlesTitle = "Handles Active"
+            val handlesIconResId = resolveSafeIconResId(R.drawable.ic_view_sidebar)
+            val handlesNotification = buildNotification(handlesIconResId, handlesTitle, "Listening for edge gestures")
+            notificationManager.notify(NOTIFICATION_ID, handlesNotification)
         }
     }
 
@@ -462,7 +475,14 @@ class HandleService : Service(), SharedPreferences.OnSharedPreferenceChangeListe
         when (type) {
             "STRING" -> prefs.edit().putString(key, value).commit()
             "INT" -> prefs.edit().putInt(key, value.toIntOrNull() ?: 0).commit()
-            "BOOLEAN" -> prefs.edit().putBoolean(key, value.toBoolean()).commit()
+            "BOOLEAN" -> {
+                val bVal = value.toBoolean()
+                prefs.edit().putBoolean(key, bVal).commit()
+                if (key == KEY_NET_SPEED_ENABLED || key == "net_speed_enabled" || key == "netspeed_enabled" || key == "speed_indicator_enabled") {
+                    isSpeedMonitorEnabled = bVal
+                    setupNetSpeedManager()
+                }
+            }
             "FLOAT" -> prefs.edit().putFloat(key, value.toFloatOrNull() ?: 0f).commit()
             "REMOVE" -> prefs.edit().remove(key).commit()
             "SYNC_HANDLE" -> {
@@ -559,8 +579,8 @@ class HandleService : Service(), SharedPreferences.OnSharedPreferenceChangeListe
             if (isScreenOn) {
                 attachHandles()
             }
-        } else if (key == KEY_NET_SPEED_ENABLED) {
-            isSpeedMonitorEnabled = prefs.getBoolean(KEY_NET_SPEED_ENABLED, true)
+        } else if (key == KEY_NET_SPEED_ENABLED || key == "net_speed_enabled" || key == "netspeed_enabled" || key == "speed_indicator_enabled") {
+            isSpeedMonitorEnabled = prefs.getBoolean(KEY_NET_SPEED_ENABLED, prefs.getBoolean("netspeed_enabled", prefs.getBoolean("speed_indicator_enabled", true)))
             setupNetSpeedManager()
         } else if (key == CallRecorderManager.KEY_CALL_RECORDER_ENABLED) {
             if (CallRecorderManager.getInstance(this).isEnabled()) {

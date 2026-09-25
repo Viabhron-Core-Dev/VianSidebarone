@@ -183,13 +183,15 @@ class SidebarView(
             widthPx,
             heightPx,
             windowType,
-            WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                    WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
                     WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH or
                     WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED,
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = gravityEdge or gravityVertical
-            softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
+            softInputMode = WindowManager.LayoutParams.SOFT_INPUT_STATE_UNCHANGED or
+                    WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING
             x = 0
             y = 0
         }
@@ -911,22 +913,21 @@ class SidebarView(
     fun hideKeyboard() {
         val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
         val focused = findFocus()
-        if (focused != null) {
+        if (focused is EditText) {
             imm?.hideSoftInputFromWindow(focused.windowToken, 0)
             focused.clearFocus()
-        } else {
-            imm?.hideSoftInputFromWindow(windowToken, 0)
         }
         clearFocus()
         lastKeyboardCloseTime = SystemClock.uptimeMillis()
         isKeyboardOpen = false
-        if (isShiftedForKeyboard) {
-            layoutParams.y = originalYBeforeKeyboard
-            isShiftedForKeyboard = false
-            try {
-                windowManager.updateViewLayout(this@SidebarView, layoutParams)
-            } catch (e: Exception) {
-                e.printStackTrace()
+        if ((layoutParams.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE) == 0) {
+            layoutParams.flags = layoutParams.flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+            if (isAttached) {
+                try {
+                    windowManager.updateViewLayout(this@SidebarView, layoutParams)
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
             }
         }
     }
@@ -944,6 +945,20 @@ class SidebarView(
                         }
                     }
                 }
+            } else {
+                val currentFocus = findFocus()
+                if (currentFocus !is EditText) {
+                    if ((layoutParams.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE) == 0) {
+                        layoutParams.flags = layoutParams.flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                        if (isAttached) {
+                            try {
+                                windowManager.updateViewLayout(this, layoutParams)
+                            } catch (e: Exception) {
+                                e.printStackTrace()
+                            }
+                        }
+                    }
+                }
             }
         }
 
@@ -957,34 +972,11 @@ class SidebarView(
 
             if (keyboardCurrentlyVisible && !isKeyboardOpen) {
                 isKeyboardOpen = true
-                com.example.core.LogKeeper.writeLog("Sidebar", "Keyboard opened (height=$keypadHeight)")
-
-                if ((layoutParams.gravity and Gravity.BOTTOM) == Gravity.BOTTOM) {
-                    if (!isShiftedForKeyboard) {
-                        originalYBeforeKeyboard = layoutParams.y
-                        isShiftedForKeyboard = true
-                    }
-                    layoutParams.y = keypadHeight
-                    try {
-                        windowManager.updateViewLayout(this@SidebarView, layoutParams)
-                    } catch (e: Exception) {
-                        e.printStackTrace()
-                    }
-                }
+                com.example.core.LogKeeper.writeLog("Sidebar", "Keyboard visible (height=$keypadHeight)")
             } else if (!keyboardCurrentlyVisible && isKeyboardOpen) {
                 isKeyboardOpen = false
                 lastKeyboardCloseTime = SystemClock.uptimeMillis()
-                com.example.core.LogKeeper.writeLog("Sidebar", "Keyboard closed")
-
-                if (isShiftedForKeyboard) {
-                    layoutParams.y = originalYBeforeKeyboard
-                    isShiftedForKeyboard = false
-                    try {
-                        windowManager.updateViewLayout(this@SidebarView, layoutParams)
-                    } catch (e: Exception) {
-                        e.printStackTrace()
-                    }
-                }
+                com.example.core.LogKeeper.writeLog("Sidebar", "Keyboard hidden")
             }
         }
         viewTreeObserver.addOnGlobalLayoutListener(globalLayoutListener)

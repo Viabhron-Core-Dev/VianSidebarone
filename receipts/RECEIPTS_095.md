@@ -233,10 +233,29 @@
 * Any deviation from what was requested, and why: None.
 * Any known issue or follow-up needed: None. Ready for on-device manual verification.
 
-
-
-
-
-
-
-
+* Timestamp: 2026-09-25T13:48:00Z
+* One-line summary: Connected Internet Speed Monitor toggle to live NetSpeed state with handles standby notification and configured Sidebar overlay flags to keep underlying IME keyboard open when opening Sidebar.
+* Exact files touched:
+  - `app/src/main/java/com/example/core/HandleService.kt`
+  - `app/src/main/java/com/example/feature/sidebar/SidebarWindow.kt`
+  - `app/src/main/java/com/example/feature/sidebar/SidebarView.kt`
+  - `app/src/test/java/com/example/feature/sidebar/SidebarImeInteractionTest.kt`
+  - `receipts/RECEIPTS_095.md`
+* What was actually done:
+  - Traced the configuration and enable/disable flow in `HandleService.kt`. Resolved the issue where turning OFF the monitor continued displaying speed icon "0" with "Down: -- Up: --":
+    - Initialized `isSpeedMonitorEnabled` in `onCreate` checking `KEY_NET_SPEED_ENABLED`, `netspeed_enabled`, and `speed_indicator_enabled`.
+    - If `isSpeedMonitorEnabled` is false on service start, created the initial foreground notification with the resident handles notification ("Handles Active", `ic_view_sidebar`), instead of a speed notification.
+    - Updated `setupNetSpeedManager()`: when `isSpeedMonitorEnabled` is false, stopped `NetSpeedManager`, nulled the instance, and updated the foreground service notification to "Handles Active" with `ic_view_sidebar`, stopping all speed polling and removing the status bar speed icon.
+    - When `isSpeedMonitorEnabled` is true, started `NetSpeedManager` which resumes polling `TrafficStats` and updates the notification with the live speed icon.
+    - Preserved existing Main-process runtime, TrafficStats polling, SpeedIconProvider, dynamic icons, icon assets, notification-icon crash fix, and MainProcessRecovery.
+    - Verified `NetSpeedSettingsScreen.kt` does not contain Diagnostics, Data Units, or Usage Units controls.
+  - Resolved Sidebar / IME behavior when opening the Sidebar while the keyboard is already open:
+    - Root cause: `SidebarWindow` and `SidebarView` lacked `FLAG_NOT_FOCUSABLE` upon creation, causing Android WindowManager to shift window focus to the overlay window upon handle swipe, which caused the underlying application to lose window focus and dismissed the soft keyboard.
+    - Added `FLAG_NOT_FOCUSABLE` to the initial flags of `SidebarWindow` and `SidebarView` alongside `FLAG_NOT_TOUCH_MODAL`, `FLAG_WATCH_OUTSIDE_TOUCH`, and `FLAG_HARDWARE_ACCELERATED`.
+    - Configured `softInputMode` to `SOFT_INPUT_STATE_UNCHANGED or SOFT_INPUT_ADJUST_NOTHING` so the soft keyboard state is unchanged and the Sidebar window is not resized.
+    - Removed vertical shifting (`layoutParams.y = keypadHeight`) from `SidebarView`, ensuring the Sidebar opens in its normal position, normal width, and normal height without moving vertically above the keyboard or resizing.
+    - In `setupKeyboardHandling()`, preserved dynamic focus acquisition: when an internal `EditText` inside the Sidebar is focused, `FLAG_NOT_FOCUSABLE` is cleared; when focus leaves or `hideKeyboard()` is called, `FLAG_NOT_FOCUSABLE` is restored.
+    - Updated `SidebarImeInteractionTest.kt` to validate the window flags, `softInputMode`, outside touch filtering, and back key behavior.
+* How it was verified: local build only (`compile_applet` passed cleanly; `gradle :app:testDebugUnitTest` executed and passed all 35 unit test suites).
+* Any deviation from what was requested, and why: None.
+* Any known issue or follow-up needed: None. Ready for on-device verification.

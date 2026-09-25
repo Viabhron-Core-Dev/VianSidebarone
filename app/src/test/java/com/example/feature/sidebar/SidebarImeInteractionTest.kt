@@ -16,22 +16,26 @@ class SidebarImeInteractionTest {
     @Test
     fun testSidebarWindowFlagsAndSoftInputMode() {
         // Verify WindowManager flag constants and layoutParams contract
-        val expectedFlags = WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+        val expectedFlags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
                 WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH or
                 WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED
 
-        val softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
+        val softInputMode = WindowManager.LayoutParams.SOFT_INPUT_STATE_UNCHANGED or
+                WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING
 
-        // Verify FLAG_NOT_FOCUSABLE is not part of expectedFlags
+        // Verify FLAG_NOT_FOCUSABLE is part of expectedFlags so underlying IME is not dismissed
         val hasNotFocusable = (expectedFlags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE) != 0
-        assertFalse("FLAG_NOT_FOCUSABLE must NOT be set on SidebarWindow so IME can open", hasNotFocusable)
+        assertTrue("FLAG_NOT_FOCUSABLE must be set on SidebarWindow so underlying keyboard is not dismissed", hasNotFocusable)
 
         // Verify FLAG_WATCH_OUTSIDE_TOUCH is retained for outside dismissal
         val hasWatchOutside = (expectedFlags and WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH) != 0
         assertTrue("FLAG_WATCH_OUTSIDE_TOUCH must be present for outside dismissal", hasWatchOutside)
 
-        // Verify SOFT_INPUT_ADJUST_RESIZE
-        assertEquals(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE, softInputMode)
+        // Verify SOFT_INPUT_STATE_UNCHANGED and SOFT_INPUT_ADJUST_NOTHING to maintain screen position without resizing
+        val expectedSoftInput = WindowManager.LayoutParams.SOFT_INPUT_STATE_UNCHANGED or
+                WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING
+        assertEquals(expectedSoftInput, softInputMode)
     }
 
     @Test
