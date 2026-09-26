@@ -259,3 +259,40 @@
 * How it was verified: local build only (`compile_applet` passed cleanly; `gradle :app:testDebugUnitTest` executed and passed all 35 unit test suites).
 * Any deviation from what was requested, and why: None.
 * Any known issue or follow-up needed: None. Ready for on-device verification.
+
+* Timestamp: 2026-09-26T08:45:00Z
+* One-line summary: Completed Phase 12.10 Capability Architecture & Heavy Module Foundation across Main and :heavy processes with comprehensive unit testing.
+* Exact files touched:
+  - `app/src/main/java/com/example/core/capability/CapabilityContract.kt`
+  - `app/src/main/java/com/example/core/capability/CapabilityTypes.kt`
+  - `app/src/main/java/com/example/core/capability/CapabilityManager.kt`
+  - `app/src/main/java/com/example/core/capability/HeavyCapabilityRouter.kt`
+  - `app/src/main/java/com/example/feature/element/CommonElementRuntimeContract.kt`
+  - `app/src/main/java/com/example/feature/element/ElementCapabilityExtensions.kt`
+  - `app/src/main/java/com/example/feature/heavy/module/HeavyModuleContract.kt`
+  - `app/src/main/java/com/example/feature/heavy/module/HeavyModuleTypes.kt`
+  - `app/src/main/java/com/example/feature/heavy/module/HeavyModuleManager.kt`
+  - `app/src/main/java/com/example/core/ipc/HeavyProcessHost.kt`
+  - `app/src/main/java/com/example/feature/floating/HeavyFloatingHostService.kt`
+  - `app/src/test/java/com/example/core/capability/CapabilityManagerTest.kt`
+  - `app/src/test/java/com/example/feature/heavy/module/HeavyModuleManagerTest.kt`
+  - `blueprint/BLUEPRINT.md`
+  - `receipts/RECEIPTS_095.md`
+* What was actually done:
+  - Implemented Phase 12.10 Capability Architecture establishing strict multi-process isolation between Main (`com.example`) and Heavy (`:heavy`):
+    - Main Process Capability System (`CapabilityContract.kt`, `CapabilityTypes.kt`, `CapabilityManager.kt`):
+      - Created lightweight `CapabilitySession`, `CapabilityContract`, `LocalCapabilityModule`, and descriptors with typed routing (`LOCAL_MAIN` vs `REMOTE_HEAVY`).
+      - Implemented thread-safe `CapabilityManager` with lazy registration, reference-counted session lifecycle (`mount`, `use`, `unmount`, `releaseAll`), and auto-discard on zero active sessions.
+      - Integrated `HeavyCapabilityRouter` bridging capability execution across existing Binder IPC to `:heavy` without pulling heavy UI/engine classes into Main.
+      - Extended `CommonElementRuntimeContract` with `mountCapability` / `unmountCapabilities` helpers for safe, scoped capability access by placed Elements.
+    - Heavy Process Module System (`HeavyModuleContract.kt`, `HeavyModuleTypes.kt`, `HeavyModuleManager.kt`):
+      - Created `HeavyModuleContract`, `HeavyModuleSession`, execution requests, and result models.
+      - Implemented `HeavyModuleManager` resident strictly in `:heavy`, featuring reference-counted session mounting, safe concurrent execution, and automatic module disposal (`onDispose`) when active session count reaches 0.
+      - Wired IPC module command routing (`isModuleCommand`) in `HeavyProcessHost.kt` (`START_OPERATION` for mount, `CUSTOM` for use, `STOP_OPERATION` for unmount) with typed `IpcResult` marshalling.
+      - Integrated disposable lifecycle checking in `HeavyFloatingHostService.kt` (`checkDisposableTeardown` checks active mini-apps + active heavy module sessions, calling `stopSelf()` when idle).
+    - Unit Testing & Verification:
+      - Added 8 unit tests in `CapabilityManagerTest.kt` covering local lifecycle, remote routing, process recovery, dead process handling, and Element integration.
+      - Added 12 unit tests in `HeavyModuleManagerTest.kt` covering lazy registration, multi-session reference counting, unmount teardown, error handling, and IPC command translation.
+* How it was verified: local build only (`compile_applet` passed cleanly; `gradle :app:testDebugUnitTest` executed and passed all 37 unit test suites with 0 failures).
+* Any deviation from what was requested, and why: None.
+* Any known issue or follow-up needed: Ready for next architectural phase (Phase 13 Floating Window Mini-Apps).

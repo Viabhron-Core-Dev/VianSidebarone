@@ -61,6 +61,16 @@
   - **Process Death & Lifecycle Resilience**: Heavy process terminates on demand without lingering services. If killed, Main daemon (`HandleService`, handles, gestures, NetSpeed) continues running uninterrupted.
   - **Test Coverage (`WelcomeIpcTest.kt`)**: Validated contract serialization, IPC routing, launch deduplication/debouncing, and process death resilience.
 
+### 12.10 — Capability Architecture & Heavy Module Foundation (Completed)
+- [x] **Capability Architecture & Heavy Module Foundation**:
+  - **Main Process Capability Layer (`CapabilityContract.kt`, `CapabilityManager.kt`, `CapabilityTypes.kt`)**: Lightweight, process-safe session tracking (`CapabilitySession`), on-demand lazy registration, reference-counted mount/use/unmount lifecycle, and auto-discard when all sessions release.
+  - **Remote Heavy Routing (`HeavyCapabilityRouter.kt`)**: Bridges Main capability requests across existing Binder IPC to `:heavy` (`START_OPERATION`, `CUSTOM`, `STOP_OPERATION`) without leaking heavy UI or engine dependencies into Main. Survives Heavy process death with typed `IpcErrorCode.DEAD_BINDER` mapping to `CapabilityErrors.PROCESS_DIED`.
+  - **Element Runtime Integration (`ElementCapabilityExtensions.kt`)**: Safe extension helpers (`mountCapability`, `unmountCapabilities`) enabling placed Elements to bind to capabilities without manual lifecycle management.
+  - **Heavy Module System (`HeavyModuleContract.kt`, `HeavyModuleTypes.kt`, `HeavyModuleManager.kt`)**: Process-local registry resident strictly in `:heavy`. Enforces lazy instantiation, concurrent reference-counted mounting, safe operation dispatch (`onUse`), and guaranteed resource disposal (`onDispose`) when active session count reaches 0.
+  - **IPC Command Translation (`HeavyProcessHost.kt`)**: Integrated `isModuleCommand` routing module commands directly to `HeavyModuleManager.handleIpcCommand()` with full JSON/payload marshalling.
+  - **Disposable Teardown Sync (`HeavyFloatingHostService.kt`)**: `checkDisposableTeardown()` queries active mini-apps and active heavy module sessions, calling `stopSelf()` when idle to prevent `:heavy` from lingering.
+  - **Test Suites (`CapabilityManagerTest.kt`, `HeavyModuleManagerTest.kt`)**: 20 comprehensive unit tests verifying registration, reference counting, unmount teardown, error mapping, and IPC execution.
+
 ---
 
 ## Phase 13: Floating Window Mini-Apps (Ordered by Complexity & Difficulty)
