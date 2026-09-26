@@ -5,6 +5,7 @@ import android.content.Intent
 import android.os.IBinder
 import com.example.core.LogKeeper
 import com.example.core.WindowBounds
+import com.example.core.ipc.HeavyProcessHost
 
 /**
  * HeavyFloatingHostService: On-demand, disposable host Service running in the Heavy process (:heavy).
@@ -167,11 +168,13 @@ class HeavyFloatingHostService : Service() {
     private fun checkDisposableTeardown() {
         val activeFloating = host.getActiveInstanceCount()
         val activeModules = com.example.feature.heavy.module.HeavyModuleManager.getInstance(this).getActiveSessionCount()
-        if (activeFloating == 0 && activeModules == 0) {
-            LogKeeper.log(this, "HeavyFloatingHostService", "No active mini-apps or modules in Heavy process; calling stopSelf()")
+        val isCallRecording = HeavyProcessHost.getInstance(this).getCallHostExtension().isRecordingActive()
+        if (activeFloating == 0 && activeModules == 0 && !isCallRecording) {
+            LogKeeper.log(this, "HeavyFloatingHostService", "No active mini-apps, modules, or call recordings in Heavy process; calling stopSelf()")
             stopSelf()
         }
     }
+
 
     override fun onDestroy() {
         super.onDestroy()

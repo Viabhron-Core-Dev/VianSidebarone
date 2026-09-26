@@ -22,7 +22,7 @@ fun interface HeavyCommandHandler {
  * 3. Bridges callbacks and action requests back to Main via IMainCallbackContract.
  * 4. Dispatches commands to registered Heavy components (e.g., HeavyFloatingHost).
  */
-class HeavyProcessHost internal constructor(private val context: Context? = null) : IHeavyHostHandler {
+open class HeavyProcessHost internal constructor(private val context: Context? = null) : IHeavyHostHandler {
 
     private val binder by lazy { HeavyHostBinder(this) }
     private val commandHandlers = ConcurrentHashMap<HeavyCommandType, CopyOnWriteArrayList<HeavyCommandHandler>>()
@@ -37,7 +37,7 @@ class HeavyProcessHost internal constructor(private val context: Context? = null
 
     @Volatile
     private var callHostExtension: com.example.feature.call.HeavyCallHostExtension =
-        com.example.feature.call.DefaultHeavyCallHostExtension()
+        com.example.feature.call.RealHeavyCallHostExtension(context)
 
     @Volatile
     private var welcomeHostExtension: com.example.feature.welcome.HeavyWelcomeHostExtension =
@@ -118,7 +118,7 @@ class HeavyProcessHost internal constructor(private val context: Context? = null
     /**
      * Reports a state or lifecycle event back to the Main process.
      */
-    fun reportEvent(event: HeavyEvent): IpcResult {
+    open fun reportEvent(event: HeavyEvent): IpcResult {
         val proxy = callbackProxy ?: return IpcResult.error(
             IpcErrorCode.HEAVY_UNAVAILABLE,
             "Main callback proxy is not connected"

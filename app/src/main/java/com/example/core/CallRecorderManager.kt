@@ -9,22 +9,28 @@ import android.telephony.TelephonyManager
 import android.util.Log
 import com.example.core.ipc.CallIpcContract
 import com.example.core.ipc.HeavyCommand
+import com.example.core.ipc.HeavyConnectionListener
+import com.example.core.ipc.HeavyEvent
 import com.example.core.ipc.HeavyProcessConnectionManager
+import com.example.core.ipc.IpcResult
+import java.util.UUID
 import java.util.concurrent.CopyOnWriteArrayList
 
 /**
- * CallRecorderManager: Lightweight resident Call Sensor in the Main process (com.example).
+ * CallRecorderManager: Lightweight resident Call Sensor and State Machine in the Main process (com.example).
  *
- * Architecture:
- * 1. Resident in Main process: Operates continuously and remains available when screen is OFF/locked.
- * 2. Decoupled from screen-ON lifecycle: Does not depend on handles, gestures, or NetSpeed polling.
- * 3. Minimal IPC: On call state transitions, wakes/notifies the Heavy process (:heavy) with minimal commands.
- * 4. Fault Tolerant: Dispatches across Binder safely; remains stable if Heavy is dead or unavailable.
+ * Guarantees:
+ * 1. Minimal footprint: Holds ZERO audio buffers, MediaRecorder instances, or recording databases in Main.
+ * 2. Idempotent state machine: Strictly protects against duplicate callbacks from BroadcastReceivers and TelephonyCallbacks.
+ * 3. Authoritative source of truth: Tracks call state, expected recording intent, and active session tokens.
+ * 4. Fault tolerance & recovery: Resynchronizes with the Heavy process (:heavy) across Binder on connect or process death.
  */
 class CallRecorderManager internal constructor(
     private val context: Context?,
     private val connectionManager: HeavyProcessConnectionManager? = null
-) {
+) : HeavyConnectionListener {
+
+    private val lock = Any()
 
     private val prefs: SharedPreferences? by lazy {
         context?.getSharedPreferences(HandleManager.PREFS_NAME, Context.MODE_PRIVATE)
@@ -33,6 +39,9 @@ class CallRecorderManager internal constructor(
     private val telephonyManager: TelephonyManager? by lazy {
         context?.getSystemService(Context.TELEPHONY_SERVICE) as? TelephonyManager
     }
+
+    private val cm: HeavyProcessConnectionManager?
+        get() = connectionManager ?: context?.let { HeavyProcessConnectionManager.getInstance(it) }
 
     @Volatile
     var isListening = false
@@ -51,6 +60,29 @@ class CallRecorderManager internal constructor(
     var lastTransition: String = CallIpcContract.TRANSITION_UNCHANGED
         private set
 
+    @Volatile
+    var isRecordingExpected: Boolean = false
+        private set
+
+    @Volatile
+    var isHeavyRecordingActive: Boolean = false
+        private set
+
+    @Volatile
+    var activeSessionId: String? = null
+        private set
+
+    @Volatile
+    var activeRecordingPath: String? = null
+        private set
+
+    @Volatile
+    var pendingOperation: String? = null
+        private set
+
+    @Volatile
+    private var recoveryAttempted: Boolean = false
+
     private var telephonyCallback: Any? = null
 
     @Suppress("DEPRECATION")
@@ -60,7 +92,16 @@ class CallRecorderManager internal constructor(
         fun onCallTransition(previousState: Int, newState: Int, transition: String)
     }
 
+    fun interface RecordingSessionListener {
+        fun onRecordingStateChanged(sessionId: String?, isRecording: Boolean, filePath: String?)
+    }
+
     private val listeners = CopyOnWriteArrayList<CallStateListener>()
+    private val recordingListeners = CopyOnWriteArrayList<RecordingSessionListener>()
+
+    init {
+        cm?.addListener(this)
+    }
 
     fun addListener(listener: CallStateListener) {
         listeners.add(listener)
@@ -68,6 +109,14 @@ class CallRecorderManager internal constructor(
 
     fun removeListener(listener: CallStateListener) {
         listeners.remove(listener)
+    }
+
+    fun addRecordingListener(listener: RecordingSessionListener) {
+        recordingListeners.add(listener)
+    }
+
+    fun removeRecordingListener(listener: RecordingSessionListener) {
+        recordingListeners.remove(listener)
     }
 
     private fun safeLog(tag: String, msg: String) {
@@ -78,12 +127,16 @@ class CallRecorderManager internal constructor(
         context?.let { LogKeeper.logCrash(it, tag, t) }
     }
 
+    internal var testEnabledOverride: Boolean? = null
+
     fun isEnabled(): Boolean {
-        return prefs?.getBoolean(KEY_CALL_RECORDER_ENABLED, false) ?: true
+        testEnabledOverride?.let { return it }
+        return prefs?.getBoolean(KEY_CALL_RECORDER_ENABLED, false) ?: false
     }
 
+
     fun startListening() {
-        if (isListening || !isEnabled()) return
+        if (isListening) return
         val tm = telephonyManager ?: return
         val ctx = context ?: return
 
@@ -146,58 +199,196 @@ class CallRecorderManager internal constructor(
         }
     }
 
+    /**
+     * Entry point for incoming phone state events from BroadcastReceivers (e.g. CallStateReceiver).
+     */
     fun onCallStateReceived(state: Int) {
         handleCallState(state)
     }
 
+    /**
+     * Authoritative idempotent state machine execution for call state changes.
+     */
     internal fun handleCallState(state: Int) {
-        val previousState = currentCallState
-        if (state == previousState && state != TelephonyManager.CALL_STATE_IDLE) {
-            return
-        }
+        synchronized(lock) {
+            val previousState = currentCallState
 
-        val transition = CallIpcContract.determineTransition(previousState, state)
-        currentCallState = state
-        lastTransition = transition
+            // 1. Strict idempotence check: Ignore duplicate callbacks with unchanged state
+            if (state == previousState) {
+                return
+            }
 
-        val stateStr = CallIpcContract.toCallStateString(state)
-        Log.d(TAG, "Call state transition: $previousState -> $state ($stateStr, transition=$transition)")
-        safeLog(TAG, "Call state transition: $stateStr (transition=$transition)")
+            val transition = CallIpcContract.determineTransition(previousState, state)
+            currentCallState = state
+            lastTransition = transition
+            val stateStr = CallIpcContract.toCallStateString(state)
 
-        notifyListeners(previousState, state, transition)
+            Log.d(TAG, "Call state transition: $previousState -> $state ($stateStr, transition=$transition)")
+            safeLog(TAG, "Call state transition: $stateStr (transition=$transition)")
 
-        // 1. Dispatch Call State Changed command to Heavy process
-        val stateCmd = CallIpcContract.createCallStateCommand(
-            rawState = state,
-            stateStr = stateStr,
-            transition = transition
-        )
-        dispatchToHeavy(stateCmd)
+            when (state) {
+                TelephonyManager.CALL_STATE_OFFHOOK -> {
+                    // Call connected: Generate a unique session token
+                    val sessionId = "call_rec_${System.currentTimeMillis()}_${UUID.randomUUID().toString().take(6)}"
+                    activeSessionId = sessionId
+                    recoveryAttempted = false
 
-        // 2. Dispatch Call Recorder Operation if entering or leaving active call
-        if (state == TelephonyManager.CALL_STATE_OFFHOOK) {
-            val reqCmd = CallIpcContract.createRequestRecorderCommand(CallIpcContract.OP_START)
-            dispatchToHeavy(reqCmd)
-        } else if (state == TelephonyManager.CALL_STATE_IDLE && previousState == TelephonyManager.CALL_STATE_OFFHOOK) {
-            val reqCmd = CallIpcContract.createRequestRecorderCommand(CallIpcContract.OP_STOP)
-            dispatchToHeavy(reqCmd)
+                    // 1. Dispatch call state change to Heavy
+                    val stateCmd = CallIpcContract.createCallStateCommand(
+                        rawState = state,
+                        stateStr = stateStr,
+                        transition = transition,
+                        sessionId = sessionId
+                    )
+                    dispatchToHeavy(stateCmd)
+
+                    // 2. If auto recording is configured in prefs, initiate START request to Heavy
+                    if (isEnabled()) {
+                        isRecordingExpected = true
+                        pendingOperation = CallIpcContract.OP_START
+                        val reqCmd = CallIpcContract.createRequestRecorderCommand(CallIpcContract.OP_START, sessionId)
+                        val ipcResult = dispatchToHeavy(reqCmd)
+                        if (ipcResult.success && ipcResult.data[CallIpcContract.KEY_RECORDING_ACTIVE] == "true") {
+                            isHeavyRecordingActive = true
+                            activeRecordingPath = ipcResult.data[CallIpcContract.KEY_FILE_PATH]
+                            pendingOperation = null
+                            notifyRecordingListeners(sessionId, true, activeRecordingPath)
+                        }
+                    } else {
+                        isRecordingExpected = false
+                        pendingOperation = null
+                    }
+                }
+
+                TelephonyManager.CALL_STATE_IDLE -> {
+                    val finishedSession = activeSessionId
+
+                    // 1. Dispatch call state change to Heavy
+                    val stateCmd = CallIpcContract.createCallStateCommand(
+                        rawState = state,
+                        stateStr = stateStr,
+                        transition = transition,
+                        sessionId = finishedSession
+                    )
+                    dispatchToHeavy(stateCmd)
+
+                    // 2. Stop recording session if active or requested
+                    if (previousState == TelephonyManager.CALL_STATE_OFFHOOK || isHeavyRecordingActive || isRecordingExpected) {
+                        val reqCmd = CallIpcContract.createRequestRecorderCommand(CallIpcContract.OP_STOP, finishedSession)
+                        dispatchToHeavy(reqCmd)
+                    }
+
+                    // Reset session state
+                    isRecordingExpected = false
+                    isHeavyRecordingActive = false
+                    activeRecordingPath = null
+                    pendingOperation = null
+                    recoveryAttempted = false
+
+                    activeSessionId = null
+                    notifyRecordingListeners(finishedSession, false, null)
+                }
+
+
+                TelephonyManager.CALL_STATE_RINGING -> {
+                    val stateCmd = CallIpcContract.createCallStateCommand(
+                        rawState = state,
+                        stateStr = stateStr,
+                        transition = transition
+                    )
+                    dispatchToHeavy(stateCmd)
+                }
+            }
+
+            notifyListeners(previousState, state, transition)
         }
     }
 
-    private fun dispatchToHeavy(command: HeavyCommand) {
-        val cm = connectionManager ?: context?.let {
-            HeavyProcessConnectionManager.getInstance(it)
-        }
-        if (cm == null) {
+    private fun dispatchToHeavy(command: HeavyCommand): IpcResult {
+        val connection = cm
+        if (connection == null) {
             safeLog(TAG, "HeavyProcessConnectionManager unavailable; command not dispatched")
-            return
+            return IpcResult.error(com.example.core.ipc.IpcErrorCode.HEAVY_UNAVAILABLE, "Connection manager is null")
         }
 
-        try {
-            val result = cm.sendCommand(command, autoConnect = true)
-            safeLog(TAG, "Dispatched ${command.type} to Heavy: success=${result.success}, code=${result.errorCode}")
+        return try {
+            val result = connection.sendCommand(command, autoConnect = true)
+            safeLog(TAG, "Dispatched ${command.type} (${command.payload[CallIpcContract.KEY_OPERATION] ?: ""}): success=${result.success}")
+            result
         } catch (e: Throwable) {
             safeLogCrash(TAG, e)
+            IpcResult.error(com.example.core.ipc.IpcErrorCode.UNKNOWN_ERROR, e.message ?: "dispatch failed")
+        }
+    }
+
+    // --- HeavyConnectionListener (Recovery & Event Handling) ---
+
+    override fun onConnected() {
+        synchronized(lock) {
+            safeLog(TAG, "Heavy process connected: checking Call Recorder state synchronization")
+            // Re-sync: If a call is active and recording is expected, ensure Heavy starts the session
+            if (currentCallState == TelephonyManager.CALL_STATE_OFFHOOK && isRecordingExpected && !isHeavyRecordingActive) {
+                val sessionId = activeSessionId ?: "call_rec_${System.currentTimeMillis()}"
+                activeSessionId = sessionId
+                safeLog(TAG, "Resynchronizing call recording session after connect (sessionId=$sessionId)")
+                val reqCmd = CallIpcContract.createRequestRecorderCommand(CallIpcContract.OP_START, sessionId)
+                dispatchToHeavy(reqCmd)
+            } else if (currentCallState == TelephonyManager.CALL_STATE_IDLE && isHeavyRecordingActive) {
+                val reqCmd = CallIpcContract.createRequestRecorderCommand(CallIpcContract.OP_STOP, activeSessionId)
+                dispatchToHeavy(reqCmd)
+                isHeavyRecordingActive = false
+            }
+        }
+    }
+
+    override fun onHeavyProcessDied() {
+        synchronized(lock) {
+            safeLog(TAG, "Heavy process died while call state was $currentCallState")
+            isHeavyRecordingActive = false
+
+            // If call is ongoing, attempt recovery once without infinite looping
+            if (currentCallState == TelephonyManager.CALL_STATE_OFFHOOK && isRecordingExpected && !recoveryAttempted) {
+                recoveryAttempted = true
+                safeLog(TAG, "Triggering on-demand reconnection to recover active call recording session")
+                cm?.connect(autoCreate = true)
+            }
+        }
+    }
+
+    override fun onHeavyEvent(event: HeavyEvent) {
+        if (event.sourceId != CallIpcContract.TARGET_CALL_RECORDER) return
+
+        synchronized(lock) {
+            val op = event.payload[CallIpcContract.KEY_OPERATION]
+            val sessionId = event.payload[CallIpcContract.KEY_SESSION_ID]
+
+            when (op) {
+                CallIpcContract.EVENT_RECORDING_STARTED -> {
+                    isHeavyRecordingActive = true
+                    activeRecordingPath = event.payload[CallIpcContract.KEY_FILE_PATH]
+                    pendingOperation = null
+                    safeLog(TAG, "Heavy confirmed recording started for session '$sessionId' at $activeRecordingPath")
+                    notifyRecordingListeners(sessionId, true, activeRecordingPath)
+                }
+
+                CallIpcContract.EVENT_RECORDING_STOPPED -> {
+                    isHeavyRecordingActive = false
+                    activeRecordingPath = null
+                    pendingOperation = null
+                    val duration = event.payload[CallIpcContract.KEY_DURATION_MS] ?: "0"
+                    safeLog(TAG, "Heavy confirmed recording stopped for session '$sessionId' (duration=${duration}ms)")
+                    notifyRecordingListeners(sessionId, false, null)
+                }
+
+                CallIpcContract.EVENT_RECORDING_ERROR -> {
+                    isHeavyRecordingActive = false
+                    pendingOperation = null
+                    val errCode = event.payload[CallIpcContract.KEY_ERROR_CODE] ?: "UNKNOWN"
+                    val errMsg = event.payload[CallIpcContract.KEY_ERROR_MESSAGE] ?: "Unknown error"
+                    safeLog(TAG, "Heavy reported recording error: code=$errCode, msg=$errMsg")
+                    notifyRecordingListeners(sessionId, false, null)
+                }
+            }
         }
     }
 
@@ -205,6 +396,16 @@ class CallRecorderManager internal constructor(
         for (listener in listeners) {
             try {
                 listener.onCallTransition(previousState, newState, transition)
+            } catch (e: Throwable) {
+                safeLogCrash(TAG, e)
+            }
+        }
+    }
+
+    private fun notifyRecordingListeners(sessionId: String?, isRecording: Boolean, filePath: String?) {
+        for (listener in recordingListeners) {
+            try {
+                listener.onRecordingStateChanged(sessionId, isRecording, filePath)
             } catch (e: Throwable) {
                 safeLogCrash(TAG, e)
             }

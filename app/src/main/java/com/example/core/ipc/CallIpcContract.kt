@@ -17,6 +17,12 @@ object CallIpcContract {
     const val KEY_TRANSITION = "transition"
     const val KEY_TIMESTAMP = "timestamp"
     const val KEY_OPERATION = "operation"
+    const val KEY_SESSION_ID = "session_id"
+    const val KEY_FILE_PATH = "file_path"
+    const val KEY_DURATION_MS = "duration_ms"
+    const val KEY_ERROR_CODE = "error_code"
+    const val KEY_ERROR_MESSAGE = "error_message"
+    const val KEY_RECORDING_ACTIVE = "recording_active"
 
     // Canonical Call State constants
     const val STATE_IDLE = "IDLE"
@@ -34,6 +40,11 @@ object CallIpcContract {
     const val OP_START = "START"
     const val OP_STOP = "STOP"
     const val OP_STATUS = "STATUS"
+
+    // Events dispatched from Heavy to Main
+    const val EVENT_RECORDING_STARTED = "CALL_RECORDING_STARTED"
+    const val EVENT_RECORDING_STOPPED = "CALL_RECORDING_STOPPED"
+    const val EVENT_RECORDING_ERROR = "CALL_RECORDING_ERROR"
 
     /**
      * Converts Android TelephonyManager integer call state to canonical string.
@@ -67,18 +78,23 @@ object CallIpcContract {
         rawState: Int,
         stateStr: String = toCallStateString(rawState),
         transition: String = TRANSITION_UNCHANGED,
+        sessionId: String? = null,
         timestamp: Long = System.currentTimeMillis()
     ): HeavyCommand {
+        val payload = mutableMapOf(
+            KEY_RAW_STATE to rawState.toString(),
+            KEY_CALL_STATE to stateStr,
+            KEY_TRANSITION to transition,
+            KEY_TIMESTAMP to timestamp.toString()
+        )
+        if (!sessionId.isNullOrEmpty()) {
+            payload[KEY_SESSION_ID] = sessionId
+        }
         return HeavyCommand(
             commandId = "call_${timestamp}_${stateStr.lowercase()}",
             type = HeavyCommandType.CALL_STATE_CHANGED,
             targetId = TARGET_CALL_RECORDER,
-            payload = mapOf(
-                KEY_RAW_STATE to rawState.toString(),
-                KEY_CALL_STATE to stateStr,
-                KEY_TRANSITION to transition,
-                KEY_TIMESTAMP to timestamp.toString()
-            ),
+            payload = payload,
             timestamp = timestamp
         )
     }
@@ -88,17 +104,96 @@ object CallIpcContract {
      */
     fun createRequestRecorderCommand(
         operation: String,
+        sessionId: String? = null,
         timestamp: Long = System.currentTimeMillis()
     ): HeavyCommand {
+        val payload = mutableMapOf(
+            KEY_OPERATION to operation,
+            KEY_TIMESTAMP to timestamp.toString()
+        )
+        if (!sessionId.isNullOrEmpty()) {
+            payload[KEY_SESSION_ID] = sessionId
+        }
         return HeavyCommand(
             commandId = "req_recorder_${timestamp}_${operation.lowercase()}",
             type = HeavyCommandType.REQUEST_CALL_RECORDER,
             targetId = TARGET_CALL_RECORDER,
+            payload = payload,
+            timestamp = timestamp
+        )
+    }
+
+    /**
+     * Creates a HeavyEvent indicating a recording session was successfully initiated.
+     */
+    fun createRecordingStartedEvent(
+        sessionId: String,
+        filePath: String,
+        timestamp: Long = System.currentTimeMillis()
+    ): HeavyEvent {
+        return HeavyEvent(
+            eventId = "rec_start_${timestamp}_${sessionId.take(8)}",
+            type = HeavyEventType.STATE_UPDATED,
+            sourceId = TARGET_CALL_RECORDER,
             payload = mapOf(
-                KEY_OPERATION to operation,
+                KEY_OPERATION to EVENT_RECORDING_STARTED,
+                KEY_SESSION_ID to sessionId,
+                KEY_FILE_PATH to filePath,
+                KEY_RECORDING_ACTIVE to "true",
+                KEY_TIMESTAMP to timestamp.toString()
+            ),
+            timestamp = timestamp
+        )
+    }
+
+    /**
+     * Creates a HeavyEvent indicating a recording session was completed and saved.
+     */
+    fun createRecordingStoppedEvent(
+        sessionId: String,
+        filePath: String,
+        durationMs: Long,
+        timestamp: Long = System.currentTimeMillis()
+    ): HeavyEvent {
+        return HeavyEvent(
+            eventId = "rec_stop_${timestamp}_${sessionId.take(8)}",
+            type = HeavyEventType.OPERATION_FINISHED,
+            sourceId = TARGET_CALL_RECORDER,
+            payload = mapOf(
+                KEY_OPERATION to EVENT_RECORDING_STOPPED,
+                KEY_SESSION_ID to sessionId,
+                KEY_FILE_PATH to filePath,
+                KEY_DURATION_MS to durationMs.toString(),
+                KEY_RECORDING_ACTIVE to "false",
+                KEY_TIMESTAMP to timestamp.toString()
+            ),
+            timestamp = timestamp
+        )
+    }
+
+    /**
+     * Creates a HeavyEvent indicating a recording error or audio capture failure.
+     */
+    fun createRecordingErrorEvent(
+        sessionId: String,
+        errorCode: String,
+        errorMessage: String,
+        timestamp: Long = System.currentTimeMillis()
+    ): HeavyEvent {
+        return HeavyEvent(
+            eventId = "rec_err_${timestamp}_${sessionId.take(8)}",
+            type = HeavyEventType.ERROR_REPORTED,
+            sourceId = TARGET_CALL_RECORDER,
+            payload = mapOf(
+                KEY_OPERATION to EVENT_RECORDING_ERROR,
+                KEY_SESSION_ID to sessionId,
+                KEY_ERROR_CODE to errorCode,
+                KEY_ERROR_MESSAGE to errorMessage,
+                KEY_RECORDING_ACTIVE to "false",
                 KEY_TIMESTAMP to timestamp.toString()
             ),
             timestamp = timestamp
         )
     }
 }
+

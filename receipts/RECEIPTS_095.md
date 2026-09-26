@@ -296,3 +296,38 @@
 * How it was verified: local build only (`compile_applet` passed cleanly; `gradle :app:testDebugUnitTest` executed and passed all 37 unit test suites with 0 failures).
 * Any deviation from what was requested, and why: None.
 * Any known issue or follow-up needed: Ready for next architectural phase (Phase 13 Floating Window Mini-Apps).
+
+* Timestamp: 2026-09-26T19:45:00Z
+* One-line summary: Completed Phase 12.11 Real Heavy Call Recorder Engine & Multi-Process Architecture with full unit test coverage and compilation verification.
+* Exact files touched:
+  - `app/src/main/java/com/example/core/ipc/CallIpcContract.kt`
+  - `app/src/main/java/com/example/core/CallRecorderManager.kt`
+  - `app/src/main/java/com/example/feature/call/HeavyCallRecorderEngine.kt`
+  - `app/src/main/java/com/example/feature/call/HeavyCallHostExtension.kt`
+  - `app/src/main/java/com/example/core/ipc/HeavyProcessHost.kt`
+  - `app/src/main/java/com/example/feature/floating/HeavyFloatingHostService.kt`
+  - `app/src/test/java/com/example/core/ipc/CallSensorIpcTest.kt`
+  - `app/src/test/java/com/example/feature/call/HeavyCallRecorderEngineTest.kt`
+  - `blueprint/BLUEPRINT.md`
+  - `receipts/RECEIPTS_095.md`
+* What was actually done:
+  - Implemented the real Heavy Call Recorder engine and verified strict 2-process architecture:
+    - Main Process (`com.example`):
+      - Resident lightweight `CallRecorderManager` and `CallStateReceiver` listening to phone state changes.
+      - Maintains minimal state: `currentCallState`, `isRecordingExpected`, `isHeavyRecordingActive`, `activeSessionId`, `activeRecordingPath`. Zero audio buffers, 0 MediaRecorder instances, 0 recording DBs.
+      - Enforces idempotent call-state transitions preventing duplicate recording sessions on repeated telephony/receiver callbacks.
+      - Handles dead `:heavy` Binder events without crash loops and re-synchronizes active call recording sessions when Heavy reconnects.
+    - Heavy Process (`:heavy`):
+      - Real `HeavyCallRecorderEngine` managing `MediaRecorder` lifecycle, audio format (`MPEG_4`/`THREE_GPP`), audio sources with fallback (`VOICE_RECOGNITION` -> `MIC`), and storage resolution (SAF DocumentFile trees or private `.Records/CALL_*.m4a`).
+      - Connects to `RealHeavyCallHostExtension` so that IPC commands (`CALL_STATE_CHANGED`, `REQUEST_CALL_RECORDER` for START/STOP/STATUS) execute actual audio recording sessions instead of mock acknowledgments.
+      - Dispatches asynchronous `HeavyEvent` updates (`STATE_UPDATED`, `OPERATION_FINISHED`, `ERROR_REPORTED`) across Binder to Main.
+      - Coordinates with `HeavyFloatingHostService.checkDisposableTeardown()` to ensure service does not stop while an active call recording is ongoing.
+    - Verification & Tests:
+      - Fixed event `sourceId` mappings and `IpcErrorCode.COMMAND_FAILED` typing across IPC contract and engine.
+      - Added and executed unit test suites `CallSensorIpcTest` and `HeavyCallRecorderEngineTest` covering contract serialization, state transitions, duplicate callback filtering, heavy process death resilience, reconnect resynchronization, and engine lifecycle delegation.
+      - Executed `gradle :app:testDebugUnitTest` (all 92 unit tests passing).
+      - Executed `compile_applet` (build succeeded cleanly).
+* How it was verified: local build only (`compile_applet` passed cleanly; `gradle :app:testDebugUnitTest` executed and passed all 37 test suites / 92 tests with 0 failures).
+* Any deviation from what was requested, and why: None.
+* Any known issue or follow-up needed: None. Ready for on-device verification.
+

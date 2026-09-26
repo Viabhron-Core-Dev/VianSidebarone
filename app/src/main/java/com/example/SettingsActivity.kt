@@ -117,10 +117,16 @@ fun SettingsNavigationApp(initialRoute: String, onFinish: () -> Unit) {
                 isFirstLaunch = false
             )
         }
+        currentRoute == "call_recorder" -> {
+            com.example.feature.settings.CallRecorderSettingsScreen(
+                onBack = { navigateBack() }
+            )
+        }
         else -> {
             MainSettingsScreen(
                 onNavigateToHandles = { navigateTo("handles") },
                 onNavigateToNetSpeed = { navigateTo("netspeed") },
+                onNavigateToCallRecorder = { navigateTo("call_recorder") },
                 onNavigateToPermissions = { navigateTo("permissions") },
                 onBack = onFinish
             )
@@ -133,6 +139,7 @@ fun SettingsNavigationApp(initialRoute: String, onFinish: () -> Unit) {
 fun MainSettingsScreen(
     onNavigateToHandles: () -> Unit,
     onNavigateToNetSpeed: () -> Unit,
+    onNavigateToCallRecorder: () -> Unit,
     onNavigateToPermissions: () -> Unit,
     onBack: () -> Unit
 ) {
@@ -175,6 +182,17 @@ fun MainSettingsScreen(
                 )
                 Divider()
             }
+            item {
+                ListItem(
+                    headlineContent = { Text("Call Recorder") },
+                    supportingContent = { Text("Configure phone call recording rules, audio format, and browse recordings") },
+                    modifier = Modifier
+                        .clickable { onNavigateToCallRecorder() }
+                        .testTag("settings_item_call_recorder")
+                )
+                Divider()
+            }
+
             item {
                 ListItem(
                     headlineContent = { Text("Vian Permissions Manager") },

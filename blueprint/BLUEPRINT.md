@@ -71,6 +71,14 @@
   - **Disposable Teardown Sync (`HeavyFloatingHostService.kt`)**: `checkDisposableTeardown()` queries active mini-apps and active heavy module sessions, calling `stopSelf()` when idle to prevent `:heavy` from lingering.
   - **Test Suites (`CapabilityManagerTest.kt`, `HeavyModuleManagerTest.kt`)**: 20 comprehensive unit tests verifying registration, reference counting, unmount teardown, error mapping, and IPC execution.
 
+### 12.11 — Real Call Recorder Engine & Multi-Process Architecture (Completed)
+- [x] **Strict 2-Process Architecture**:
+  - **Main Process (`com.example`)**: Resident, lightweight Call Sensor (`CallRecorderManager.kt`, `CallStateReceiver.kt`). Holds 0 audio buffers, 0 MediaRecorder instances, 0 recording databases, and 0 recording UI. Maintains only authoritative call state, expected recording intent, and active session tokens. Handles IPC reconnect/recovery and duplicate callback deduplication.
+  - **Heavy Process (`:heavy`)**: Real recording engine (`HeavyCallRecorderEngine.kt`, `RealHeavyCallHostExtension.kt`). Hosts `MediaRecorder` lifecycle, audio configuration (`MPEG_4`/`THREE_GPP`), SAF and app-private storage resolution (`.Records/CALL_*.m4a`), fallback audio source capture (`VOICE_RECOGNITION` -> `MIC`), and dispatches async lifecycle events (`STATE_UPDATED`, `OPERATION_FINISHED`, `ERROR_REPORTED`) back to Main across Binder.
+  - **Authoritative Idempotent State Machine**: Deduplicates incoming Telephony callbacks and BroadcastReceivers. `IDLE -> OFFHOOK` requests exactly one session; duplicate `OFFHOOK` calls are ignored; `OFFHOOK -> IDLE` stops the session cleanly once.
+  - **Fault Tolerance & Recovery**: If `:heavy` crashes during an active call, Main catches the dead Binder, prevents infinite reconnect loops, initiates on-demand reconnection, and resynchronizes active session state upon reconnect.
+  - **Test Coverage (`CallSensorIpcTest.kt`, `HeavyCallRecorderEngineTest.kt`)**: Validates contract payload serialization, state transitions, duplicate callback filtering, heavy process death resilience, reconnect resynchronization, and engine lifecycle delegation.
+
 ---
 
 ## Phase 13: Floating Window Mini-Apps (Ordered by Complexity & Difficulty)
