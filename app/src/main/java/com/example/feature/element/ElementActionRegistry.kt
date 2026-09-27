@@ -72,17 +72,45 @@ class ElementActionRegistry private constructor(private val context: Context) {
     }
 
     /**
-     * Checks if an action key is registered in the registry.
+     * Checks if an action key is registered in the registry or matches a modular Element prefix.
      */
     fun isRegistered(actionKey: String): Boolean {
-        return descriptors.containsKey(actionKey)
+        if (descriptors.containsKey(actionKey)) return true
+        if (actionKey.contains(":")) {
+            val prefix = actionKey.substringBefore(":")
+            return when (prefix) {
+                "app", "link", "intent", "quicktile", "system", "volume", "media", "display",
+                "settings_shortcut", "page_window", "floating_trigger", "widget", "popup_widget",
+                "folder", "spacer" -> true
+                else -> false
+            }
+        }
+        return false
     }
 
     /**
      * Resolves the lightweight descriptor for an action key without instantiating the element.
      */
     fun getDescriptor(actionKey: String): ElementDescriptor? {
-        return descriptors[actionKey]
+        descriptors[actionKey]?.let { return it }
+        if (actionKey.contains(":")) {
+            val prefix = actionKey.substringBefore(":")
+            val category = when (prefix) {
+                "app", "link", "intent" -> ElementCategory.ANOTHER_APP_LINK
+                "widget", "popup_widget" -> ElementCategory.ANDROID_WIDGET
+                "system", "quicktile", "volume", "media", "display", "settings_shortcut" -> ElementCategory.TOOL_ACTION
+                "page_window" -> ElementCategory.SCREEN_OVERLAY
+                "floating_trigger" -> ElementCategory.SIDEBAR_PAGE_CONTENT
+                else -> ElementCategory.TOOL_ACTION
+            }
+            return ElementDescriptor(
+                actionKey = actionKey,
+                displayName = actionKey.substringAfter(":"),
+                category = category,
+                description = "Modular element action for $actionKey"
+            )
+        }
+        return null
     }
 
     /**
@@ -94,16 +122,37 @@ class ElementActionRegistry private constructor(private val context: Context) {
 
     /**
      * Resolves an action key to its ElementActionContract instance on-demand.
-     * Invokes the registered factory lazily. Returns null if unregistered or factory fails.
+     * Invokes the registered factory lazily or generates an on-demand contract for modular Element keys.
      */
     fun resolve(actionKey: String): ElementActionContract? {
-        val factory = factories[actionKey] ?: return null
-        return try {
-            factory.create()
-        } catch (e: Throwable) {
-            LogKeeper.logError(context, TAG, "Failed to instantiate ElementAction for key '$actionKey'", e)
-            null
+        val factory = factories[actionKey]
+        if (factory != null) {
+            return try {
+                factory.create()
+            } catch (e: Throwable) {
+                LogKeeper.logError(context, TAG, "Failed to instantiate ElementAction for key '$actionKey'", e)
+                null
+            }
         }
+        if (isRegistered(actionKey)) {
+            val descriptor = getDescriptor(actionKey) ?: return null
+            return object : CommonElementRuntimeContract {
+                override val descriptor: ElementDescriptor = descriptor
+                override fun execute(executionContext: ElementExecutionContext): Boolean {
+                    val sharedPrefs = executionContext.context.getSharedPreferences("FloatingReaderPrefs", Context.MODE_PRIVATE)
+                    val dummyScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main)
+                    val appsManager = com.example.feature.sidebar.SidebarAppsManager(
+                        executionContext.context,
+                        sharedPrefs,
+                        dummyScope,
+                        "action_registry_dispatch"
+                    ) {}
+                    val item = appsManager.parseId(actionKey) ?: return false
+                    return ElementActionDispatcher.execute(executionContext.context, item)
+                }
+            }
+        }
+        return null
     }
 
     /**

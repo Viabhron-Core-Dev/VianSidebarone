@@ -63,7 +63,7 @@ class SidebarView(
     private lateinit var editButton: ImageView
     private var isAttached = false
     private val viewScope = CoroutineScope(Dispatchers.Main + Job())
-    private val appsManagers = mutableMapOf<String, SidebarAppsManager>()
+    private val pageFactory: SidebarPageFactory = DefaultSidebarPageFactory(prefs)
     private val dimOverlay: View
     private var pageChangeCallback: ViewPager2.OnPageChangeCallback? = null
     private val isLooping = pageConfigs.size > 2
@@ -292,71 +292,13 @@ class SidebarView(
                     val actualPosition = if (pageConfigs.size > 2) currentItem % pageConfigs.size else currentItem
                     val pageConfig = pageConfigs.getOrNull(actualPosition)
                     if (pageConfig != null) {
-                        when (pageConfig.type) {
-                            "apps" -> {
-                                val intent = Intent(context, com.example.SidebarEditActivity::class.java).apply {
-                                    putExtra("PAGE_ID", pageConfig.id)
-                                    putExtra("CONTAINER_ID", containerId)
-                                    putExtra("HANDLE_ID", physicalHandleId)
-                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                }
-                                context.startActivity(intent)
-                                onClose()
-                            }
-                            "widgets_grid" -> {
-                                val intent = Intent(context, com.example.WidgetsGridEditActivity::class.java).apply {
-                                    putExtra("PAGE_ID", pageConfig.id)
-                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                }
-                                context.startActivity(intent)
-                                onClose()
-                            }
-                            "hybrid_grid", "default_hybrid" -> {
-                                val intent = Intent(context, com.example.HybridGridEditActivity::class.java).apply {
-                                    putExtra("PAGE_ID", pageConfig.id)
-                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                }
-                                context.startActivity(intent)
-                                onClose()
-                            }
-                            "app_tracker" -> {
-                                val intent = Intent(context, com.example.AppTrackerSettingsActivity::class.java).apply {
-                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                }
-                                context.startActivity(intent)
-                                onClose()
-                            }
-                            "notifications", "notification" -> {
-                                val intent = Intent(context, com.example.NotificationHistoryActivity::class.java).apply {
-                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                }
-                                context.startActivity(intent)
-                                onClose()
-                            }
-                            "scheduler", "short_reminders", "reminder", "reminders" -> {
-                                val intent = Intent(context, com.example.feature.settings.TagManagementActivity::class.java).apply {
-                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                }
-                                context.startActivity(intent)
-                                onClose()
-                            }
-                            "calculator", "compass", "resources_tracker", "media_player", "widget" -> {
-                                val intent = Intent(context, com.example.SettingsActivity::class.java).apply {
-                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-                                    putExtra("start_route", "pages_${containerId}|edit_page:${pageConfig.id}")
-                                }
-                                context.startActivity(intent)
-                                onClose()
-                            }
-                            else -> {
-                                val intent = Intent(context, com.example.SettingsActivity::class.java).apply {
-                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-                                    putExtra("start_route", "pages_${containerId}")
-                                }
-                                context.startActivity(intent)
-                                onClose()
-                            }
-                        }
+                        SidebarEditNavigator.navigateToEditScreen(
+                            context = context,
+                            pageConfig = pageConfig,
+                            containerId = containerId,
+                            physicalHandleId = physicalHandleId,
+                            onClose = onClose
+                        )
                     }
                 }
             }
@@ -1009,8 +951,7 @@ class SidebarView(
             container.removeAllViews()
 
             AppWidgetHelper.stopListening()
-            appsManagers.values.forEach { it.destroy() }
-            appsManagers.clear()
+            pageFactory.destroy()
 
             dots.clear()
             dotsLayout.removeAllViews()
@@ -1060,93 +1001,18 @@ class SidebarView(
             frame.removeAllViews()
             val context = frame.context
             
-            pageView = when (config.type) {
-                "calculator" -> CalculatorPageView(context) { newHeight ->
+            pageView = pageFactory.createPageView(
+                context = context,
+                config = config,
+                physicalHandleId = physicalHandleId,
+                containerId = containerId,
+                viewScope = viewScope,
+                onClose = { onClose() },
+                setDimmed = { dimmed -> setDimmed(dimmed) },
+                onHeightChanged = { newHeight ->
                     handleChildHeightChange(bindingAdapterPosition, newHeight)
                 }
-                "compass" -> CompassPageView(context) { newHeight ->
-                    handleChildHeightChange(bindingAdapterPosition, newHeight)
-                }
-                "apps" -> {
-                    val prefKey = "sidebar_apps_${physicalHandleId}_${config.id}"
-                    val manager = appsManagers.getOrPut(prefKey) {
-                        SidebarAppsManager(context, prefs, viewScope, prefKey) {}
-                    }
-                    manager.ensureLoaded()
-                    val p = AppsPageView(context, physicalHandleId, config, manager, viewScope,
-                        onCloseSidebar = { onClose() },
-                        onDimSidebar = { dimmed -> setDimmed(dimmed) },
-                        onHeightChanged = { newHeight ->
-                            handleChildHeightChange(bindingAdapterPosition, newHeight)
-                        }
-                    )
-                    p.updateData(manager.activeItems)
-                    p
-                }
-                "hybrid_grid", "default_hybrid" -> {
-                    val pageId = if (config.type == "default_hybrid" && !config.id.startsWith("default_hybrid")) "default_hybrid" else config.id
-                    HybridGridPageView(context, pageId, viewScope, containerId,
-                        onClose = { onClose() },
-                        onDimSidebar = { dimmed -> setDimmed(dimmed) }
-                    ) { newHeight ->
-                        handleChildHeightChange(bindingAdapterPosition, newHeight)
-                    }
-                }
-                "widgets_grid" -> {
-                    WidgetsGridPageView(context, config.id, viewScope) { newHeight ->
-                        handleChildHeightChange(bindingAdapterPosition, newHeight)
-                    }
-                }
-                "app_tracker" -> {
-                    AppTrackerPageView(context, onClose, { pkgName ->
-                        try {
-                            val pm = context.packageManager
-                            val launchIntent = pm.getLaunchIntentForPackage(pkgName)
-                            if (launchIntent != null) {
-                                launchIntent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                                context.startActivity(launchIntent)
-                            } else {
-                                val detailsIntent = android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-                                    data = android.net.Uri.parse("package:$pkgName")
-                                    addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                                }
-                                context.startActivity(detailsIntent)
-                            }
-                        } catch (e: Exception) {}
-                        onClose()
-                    }, onHeightChanged = { newHeight ->
-                        handleChildHeightChange(bindingAdapterPosition, newHeight)
-                    })
-                }
-                "media_player" -> {
-                    MediaPlayerPageView(context, onClose) { newHeight ->
-                        handleChildHeightChange(bindingAdapterPosition, newHeight)
-                    }
-                }
-                "widget" -> {
-                    WidgetPageView(context, config.id) { newHeight ->
-                        handleChildHeightChange(bindingAdapterPosition, newHeight)
-                    }
-                }
-                "scheduler" -> SchedulerPageView(context, viewScope) { newHeight ->
-                    handleChildHeightChange(bindingAdapterPosition, newHeight)
-                }
-                "notifications", "notification" -> NotificationPageView(context, { onClose() }, { /* TODO: onHideApp */ }) { newHeight ->
-                    handleChildHeightChange(bindingAdapterPosition, newHeight)
-                }
-                "resources_tracker" -> ResourcesTrackerPageView(context, viewScope) { newHeight ->
-                    handleChildHeightChange(bindingAdapterPosition, newHeight)
-                }
-                else -> {
-                    TextView(context).apply {
-                        text = "Page: ${config.title}\nType: ${config.type}\n(Not Implemented)"
-                        setTextColor(Color.WHITE)
-                        textSize = 16f
-                        gravity = Gravity.CENTER
-                        layoutParams = FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT)
-                    }
-                }
-            }
+            )
             frame.addView(pageView)
         }
     }

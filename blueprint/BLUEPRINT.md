@@ -79,6 +79,15 @@
   - **Fault Tolerance & Recovery**: If `:heavy` crashes during an active call, Main catches the dead Binder, prevents infinite reconnect loops, initiates on-demand reconnection, and resynchronizes active session state upon reconnect.
   - **Test Coverage (`CallSensorIpcTest.kt`, `HeavyCallRecorderEngineTest.kt`)**: Validates contract payload serialization, state transitions, duplicate callback filtering, heavy process death resilience, reconnect resynchronization, and engine lifecycle delegation.
 
+### 12.12 — Elements System & Structural Separation (Completed)
+- [x] **Strict Hierarchy Architecture**: `Handle → Gesture → Container → Page → Element`
+  - **SidebarView Minimal Structural Split**: Extracted page edit navigation routing to `SidebarEditNavigator.kt`, preserving `SidebarView` strictly as high-level Sidebar coordinator, keyboard/IME handler, and window layout orchestrator.
+  - **Authoritative Element Models (`SidebarItem.kt`)**: Decoupled sealed class `SidebarItem` and all action lists (`ALL_QUICK_TILES`, `ALL_SYSTEM_ACTIONS`, `ALL_SCREEN_CAPTURE_ACTIONS`, `ALL_VOLUME_ACTIONS`, `ALL_MEDIA_ACTIONS`, `ALL_SETTINGS_SHORTCUTS`, `ALL_DISPLAY_ACTIONS`, `ALL_UTILITIES_ACTIONS`, `ALL_FLOATING_WINDOWS`) from `SidebarAppsManager.kt` into dedicated model file.
+  - **Dedicated Element View Rendering (`ElementViewRenderer.kt`)**: Extracted tile layout binding, dynamic icon binding, launchable action close coordination, context menu popups ("App Info", "Remove", "Change Icon", "Reset Icon"), and modal popups (Folders with custom grids, Popup Widgets with `AppWidgetHostView`).
+  - **Action Registration & Dispatch (`ElementActionRegistry.kt`, `ElementActionDispatcher.kt`)**: Modular prefix resolution (`app:`, `system:`, `display:`, `volume:`, `quicktile:`, `media:`, `settings_shortcut:`, `folder:`, `widget:`, `link:`) and full system/accessibility action dispatching.
+  - **HybridGridPageView Optimization**: Delegated element view rendering, popup management, and context menus directly to `ElementViewRenderer`, eliminating ~700 lines of duplicated logic while preserving container isolation and page persistence.
+  - **Test Suite (`ElementSystemTest.kt`)**: Comprehensive unit tests covering element hierarchy, ID prefixing, action list coverage, registry prefix resolution, and edit navigation intent creation.
+
 ---
 
 ## Phase 13: Floating Window Mini-Apps (Ordered by Complexity & Difficulty)
