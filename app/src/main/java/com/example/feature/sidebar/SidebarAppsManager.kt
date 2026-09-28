@@ -556,8 +556,8 @@ class SidebarAppsManager(
         } else if (id.startsWith("folder:")) {
             try {
                 val parts = id.split(":", limit = 3)
-                val uuid = parts[1]
-                val folderDataStr = parts[2]
+                val uuid = parts.getOrNull(1) ?: ""
+                val folderDataStr = if (parts.size >= 3) parts[2] else "{}"
                 val obj = org.json.JSONObject(folderDataStr)
                 val itemsArr = obj.optJSONArray("items")
                 val itemsList = mutableListOf<String>()
@@ -569,11 +569,11 @@ class SidebarAppsManager(
                 val folderStyle = obj.optInt("folderStyle", 0)
                 val popupColumns = obj.optInt("popupColumns", 0)
                 val popupRows = obj.optInt("popupRows", 0)
-                return SidebarItem.Folder(uuid, obj.getString("name"), obj.getString("colorHex"), itemsList, folderStyle, popupColumns, popupRows, id)
+                return SidebarItem.Folder(uuid, obj.optString("name", "Folder"), obj.optString("colorHex", "#444444"), itemsList, folderStyle, popupColumns, popupRows, id)
             } catch (e: Exception) { 
-                    com.example.core.LogKeeper.writeLog("SidebarAppsManager", "Error parsing folder id: $id - ${e.message}")
-                    e.printStackTrace() 
-                }
+                com.example.core.LogKeeper.writeLog("SidebarAppsManager", "Error parsing folder id: $id - ${e.message}")
+                e.printStackTrace() 
+            }
         } else if (id.startsWith("link:")) {
             val meta = ElementMetadataStore.get(context, id)
             if (meta != null) {
@@ -751,8 +751,8 @@ class SidebarAppsManager(
         } else if (id.startsWith("folder:")) {
                 try {
                     val parts = id.split(":", limit = 3)
-                    val uuid = parts[1]
-                    val folderDataStr = parts[2]
+                    val uuid = parts.getOrNull(1) ?: ""
+                    val folderDataStr = if (parts.size >= 3) parts[2] else "{}"
                     val obj = org.json.JSONObject(folderDataStr)
                     val itemsArr = obj.optJSONArray("items")
                     val itemsList = mutableListOf<String>()
@@ -764,7 +764,7 @@ class SidebarAppsManager(
                     val folderStyle = obj.optInt("folderStyle", 0)
                     val popupColumns = obj.optInt("popupColumns", 0)
                     val popupRows = obj.optInt("popupRows", 0)
-                    result.add(SidebarItem.Folder(uuid, obj.getString("name"), obj.getString("colorHex"), itemsList, folderStyle, popupColumns, popupRows, id))
+                    result.add(SidebarItem.Folder(uuid, obj.optString("name", "Folder"), obj.optString("colorHex", "#444444"), itemsList, folderStyle, popupColumns, popupRows, id))
                 } catch (e: Exception) { 
                     com.example.core.LogKeeper.writeLog("SidebarAppsManager", "Error parsing folder id: $id - ${e.message}")
                     e.printStackTrace() 

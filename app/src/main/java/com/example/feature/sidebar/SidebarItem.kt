@@ -124,6 +124,20 @@ sealed class SidebarItem {
         override var id: String = "folder:$uuid"
     ) : SidebarItem() {
         override val label = name
+
+        fun toSerializedId(): String {
+            val obj = org.json.JSONObject().apply {
+                put("name", name)
+                put("colorHex", colorHex)
+                put("folderStyle", folderStyle)
+                put("popupColumns", popupColumns)
+                put("popupRows", popupRows)
+                val arr = org.json.JSONArray()
+                items.forEach { arr.put(it) }
+                put("items", arr)
+            }
+            return "folder:$uuid:${obj.toString()}"
+        }
     }
 
     data class Link(
@@ -160,6 +174,20 @@ sealed class SidebarItem {
         } else {
             "intent:${java.net.URLEncoder.encode(label, "UTF-8")}:${java.net.URLEncoder.encode(uri, "UTF-8")}"
         }
+    }
+}
+
+fun extractChildCountFromFolderId(folderId: String?): Int {
+    if (folderId == null || !folderId.startsWith("folder:")) return 0
+    return try {
+        val parts = folderId.split(":", limit = 3)
+        if (parts.size >= 3) {
+            val obj = org.json.JSONObject(parts[2])
+            val arr = obj.optJSONArray("items")
+            arr?.length() ?: 0
+        } else 0
+    } catch (_: Exception) {
+        0
     }
 }
 

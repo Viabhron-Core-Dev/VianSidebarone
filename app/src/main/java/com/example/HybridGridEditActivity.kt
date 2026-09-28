@@ -90,16 +90,29 @@ class HybridGridEditActivity : ComponentActivity() {
                 val prefs = getSharedPreferences("FloatingReaderPrefs", Context.MODE_PRIVATE)
                 val parsedItems = loadHybridLocalItems(prefs, pageId).toMutableList()
                 
-                val index = parsedItems.indexOfFirst { it.id.startsWith("folder:$uuid:") }
+                val index = parsedItems.indexOfFirst {
+                    val itemUuid = it.id.removePrefix("folder:").substringBefore(":")
+                    itemUuid == uuid
+                }
                 if (index != -1) {
+                    val oldCount = com.example.feature.sidebar.extractChildCountFromFolderId(parsedItems[index].id)
+                    val newCount = com.example.feature.sidebar.extractChildCountFromFolderId(updatedFolder)
+                    com.example.core.LogKeeper.writeLog("FolderElement", "folder UUID being edited: $uuid")
+                    com.example.core.LogKeeper.writeLog("FolderElement", "child count before editing: $oldCount")
+                    com.example.core.LogKeeper.writeLog("FolderElement", "child count after adding/removing: $newCount")
+                    com.example.core.LogKeeper.writeLog("FolderElement", "folder replacement in the parent page: replacing index $index in Hybrid Grid page with $newCount children")
+                    
                     parsedItems[index] = parsedItems[index].copy(id = updatedFolder)
-                    saveHybridItems(prefs, pageId, parsedItems)
+                    saveHybridItems(prefs, pageId, parsedItems, this)
+                    com.example.core.LogKeeper.writeLog("FolderElement", "final saved child count: $newCount")
                     LogKeeper.writeLog("HybridGridEdit", "Updated folder: $uuid")
                     
-                    val bIntent = Intent("ELEMENT_ADDED_TO_HYBRID")
-                    bIntent.putExtra("PAGE_ID", pageId)
-                    bIntent.setPackage(packageName)
+                    val bIntent = Intent("ELEMENT_ADDED_TO_HYBRID").apply {
+                        putExtra("PAGE_ID", pageId)
+                        setPackage(packageName)
+                    }
                     sendBroadcast(bIntent)
+                    recreate()
                 }
             }
         } else if (requestCode == 201 && resultCode == Activity.RESULT_OK && data != null) {
@@ -156,7 +169,7 @@ class HybridGridEditActivity : ComponentActivity() {
                     x = targetX,
                     y = targetY
                 ))
-                saveHybridItems(prefs, pageId, parsedItems)
+                saveHybridItems(prefs, pageId, parsedItems, this)
                 LogKeeper.writeLog("HybridGridEdit", "Added item: $elementId at ($targetX, $targetY)")
                 val intent = Intent("ELEMENT_ADDED_TO_HYBRID")
                 intent.putExtra("PAGE_ID", pageId)
@@ -165,6 +178,13 @@ class HybridGridEditActivity : ComponentActivity() {
                 recreate()
             }
         }
+    }
+
+    override fun onBackPressed() {
+        val prefs = getSharedPreferences("FloatingReaderPrefs", Context.MODE_PRIVATE)
+        val currentFreshItems = loadHybridLocalItems(prefs, pageId)
+        saveHybridItems(prefs, pageId, currentFreshItems, this)
+        super.onBackPressed()
     }
 
     override fun onDestroy() {
@@ -201,13 +221,31 @@ fun HybridGridEditor(
     var items by remember { mutableStateOf(loadHybridLocalItems(prefs, pageId)) }
     var isUserInteracting by remember { mutableStateOf(false) }
 
+    val lifecycleOwner = androidx.compose.ui.platform.LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                items = loadHybridLocalItems(prefs, pageId)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+
     val scrollState = rememberScrollState()
 
     // Auto-save when cols change
     LaunchedEffect(cols) {
-        prefs.edit().putInt("hybrid_grid_cols_$pageId", cols).commit()
-        com.example.core.OverlaySyncManager.syncInt(context, "hybrid_grid_cols_$pageId", cols)
-        saveHybridItems(prefs, pageId, items, context)
+        val currentCols = prefs.getInt("hybrid_grid_cols_$pageId", 4)
+        if (cols != currentCols) {
+            prefs.edit().putInt("hybrid_grid_cols_$pageId", cols).commit()
+            com.example.core.OverlaySyncManager.syncInt(context, "hybrid_grid_cols_$pageId", cols)
+            val currentFreshItems = loadHybridLocalItems(prefs, pageId)
+            items = currentFreshItems
+            saveHybridItems(prefs, pageId, currentFreshItems, context)
+        }
     }
 
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
@@ -218,7 +256,8 @@ fun HybridGridEditor(
         ) {
             Text("Edit Hybrid Grid", fontSize = 20.sp, color = Color.White)
             Button(onClick = {
-                saveHybridItems(prefs, pageId, items, context)
+                val currentFreshItems = loadHybridLocalItems(prefs, pageId)
+                saveHybridItems(prefs, pageId, currentFreshItems, context)
                 onClose()
             }) {
                 Text("Done")
@@ -404,10 +443,16 @@ fun HybridGridEditorCanvas(
                     if (item.id.startsWith("folder:")) {
                         IconButton(
                             onClick = {
-                                val uuid = item.id.split(":")[1]
+                                val uuid = item.id.removePrefix("folder:").substringBefore(":")
+                                val latestFolderItem = items.find {
+                                    it.id.removePrefix("folder:").substringBefore(":") == uuid
+                                }
+                                val folderFullId = latestFolderItem?.id ?: item.id
                                 val intent = android.content.Intent(context, com.example.SidebarEditActivity::class.java).apply {
                                     putExtra("FOLDER_UUID", uuid)
-                                    putExtra("FOLDER_FULL_ID", item.id)
+                                    putExtra("FOLDER_FULL_ID", folderFullId)
+                                    putExtra("PAGE_ID", pageId)
+                                    putExtra("IS_HYBRID_GRID", true)
                                 }
                                 val activity = context as? androidx.activity.ComponentActivity
                                 activity?.startActivityForResult(intent, 200)

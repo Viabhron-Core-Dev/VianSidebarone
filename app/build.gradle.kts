@@ -58,6 +58,7 @@ dependencies {
     implementation("androidx.camera:camera-lifecycle:1.3.4")
     implementation("androidx.camera:camera-view:1.3.4")
     testImplementation(libs.junit)
+    testImplementation(libs.json)
 }
 
 val generateSpeedIcons = tasks.register<Exec>("generateSpeedIcons") {

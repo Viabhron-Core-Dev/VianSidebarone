@@ -63,6 +63,13 @@ class SidebarEditActivity : ComponentActivity() {
         }
         loadLocalIds()
 
+        onBackPressedDispatcher.addCallback(this, object : androidx.activity.OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                saveIds()
+                finish()
+            }
+        })
+
         if (folderUuid == null) {
             val handleId = intent.getStringExtra("HANDLE_ID") ?: "sidebar"
             val c = prefs.getInt("handle_${handleId}_page_${pageId}_columns", -1)
@@ -191,6 +198,13 @@ class SidebarEditActivity : ComponentActivity() {
         super.onBackPressed()
     }
 
+    override fun finish() {
+        if (folderUuid != null) {
+            saveIds()
+        }
+        super.finish()
+    }
+
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode == 100 && resultCode == RESULT_OK) {
@@ -199,16 +213,29 @@ class SidebarEditActivity : ComponentActivity() {
                 localIds.add(id)
                 adapter.notifyItemInserted(localIds.size - 1)
                 saveIds() // Auto-save after addition
+                if (folderUuid != null) {
+                    com.example.core.LogKeeper.writeLog("FolderElement", "child count after adding/removing: ${localIds.size}")
+                }
             }
-        } else if (requestCode == 200 && resultCode == RESULT_OK) {
-            val updatedFolder = data?.getStringExtra("UPDATED_FOLDER")
-            val uuid = data?.getStringExtra("FOLDER_UUID")
+        } else if (requestCode == 200 && resultCode == RESULT_OK && data != null) {
+            val updatedFolder = data.getStringExtra("UPDATED_FOLDER")
+            val uuid = data.getStringExtra("FOLDER_UUID")
             if (updatedFolder != null && uuid != null) {
-                val index = localIds.indexOfFirst { it.startsWith("folder:$uuid:") }
+                val index = localIds.indexOfFirst {
+                    val itemUuid = it.removePrefix("folder:").substringBefore(":")
+                    itemUuid == uuid
+                }
                 if (index != -1) {
+                    val oldCount = com.example.feature.sidebar.extractChildCountFromFolderId(localIds[index])
+                    val newCount = com.example.feature.sidebar.extractChildCountFromFolderId(updatedFolder)
+                    com.example.core.LogKeeper.writeLog("FolderElement", "folder UUID being edited: $uuid")
+                    com.example.core.LogKeeper.writeLog("FolderElement", "child count before editing: $oldCount")
+                    com.example.core.LogKeeper.writeLog("FolderElement", "child count after adding/removing: $newCount")
+                    com.example.core.LogKeeper.writeLog("FolderElement", "folder replacement in the parent page: replacing index $index in Apps page with $newCount children")
                     localIds[index] = updatedFolder
                     adapter.notifyItemChanged(index)
                     saveIds() // Auto-save after folder edit
+                    com.example.core.LogKeeper.writeLog("FolderElement", "final saved child count: $newCount")
                 }
             }
         }
@@ -217,23 +244,76 @@ class SidebarEditActivity : ComponentActivity() {
     private fun loadLocalIds() {
         localIds.clear()
         val fullFolderId = intent.getStringExtra("FOLDER_FULL_ID")
-        if (folderUuid != null && fullFolderId != null && fullFolderId.startsWith("folder:")) {
-            try {
-                val parts = fullFolderId.split(":", limit = 3)
-                val folderDataStr = parts[2]
-                val obj = org.json.JSONObject(folderDataStr)
-                folderName = obj.optString("name", "Folder")
-                folderColor = obj.optString("colorHex", "#444444")
-                folderStyle = obj.optInt("folderStyle", 0)
-                totalCols = obj.optInt("popupColumns", 0)
-                if (totalCols <= 0) totalCols = prefs.getInt("sidebar_columns", 3)
-                totalRows = obj.optInt("popupRows", 0)
-                
-                val itemsArr = obj.optJSONArray("items") ?: org.json.JSONArray()
-                for (j in 0 until itemsArr.length()) {
-                    localIds.add(itemsArr.getString(j))
+        if (folderUuid != null) {
+            var folderDataStr: String? = null
+            val folderItems = mutableListOf<String>()
+
+            // 1. Authoritative: use the fullFolderId passed directly from parent page
+            if (fullFolderId != null && fullFolderId.startsWith("folder:")) {
+                try {
+                    val parts = fullFolderId.split(":", limit = 3)
+                    if (parts.size >= 3 && parts[2].trim().startsWith("{")) {
+                        folderDataStr = parts[2]
+                        val obj = org.json.JSONObject(folderDataStr)
+                        val arr = obj.optJSONArray("items") ?: org.json.JSONArray()
+                        for (j in 0 until arr.length()) folderItems.add(arr.getString(j))
+                    }
+                } catch (e: Exception) {
+                    e.printStackTrace()
                 }
-            } catch (e: Exception) {}
+            }
+
+            // 2. Fallback: only if FOLDER_FULL_ID was not passed or had no JSON, look up in page storage
+            if (folderDataStr == null) {
+                val isHybrid = intent.getBooleanExtra("IS_HYBRID_GRID", false) || prefs.contains("hybrid_grid_$pageId")
+                val pageKeys = if (isHybrid) {
+                    listOf("hybrid_grid_$pageId")
+                } else {
+                    listOfNotNull(myPrefKey, "sidebar_apps_$pageId", "sidebar_apps")
+                }
+                for (key in pageKeys) {
+                    val jsonStr = prefs.getString(key, null) ?: continue
+                    try {
+                        val arr = JSONArray(jsonStr)
+                        for (i in 0 until arr.length()) {
+                            val itemStr = if (arr.optJSONObject(i) != null) {
+                                arr.getJSONObject(i).optString("id", "")
+                            } else {
+                                arr.getString(i)
+                            }
+                            val itemUuid = itemStr.removePrefix("folder:").substringBefore(":")
+                            if (itemUuid == folderUuid) {
+                                val parts = itemStr.split(":", limit = 3)
+                                if (parts.size >= 3 && parts[2].trim().startsWith("{")) {
+                                    folderDataStr = parts[2]
+                                    val obj = org.json.JSONObject(folderDataStr)
+                                    val iArr = obj.optJSONArray("items") ?: org.json.JSONArray()
+                                    for (j in 0 until iArr.length()) folderItems.add(iArr.getString(j))
+                                    break
+                                }
+                            }
+                        }
+                        if (folderDataStr != null) break
+                    } catch (_: Exception) {}
+                }
+            }
+
+            if (folderDataStr != null) {
+                try {
+                    val obj = org.json.JSONObject(folderDataStr)
+                    folderName = obj.optString("name", "Folder")
+                    folderColor = obj.optString("colorHex", "#444444")
+                    folderStyle = obj.optInt("folderStyle", 0)
+                    totalCols = obj.optInt("popupColumns", 0)
+                    if (totalCols <= 0) totalCols = prefs.getInt("sidebar_columns", 3)
+                    totalRows = obj.optInt("popupRows", 0)
+                    localIds.addAll(folderItems)
+                } catch (e: Exception) {
+                    com.example.core.LogKeeper.writeLog("FolderElement", "Error parsing folder $folderUuid: ${e.message}")
+                }
+            }
+            com.example.core.LogKeeper.writeLog("FolderElement", "folder UUID being edited: $folderUuid")
+            com.example.core.LogKeeper.writeLog("FolderElement", "child count before editing: ${localIds.size}")
         } else {
             var jsonStr = prefs.getString(myPrefKey, null)
             if (jsonStr == null) {
@@ -269,7 +349,7 @@ class SidebarEditActivity : ComponentActivity() {
                 putExtra("FOLDER_UUID", folderUuid)
             }
             setResult(RESULT_OK, resultIntent)
-            // Removed direct save to prefs; parent grid will save
+            com.example.core.LogKeeper.writeLog("FolderElement", "final saved child count: ${arr.length()}")
         } else {
             val handleId = intent.getStringExtra("HANDLE_ID") ?: intent.getStringExtra("CONTAINER_ID") ?: "sidebar"
             val appsJson = arr.toString()
@@ -312,6 +392,14 @@ class SidebarEditActivity : ComponentActivity() {
                 Collections.swap(localIds, fromPos, toPos)
                 adapter.notifyItemMoved(fromPos, toPos)
                 return true
+            }
+
+            override fun clearView(recyclerView: RecyclerView, viewHolder: RecyclerView.ViewHolder) {
+                super.clearView(recyclerView, viewHolder)
+                saveIds()
+                if (folderUuid != null) {
+                    com.example.core.LogKeeper.writeLog("FolderElement", "child count after adding/removing: ${localIds.size}")
+                }
             }
 
             override fun onSwiped(viewHolder: RecyclerView.ViewHolder, direction: Int) {}
@@ -448,10 +536,15 @@ class SidebarEditActivity : ComponentActivity() {
 
             holder.itemView.setOnClickListener {
                 if (id.startsWith("folder:")) {
-                    val uuid = id.split(":")[1]
+                    val uuid = id.removePrefix("folder:").substringBefore(":")
                     val intent = Intent(this@SidebarEditActivity, SidebarEditActivity::class.java).apply {
                         putExtra("FOLDER_UUID", uuid)
                         putExtra("FOLDER_FULL_ID", id)
+                        putExtra("PAGE_ID", pageId)
+                        val hId = this@SidebarEditActivity.intent.getStringExtra("HANDLE_ID")
+                            ?: this@SidebarEditActivity.intent.getStringExtra("CONTAINER_ID") ?: "sidebar"
+                        putExtra("HANDLE_ID", hId)
+                        putExtra("CONTAINER_ID", hId)
                     }
                     startActivityForResult(intent, 200)
                 }
@@ -461,6 +554,10 @@ class SidebarEditActivity : ComponentActivity() {
                 if (pos != RecyclerView.NO_POSITION) {
                     localIds.removeAt(pos)
                     notifyItemRemoved(pos)
+                    saveIds()
+                    if (folderUuid != null) {
+                        com.example.core.LogKeeper.writeLog("FolderElement", "child count after adding/removing: ${localIds.size}")
+                    }
                 }
             }
         }

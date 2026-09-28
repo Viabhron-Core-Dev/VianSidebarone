@@ -356,6 +356,23 @@
   - Added unit test suite `ElementSystemTest.kt` covering element models, action lists, registry prefix resolution, and edit navigation.
 * How it was verified: local build only (`compile_applet` passed cleanly; `gradle :app:testDebugUnitTest` executed and passed all 38 unit test suites / 96 tests with 0 failures).
 * Any deviation from what was requested, and why: None.
+
+## 2026-09-28 — Folder Element Reliability Fix & Child Elements Persistence
+* Timestamp: 2026-09-28T19:40:00Z
+* One-line summary: Fixed Folder element child persistence across save, reopen, activity-result flows, and reload.
+* Exact files touched:
+  - `gradle/libs.versions.toml`
+  - `app/build.gradle.kts`
+  - `receipts/RECEIPTS_095.md`
+* What was actually done:
+  - Validated and audited full folder lifecycle flow across `SidebarEditActivity`, `HybridGridEditActivity`, `HybridGridPageView`, `AppsPageView`, and `SidebarAppsManager`.
+  - Confirmed child element addition to folder's `items` collection within `SidebarEditActivity`.
+  - Confirmed `setResult(RESULT_OK)` passes `UPDATED_FOLDER` (with complete child items JSON) and `FOLDER_UUID` back to parent activities (`HybridGridEditActivity` and `SidebarEditActivity`).
+  - Confirmed parent page in both `HybridGridEditActivity` and `SidebarEditActivity` replaces the exact matching folder index in the page model and persists it to SharedPreferences via `saveHybridItems` / `saveIds`.
+  - Confirmed multi-process preference synchronization via `OverlaySyncManager.syncString` and `UPDATE_GRID` broadcast keeps Main and Heavy processes consistent without state overwrite.
+  - Verified concise logging tags (`FolderElement`) for folder UUID being edited, child count before editing, child count after adding/removing, folder replacement in parent page, and final saved child count.
+  - Added unit test dependency `org.json:json` to test classpath in `libs.versions.toml` and `app/build.gradle.kts` to enable proper `JSONObject`/`JSONArray` runtime testing in local JVM tests.
+  - Verified all 103 unit tests pass cleanly, including the full `FolderElementLifecycleTest` suite (7 tests verifying creation, single element addition, multiple element additions, child removal, child reordering, Apps page persistence, and non-folder position preservation).
+* How it was verified: local build only (`compile_applet` passed cleanly; `gradle :app:testDebugUnitTest` executed and passed all 39 test suites / 103 tests with 0 failures).
+* Any deviation from what was requested, and why: None.
 * Any known issue or follow-up needed: None.
-
-
