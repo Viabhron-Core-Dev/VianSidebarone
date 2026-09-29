@@ -501,52 +501,7 @@ class HybridGridPageView(
                                         }
                                     }
                                     is SidebarItem.SystemAction -> {
-                                        if (parsed.action == "force_stop_running_apps") {
-                                            com.example.utils.AppTrackerHelper.startForceStopSequence(context)
-                                        } else if (parsed.action == "log_keeper") {
-                                            val intent = Intent(context, com.example.LogKeeperActivity::class.java)
-                                            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                            context.startActivity(intent)
-                                        } else if (parsed.action == "dictionary_floating" || parsed.action == "dictionary_full") {
-                                            com.example.feature.miniapps.MiniAppManager.toggleApp(context, "dictionary")
-                                        } else if (parsed.action == "translation_floating") {
-                                            com.example.feature.miniapps.MiniAppManager.toggleApp(context, "translation")
-                                        } else if (parsed.action == "hybrid_grid_floating") {
-                                            com.example.feature.miniapps.MiniAppManager.toggleApp(context, "hybrid_grid")
-                                        } else if (parsed.action == "work_notes") {
-                                            com.example.feature.miniapps.MiniAppManager.toggleApp(context, "work_notes")
-                                        } else if (parsed.action == "ebook_reader") {
-                                            com.example.feature.miniapps.MiniAppManager.toggleApp(context, "reader")
-                                        } else if (parsed.action == "screen_record") {
-                                            val intent = Intent(context, ScreenRecordActivity::class.java)
-                                            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                            context.startActivity(intent)
-                                        } else if (parsed.action == "audio_record") {
-                                            com.example.feature.system_hub.AudioRecordFloatingPanel.toggle(context)
-                                        } else if (parsed.action == "camera_measure") {
-                                            val intent = Intent(context, com.example.feature.system_hub.CameraMeasureActivity::class.java)
-                                            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                            context.startActivity(intent)
-                                        } else if (parsed.action == "arrangement_checker" || parsed.action == "ghost_camera") {
-                                            val intent = Intent(context, com.example.feature.system_hub.GhostCameraActivity::class.java)
-                                            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                            context.startActivity(intent)
-                                        } else if (parsed.action == "settings") {
-                                            val intent = Intent(context, com.example.SettingsActivity::class.java)
-                                            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                            context.startActivity(intent)
-                                        } else {
-                                            val service = com.example.feature.system_hub.VianSideAccessibilityService.instance
-                                            if (service != null && service.performAction(parsed.action)) {
-                                                com.example.core.LogKeeper.writeLog("HybridGrid", "System action trigger: ${parsed.action}")
-                                            } else {
-                                                android.widget.Toast.makeText(context, "Please enable VianSide Accessibility Service", android.widget.Toast.LENGTH_SHORT).show()
-                                                com.example.core.LogKeeper.writeLog("HybridGrid", "Failed system action trigger: ${parsed.action}")
-                                                val intent = Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS)
-                                                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                                try { context.startActivity(intent) } catch (e: Exception) {}
-                                            }
-                                        }
+                                        com.example.feature.element.ElementActionDispatcher.handleSystemAction(context, parsed.action)
                                     }
                                     is SidebarItem.VolumeAction -> {
                                         try {
@@ -836,51 +791,7 @@ class HybridGridPageView(
                             popupWindow?.dismiss()
                         }
                         is SidebarItem.SystemAction -> {
-                            if (parsed.action == "screen_record") {
-                                val intent = Intent(context, ScreenRecordActivity::class.java)
-                                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                context.startActivity(intent)
-                            } else if (parsed.action == "log_keeper") {
-                                val intent = Intent(context, com.example.LogKeeperActivity::class.java)
-                                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                context.startActivity(intent)
-                            } else if (parsed.action == "dictionary_floating" || parsed.action == "dictionary_full") {
-                                com.example.feature.miniapps.MiniAppManager.toggleApp(context, "dictionary")
-                            } else if (parsed.action == "translation_floating") {
-                                com.example.feature.miniapps.MiniAppManager.toggleApp(context, "translation")
-                            } else if (parsed.action == "hybrid_grid_floating") {
-                                com.example.feature.miniapps.MiniAppManager.toggleApp(context, "hybrid_grid")
-                            } else if (parsed.action == "work_notes") {
-                                com.example.feature.miniapps.MiniAppManager.toggleApp(context, "work_notes")
-                            } else if (parsed.action == "ebook_reader") {
-                                com.example.feature.miniapps.MiniAppManager.toggleApp(context, "reader")
-                            } else if (parsed.action == "force_stop_running_apps") {
-                                com.example.utils.AppTrackerHelper.startForceStopSequence(context)
-                            } else if (parsed.action == "audio_record") {
-                                com.example.feature.system_hub.AudioRecordFloatingPanel.toggle(context)
-                            } else if (parsed.action == "camera_measure") {
-                                val intent = Intent(context, com.example.feature.system_hub.CameraMeasureActivity::class.java)
-                                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                context.startActivity(intent)
-                            } else if (parsed.action == "arrangement_checker" || parsed.action == "ghost_camera") {
-                                val intent = Intent(context, com.example.feature.system_hub.GhostCameraActivity::class.java)
-                                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                context.startActivity(intent)
-                            } else if (parsed.action == "settings") {
-                                val intent = Intent(context, com.example.SettingsActivity::class.java)
-                                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                context.startActivity(intent)
-                            } else {
-                                val service = com.example.feature.system_hub.VianSideAccessibilityService.instance
-                                if (service != null && service.performAction(parsed.action)) {
-                                    com.example.core.LogKeeper.writeLog("HybridGrid", "Folder system action trigger: ${parsed.action}")
-                                } else {
-                                    android.widget.Toast.makeText(context, "Please enable VianSide Accessibility Service", android.widget.Toast.LENGTH_SHORT).show()
-                                    val intent = Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS)
-                                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                    try { context.startActivity(intent) } catch (e: Exception) {}
-                                }
-                            }
+                            com.example.feature.element.ElementActionDispatcher.handleSystemAction(context, parsed.action)
                             popupWindow?.dismiss()
                         }
                         is SidebarItem.VolumeAction -> {

@@ -140,7 +140,7 @@ object ElementActionDispatcher {
         }
     }
 
-    private fun handleSystemAction(context: Context, action: String): Boolean {
+    internal fun handleSystemAction(context: Context, action: String): Boolean {
         LogKeeper.log(context, TAG, "Handling system action: $action")
         return when (action) {
             "force_stop_running_apps" -> {
@@ -208,17 +208,48 @@ object ElementActionDispatcher {
             }
             else -> {
                 val service = com.example.feature.system_hub.VianSideAccessibilityService.instance
-                if (service != null && service.performAction(action)) {
-                    LogKeeper.log(context, TAG, "System action performed by accessibility service: $action")
-                    true
-                } else {
-                    LogKeeper.log(context, TAG, "Accessibility service unavailable for action: $action")
-                    android.widget.Toast.makeText(context, "Please enable VianSide Accessibility Service", android.widget.Toast.LENGTH_SHORT).show()
+                if (service == null) {
+                    LogKeeper.log(context, TAG, "Accessibility service not running/enabled for action: $action")
+                    try {
+                        android.widget.Toast.makeText(context, "Please enable VianSide Accessibility Service", android.widget.Toast.LENGTH_SHORT).show()
+                    } catch (_: Exception) {}
                     val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).apply {
                         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                     }
                     try { context.startActivity(intent) } catch (_: Exception) {}
                     false
+                } else {
+                    when (val result = service.executeAction(action)) {
+                        is com.example.feature.system_hub.accessibility.AccessibilityActionResult.Success -> {
+                            LogKeeper.log(context, TAG, "System action performed by accessibility service: $action")
+                            true
+                        }
+                        is com.example.feature.system_hub.accessibility.AccessibilityActionResult.Unavailable -> {
+                            LogKeeper.log(context, TAG, "Accessibility action '$action' unavailable: ${result.reason}")
+                            try {
+                                android.widget.Toast.makeText(context, result.reason, android.widget.Toast.LENGTH_SHORT).show()
+                            } catch (_: Exception) {}
+                            false
+                        }
+                        is com.example.feature.system_hub.accessibility.AccessibilityActionResult.Failed -> {
+                            LogKeeper.log(context, TAG, "Accessibility action '$action' failed: ${result.reason}")
+                            try {
+                                android.widget.Toast.makeText(context, "Action failed: ${result.reason}", android.widget.Toast.LENGTH_SHORT).show()
+                            } catch (_: Exception) {}
+                            false
+                        }
+                        is com.example.feature.system_hub.accessibility.AccessibilityActionResult.ServiceUnavailable -> {
+                            LogKeeper.log(context, TAG, "Accessibility service disconnected during action: $action")
+                            try {
+                                android.widget.Toast.makeText(context, "Please enable VianSide Accessibility Service", android.widget.Toast.LENGTH_SHORT).show()
+                            } catch (_: Exception) {}
+                            val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).apply {
+                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            }
+                            try { context.startActivity(intent) } catch (_: Exception) {}
+                            false
+                        }
+                    }
                 }
             }
         }

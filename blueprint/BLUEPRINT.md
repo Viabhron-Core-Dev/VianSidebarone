@@ -88,6 +88,15 @@
   - **HybridGridPageView Optimization**: Delegated element view rendering, popup management, and context menus directly to `ElementViewRenderer`, eliminating ~700 lines of duplicated logic while preserving container isolation and page persistence.
   - **Test Suite (`ElementSystemTest.kt`)**: Comprehensive unit tests covering element hierarchy, ID prefixing, action list coverage, registry prefix resolution, and edit navigation intent creation.
 
+### 12.13 — Modular Accessibility Architecture & Action Execution Engine (Completed)
+- [x] **Modular Accessibility Architecture**:
+  - **Modular Service Coordinator**: `VianSideAccessibilityService` coordinates and dispatches via `AccessibilityActionRegistry`, strictly avoiding monolithic `when(action)` branches.
+  - **On-Demand Lifecycle**: Registered modules (`AutoScrollActionModule`, `CursorActionModule`, `LongScreenshotActionModule`, `ScreenshotActionModule`, `GlobalNavigationActionModule`, etc.) load lazily when invoked and immediately unload on completion (or on toggle-off for continuous overlays like auto-scroll and cursor).
+  - **State Discrimination**: Strict typed hierarchy (`AccessibilityActionResult.Success`, `AccessibilityActionResult.Unavailable`, `AccessibilityActionResult.Failed`, `AccessibilityActionResult.ServiceUnavailable`). UI layers (`ElementActionDispatcher`, `AppsPageView`, `HybridGridPageView`) only open Android Accessibility Settings when the service itself is actually disabled or disconnected, never on module absence or execution failure.
+  - **Optional Heavy Scanner Boundary (`ScannerCapabilityContract.kt`)**: Decoupled ML/OCR/QR/barcode functionality (`qr_scan`, `barcode_scanner`, `redact_screenshot`) as optional downloadable capabilities with clean boundary interfaces. Main startup remains lightweight with zero heavy ML resource initialization.
+  - **Structured Diagnostic Logging**: Exact diagnostic format logging requested action ID, selected module/handler, module load, execution result, module unload, and failure reason.
+  - **Test Suite (`ModularAccessibilityActionTest.kt`)**: 8 comprehensive unit tests verifying service unavailable redirection, global navigation dispatch, screenshot execution, toggle lifecycle loading/unloading, scanner capability unavailable reporting without settings redirect, and diagnostic log verification.
+
 ---
 
 ## Phase 13: Floating Window Mini-Apps (Ordered by Complexity & Difficulty)

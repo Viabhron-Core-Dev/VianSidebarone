@@ -376,3 +376,39 @@
 * How it was verified: local build only (`compile_applet` passed cleanly; `gradle :app:testDebugUnitTest` executed and passed all 39 test suites / 103 tests with 0 failures).
 * Any deviation from what was requested, and why: None.
 * Any known issue or follow-up needed: None.
+
+### Entry: 2026-09-29T19:54:00Z
+* Timestamp: 2026-09-29T19:54:00Z
+* One-line summary: Implemented modular Accessibility Architecture with on-demand lifecycle, dedicated action modules, clean scanner boundaries, and strict state discrimination preventing erroneous Accessibility Settings redirects.
+* Exact files touched:
+  - `app/src/main/java/com/example/feature/system_hub/accessibility/AccessibilityActionContract.kt`
+  - `app/src/main/java/com/example/feature/system_hub/accessibility/AccessibilityActionRegistry.kt`
+  - `app/src/main/java/com/example/feature/system_hub/accessibility/GlobalNavigationActionModule.kt`
+  - `app/src/main/java/com/example/feature/system_hub/accessibility/ScreenshotActionModule.kt`
+  - `app/src/main/java/com/example/feature/system_hub/accessibility/AutoScrollActionModule.kt`
+  - `app/src/main/java/com/example/feature/system_hub/accessibility/CursorActionModule.kt`
+  - `app/src/main/java/com/example/feature/system_hub/accessibility/LongScreenshotActionModule.kt`
+  - `app/src/main/java/com/example/feature/system_hub/accessibility/ScannerCapabilityContract.kt`
+  - `app/src/main/java/com/example/feature/system_hub/accessibility/ScannerCapabilityModules.kt`
+  - `app/src/main/java/com/example/feature/system_hub/VianSideAccessibilityService.kt`
+  - `app/src/main/java/com/example/feature/system_hub/AutoScrollManager.kt`
+  - `app/src/main/java/com/example/feature/system_hub/CursorManager.kt`
+  - `app/src/main/java/com/example/feature/system_hub/LongScreenshotManager.kt`
+  - `app/src/main/java/com/example/feature/element/ElementActionDispatcher.kt`
+  - `app/src/main/java/com/example/feature/sidebar/HybridGridPageView.kt`
+  - `app/src/main/java/com/example/feature/sidebar/AppsPageView.kt`
+  - `app/src/test/java/com/example/feature/system_hub/accessibility/ModularAccessibilityActionTest.kt`
+  - `blueprint/BLUEPRINT.md`
+  - `receipts/RECEIPTS_095.md`
+* What was actually done:
+  - Preserved modular accessibility architecture: eliminated monolithic action handling and established `AccessibilityActionRegistry` for coordinating independent `AccessibilityActionModule` instances.
+  - Enforced module lifecycle: modules load lazily on-demand when requested and unload immediately when finished (or on toggle-off for continuous overlays like auto-scroll and cursor).
+  - Implemented typed `AccessibilityActionResult` distinguishing `Success`, `Unavailable`, `Failed`, and `ServiceUnavailable`.
+  - Updated UI dispatching (`ElementActionDispatcher`, `AppsPageView`, `HybridGridPageView`) to route system actions through `handleSystemAction`, ensuring that Android Accessibility Settings is launched ONLY when `VianSideAccessibilityService` is actually null/disconnected.
+  - Built out complete modular action handlers for `back`, `home`, `recents`, `notifications`, `quick_settings`, `lock_screen`, `splitscreen`, `screenshot`, `auto_scroll`, `cursor`, and `long_screenshot`.
+  - Created clean `ScannerCapabilityContract` boundary for optional heavy scanner/OCR capabilities (`qr_scan`, `barcode_scanner`, `redact_screenshot`) without bundling ML models or initializing ML resources in Main process.
+  - Added required diagnostic logging format reporting requested action ID, selected module/handler, module load, execution result, module unload, and failure reason.
+  - Added comprehensive test suite `ModularAccessibilityActionTest` (8 tests) verifying service unavailable redirect, global navigation actions execution, screenshot execution, toggle lifecycle, scanner capability unavailable reporting without settings redirect, unregistered action handling, action failure handling without redirect, and diagnostic logging format.
+* How it was verified: local build only (`compile_applet` passed cleanly; `gradle :app:testDebugUnitTest` executed and passed all 112 unit tests across 40 test suites with 0 failures).
+* Any deviation from what was requested, and why: None.
+* Any known issue or follow-up needed: None.

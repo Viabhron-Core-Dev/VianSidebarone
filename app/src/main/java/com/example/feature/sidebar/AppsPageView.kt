@@ -521,57 +521,7 @@ class AppsPageView(
                     currentFolderPopup?.dismiss()
                     onCloseSidebar()
                 } else if (item is SidebarItem.SystemAction) {
-                    if (item.action == "force_stop_running_apps") {
-                        com.example.utils.AppTrackerHelper.startForceStopSequence(context)
-                    } else if (item.action == "log_keeper") {
-                        val intent = android.content.Intent(context, com.example.LogKeeperActivity::class.java)
-                        intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                        context.startActivity(intent)
-                    } else if (item.action == "dictionary_floating" || item.action == "dictionary_full") {
-                        com.example.feature.miniapps.MiniAppManager.toggleApp(context, "dictionary")
-                    } else if (item.action == "translation_floating") {
-                        com.example.feature.miniapps.MiniAppManager.toggleApp(context, "translation")
-                    } else if (item.action == "hybrid_grid_floating") {
-                        com.example.feature.miniapps.MiniAppManager.toggleApp(context, "hybrid_grid")
-                    } else if (item.action == "work_notes") {
-                        com.example.feature.miniapps.MiniAppManager.toggleApp(context, "work_notes")
-                    } else if (item.action == "ebook_reader") {
-                        com.example.feature.miniapps.MiniAppManager.toggleApp(context, "reader")
-                    } else if (item.action == "screen_record") {
-                        val intent = android.content.Intent(context, ScreenRecordActivity::class.java)
-                        intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                        context.startActivity(intent)
-                    } else if (item.action == "audio_record") {
-                        com.example.feature.system_hub.AudioRecordFloatingPanel.toggle(context)
-                    } else if (item.action == "camera_measure") {
-                        val intent = android.content.Intent(context, com.example.feature.system_hub.CameraMeasureActivity::class.java)
-                        intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                        context.startActivity(intent)
-                    } else if (item.action == "arrangement_checker" || item.action == "ghost_camera") {
-                        val intent = android.content.Intent(context, com.example.feature.system_hub.GhostCameraActivity::class.java)
-                        intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                        context.startActivity(intent)
-                    } else if (item.action == "settings") {
-                        val intent = android.content.Intent(context, com.example.SettingsActivity::class.java)
-                        intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                        context.startActivity(intent)
-                    } else {
-                        val service = VianSideAccessibilityService.instance
-                        if (service != null && service.performAction(item.action)) {
-                            // success
-                            com.example.core.LogKeeper.writeLog("Sidebar", "System action trigger: ${item.action}")
-                        } else {
-                            android.widget.Toast.makeText(context, "Please enable VianSide Accessibility Service", android.widget.Toast.LENGTH_SHORT).show()
-                            com.example.core.LogKeeper.writeLog("Sidebar", "Failed system action trigger: ${item.action}")
-                            val intent = android.content.Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS)
-                            intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                            try {
-                                context.startActivity(intent)
-                            } catch (e: Exception) {
-                                e.printStackTrace()
-                            }
-                        }
-                    }
+                    com.example.feature.element.ElementActionDispatcher.handleSystemAction(context, item.action)
                     currentFolderPopup?.dismiss()
                         onCloseSidebar()
                 } else if (item is SidebarItem.PageWindow) {
