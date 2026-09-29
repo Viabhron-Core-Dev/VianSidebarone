@@ -226,7 +226,10 @@ class HandleService : Service(), SharedPreferences.OnSharedPreferenceChangeListe
         if (isScreenOn && Settings.canDrawOverlays(this)) {
             attachHandles()
         }
-        CallRecorderManager.getInstance(this).startListening()
+        val callRecorder = CallRecorderManager.getInstance(this)
+        if (callRecorder.isEnabled()) {
+            callRecorder.startListening()
+        }
         SidebarManager.getInstance(this).registerReceiver(this)
         com.example.feature.element.ElementActionRegistry.getInstance(this).registerReceiver(this)
 

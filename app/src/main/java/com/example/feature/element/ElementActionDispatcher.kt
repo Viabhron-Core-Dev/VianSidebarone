@@ -182,7 +182,15 @@ object ElementActionDispatcher {
                 true
             }
             "audio_record" -> {
-                com.example.feature.system_hub.AudioRecordFloatingPanel.toggle(context)
+                com.example.feature.system_hub.RecordingActionHelper.startOrToggleAudioRecord(context)
+                true
+            }
+            "call_recorder" -> {
+                com.example.feature.system_hub.RecordingActionHelper.openCallRecorderSettings(context)
+                true
+            }
+            "recordings" -> {
+                com.example.feature.system_hub.RecordingActionHelper.openRecordings(context)
                 true
             }
             "camera_measure" -> {
@@ -257,6 +265,9 @@ object ElementActionDispatcher {
 
     private fun handleSettingsShortcut(context: Context, action: String): Boolean {
         val settingsIntent = when (action) {
+            "call_recorder" -> Intent(context, com.example.SettingsActivity::class.java).apply {
+                putExtra("start_route", "call_recorder")
+            }
             "wifi" -> Intent(Settings.ACTION_WIFI_SETTINGS)
             "bluetooth" -> Intent(Settings.ACTION_BLUETOOTH_SETTINGS)
             "display" -> Intent(Settings.ACTION_DISPLAY_SETTINGS)

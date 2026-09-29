@@ -204,6 +204,13 @@ class AudioRecordFloatingPanel private constructor(private val context: Context)
     private fun startNewRecording() {
         stopActiveRecordingInternal()
 
+        if (permissionChecker(context, android.Manifest.permission.RECORD_AUDIO) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            Log.w("AudioRecordPanel", "RECORD_AUDIO permission missing; cannot start recording")
+            Toast.makeText(context, "Microphone permission is required for audio recording", Toast.LENGTH_SHORT).show()
+            close()
+            return
+        }
+
         elapsedSeconds = 0L
         isPaused = false
         updateTimerText()
@@ -255,12 +262,7 @@ class AudioRecordFloatingPanel private constructor(private val context: Context)
                 currentRecordFile = File(recordsDir, fileName)
             }
 
-            mediaRecorder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                MediaRecorder(context)
-            } else {
-                @Suppress("DEPRECATION")
-                MediaRecorder()
-            }
+            mediaRecorder = mediaRecorderFactory(context)
 
             mediaRecorder?.apply {
                 setAudioSource(MediaRecorder.AudioSource.MIC)
@@ -444,10 +446,30 @@ class AudioRecordFloatingPanel private constructor(private val context: Context)
         @SuppressLint("StaticFieldLeak")
         private var instance: AudioRecordFloatingPanel? = null
 
+        var permissionChecker: (Context, String) -> Int = { ctx, perm ->
+            androidx.core.content.ContextCompat.checkSelfPermission(ctx, perm)
+        }
+
+        var mediaRecorderFactory: (Context) -> MediaRecorder = { ctx ->
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                MediaRecorder(ctx)
+            } else {
+                @Suppress("DEPRECATION")
+                MediaRecorder()
+            }
+        }
+
         val isShowing: Boolean
             get() = instance != null
 
         fun show(context: Context) {
+            if (permissionChecker(context, android.Manifest.permission.RECORD_AUDIO) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                val intent = android.content.Intent(context, AudioRecordPermissionActivity::class.java).apply {
+                    addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                context.startActivity(intent)
+                return
+            }
             if (instance == null) {
                 instance = AudioRecordFloatingPanel(context.applicationContext).apply {
                     show()

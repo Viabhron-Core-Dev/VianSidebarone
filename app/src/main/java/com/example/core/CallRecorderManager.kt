@@ -1,8 +1,11 @@
 package com.example.core
 
+import android.Manifest
 import android.content.Context
+import android.content.pm.PackageManager
 import android.content.SharedPreferences
 import android.os.Build
+import androidx.core.content.ContextCompat
 import android.telephony.PhoneStateListener
 import android.telephony.TelephonyCallback
 import android.telephony.TelephonyManager
@@ -127,6 +130,21 @@ class CallRecorderManager internal constructor(
         context?.let { LogKeeper.logCrash(it, tag, t) }
     }
 
+    enum class ListenerStatus {
+        DISABLED,
+        PERMISSION_MISSING,
+        UNAVAILABLE,
+        LISTENING,
+        ERROR
+    }
+
+    @Volatile
+    var listenerStatus: ListenerStatus = ListenerStatus.DISABLED
+        private set
+
+    internal var permissionChecker: ((Context, String) -> Int)? = null
+    internal var telephonyRegistrationOverride: ((TelephonyManager?, Any) -> Unit)? = null
+
     internal var testEnabledOverride: Boolean? = null
 
     fun isEnabled(): Boolean {
@@ -134,13 +152,37 @@ class CallRecorderManager internal constructor(
         return prefs?.getBoolean(KEY_CALL_RECORDER_ENABLED, false) ?: false
     }
 
-
     fun startListening() {
+        if (!isEnabled()) {
+            listenerStatus = ListenerStatus.DISABLED
+            Log.d(TAG, "Call recorder is disabled, not starting listener")
+            return
+        }
         if (isListening) return
-        val tm = telephonyManager ?: return
         val ctx = context ?: return
 
+        val checkPerm = permissionChecker?.invoke(ctx, Manifest.permission.READ_PHONE_STATE)
+            ?: ContextCompat.checkSelfPermission(ctx, Manifest.permission.READ_PHONE_STATE)
+
+        if (checkPerm != PackageManager.PERMISSION_GRANTED) {
+            listenerStatus = ListenerStatus.PERMISSION_MISSING
+            Log.w(TAG, "READ_PHONE_STATE permission not granted, call recorder listener unavailable")
+            safeLog(TAG, "Call recorder listener unavailable: missing READ_PHONE_STATE permission")
+            return
+        }
+
         try {
+            if (telephonyRegistrationOverride != null) {
+                telephonyRegistrationOverride?.invoke(telephonyManager, this)
+                isListening = true
+                listenerStatus = ListenerStatus.LISTENING
+                return
+            }
+            val tm = telephonyManager ?: run {
+                listenerStatus = ListenerStatus.UNAVAILABLE
+                return
+            }
+
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 val callback = object : TelephonyCallback(), TelephonyCallback.CallStateListener {
                     override fun onCallStateChanged(state: Int) {
@@ -152,6 +194,7 @@ class CallRecorderManager internal constructor(
                     tm.registerTelephonyCallback(executor, callback)
                 }
                 isListening = true
+                listenerStatus = ListenerStatus.LISTENING
             } else {
                 @Suppress("DEPRECATION")
                 val listener = object : PhoneStateListener() {
@@ -164,13 +207,20 @@ class CallRecorderManager internal constructor(
                 @Suppress("DEPRECATION")
                 tm.listen(listener, PhoneStateListener.LISTEN_CALL_STATE)
                 isListening = true
+                listenerStatus = ListenerStatus.LISTENING
             }
             Log.d(TAG, "Call recorder state listener started in Main process")
             safeLog(TAG, "Call recorder state listener started")
         } catch (e: SecurityException) {
-            safeLogCrash(TAG, e)
+            Log.w(TAG, "SecurityException registering telephony listener: ${e.message}")
+            safeLog(TAG, "Call recorder listener unavailable: ${e.message}")
+            isListening = false
+            listenerStatus = ListenerStatus.UNAVAILABLE
         } catch (e: Exception) {
-            safeLogCrash(TAG, e)
+            Log.w(TAG, "Exception registering telephony listener: ${e.message}")
+            safeLog(TAG, "Call recorder listener unavailable: ${e.message}")
+            isListening = false
+            listenerStatus = ListenerStatus.ERROR
         }
     }
 

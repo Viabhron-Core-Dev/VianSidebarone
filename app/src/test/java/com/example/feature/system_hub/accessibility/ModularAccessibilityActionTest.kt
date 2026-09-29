@@ -216,8 +216,11 @@ class ModularAccessibilityActionTest {
     }
 
     @Test
-    fun testScannerCapabilitiesUnavailableWithoutSettingsRedirect() {
+    fun testScannerCapabilitiesExecutionWithoutSettingsRedirect() {
         VianSideAccessibilityService.instance = testService
+
+        // Provide mock screenshot for screen scanner and redact screenshot
+        AccessibilityScreenshotHelper.testScreenshotProvider = { Any() }
 
         val scannerActions = listOf("qr_scan", "barcode_scanner", "redact_screenshot")
 
@@ -225,13 +228,15 @@ class ModularAccessibilityActionTest {
             mockContext.startedIntent = null
 
             val result = registry.dispatch(testService, action)
-            assertTrue("Expected Unavailable for $action when optional capability is not installed", result is AccessibilityActionResult.Unavailable)
+            assertTrue("Expected Success for $action", result is AccessibilityActionResult.Success)
 
             // Via ElementActionDispatcher: MUST NOT redirect to Accessibility Settings!
             val handled = ElementActionDispatcher.handleSystemAction(mockContext, action)
-            assertFalse(handled)
+            assertTrue("Expected action $action to be handled", handled)
             assertNull("Scanner action $action must NOT redirect to Accessibility Settings", mockContext.startedIntent)
         }
+
+        AccessibilityScreenshotHelper.testScreenshotProvider = null
     }
 
     @Test

@@ -218,6 +218,8 @@ val ALL_SCREEN_CAPTURE_ACTIONS = listOf(
     SidebarItem.SystemAction("long_screenshot", "Long Screenshot", android.R.drawable.ic_menu_crop),
     SidebarItem.SystemAction("screen_record", "Screen Record", android.R.drawable.ic_media_play),
     SidebarItem.SystemAction("audio_record", "Audio Record", android.R.drawable.ic_btn_speak_now),
+    SidebarItem.SystemAction("call_recorder", "Call Recorder", android.R.drawable.ic_menu_call),
+    SidebarItem.SystemAction("recordings", "Recordings", android.R.drawable.ic_menu_save),
     SidebarItem.SystemAction("redact_screenshot", "Redact Screenshot", android.R.drawable.ic_menu_edit),
     SidebarItem.SystemAction("qr_scan", "Secure Screen Scanner", android.R.drawable.ic_menu_search),
     SidebarItem.SystemAction("barcode_scanner", "Secure Camera Scanner", android.R.drawable.ic_menu_camera)
@@ -260,6 +262,7 @@ val ALL_MEDIA_ACTIONS = listOf(
 
 val ALL_SETTINGS_SHORTCUTS = listOf(
     SidebarItem.SettingsShortcut("settings", "Settings", android.R.drawable.ic_menu_preferences),
+    SidebarItem.SettingsShortcut("call_recorder", "Call Recorder", android.R.drawable.ic_menu_call),
     SidebarItem.SettingsShortcut("wifi", "Wi-Fi", android.R.drawable.ic_menu_preferences),
     SidebarItem.SettingsShortcut("bluetooth", "Bluetooth", android.R.drawable.ic_menu_preferences),
     SidebarItem.SettingsShortcut("display", "Display", android.R.drawable.ic_menu_preferences),

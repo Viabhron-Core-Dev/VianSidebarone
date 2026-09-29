@@ -112,6 +112,25 @@
             android:name=".feature.system_hub.GhostCameraActivity"
             android:exported="false"
             android:theme="@style/Theme.LiteReader" />
+        <activity
+            android:name=".feature.system_hub.AudioRecordPermissionActivity"
+            android:exported="false"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+        <activity
+            android:name=".feature.system_hub.RedactScreenshotActivity"
+            android:exported="false"
+            android:process=":heavy"
+            android:label="Redact Screenshot" />
+        <activity
+            android:name=".feature.system_hub.SecureScreenScannerActivity"
+            android:exported="false"
+            android:process=":heavy"
+            android:label="Secure Screen Scanner" />
+        <activity
+            android:name=".feature.system_hub.SecureCameraScannerActivity"
+            android:exported="false"
+            android:process=":heavy"
+            android:label="Secure Camera Scanner" />
 
         <service
             android:name=".service.ScreenRecordService"

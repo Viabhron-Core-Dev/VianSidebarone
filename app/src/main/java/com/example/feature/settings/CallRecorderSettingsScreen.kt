@@ -87,9 +87,17 @@ fun CallRecorderSettingsScreen(onBack: () -> Unit) {
             item {
                 ListItem(
                     headlineContent = { Text("View Recordings") },
-                    supportingContent = { Text("Browse and manage saved call recordings") },
+                    supportingContent = { Text("Browse and manage saved call and audio recordings") },
                     modifier = Modifier.clickable {
-                        context.startActivity(Intent(context, com.example.feature.system_hub.RecordingsActivity::class.java))
+                        com.example.feature.system_hub.RecordingActionHelper.openRecordings(context)
+                    }
+                )
+                Divider()
+                ListItem(
+                    headlineContent = { Text("Audio Record Tool") },
+                    supportingContent = { Text("Launch floating audio recording panel") },
+                    modifier = Modifier.clickable {
+                        com.example.feature.system_hub.RecordingActionHelper.startOrToggleAudioRecord(context)
                     }
                 )
                 Divider()

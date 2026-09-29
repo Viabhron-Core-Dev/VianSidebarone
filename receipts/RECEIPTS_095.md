@@ -411,4 +411,32 @@
   - Added comprehensive test suite `ModularAccessibilityActionTest` (8 tests) verifying service unavailable redirect, global navigation actions execution, screenshot execution, toggle lifecycle, scanner capability unavailable reporting without settings redirect, unregistered action handling, action failure handling without redirect, and diagnostic logging format.
 * How it was verified: local build only (`compile_applet` passed cleanly; `gradle :app:testDebugUnitTest` executed and passed all 112 unit tests across 40 test suites with 0 failures).
 * Any deviation from what was requested, and why: None.
+### Entry: 2026-09-29T21:55:00Z
+* Timestamp: 2026-09-29T21:55:00Z
+* One-line summary: Resolved Accessibility-dependent and recording element issues across Audio Record, Call Recorder, Cursor fake-touch, Redact Screenshot, Secure Screen/Camera Scanners, and Settings reuse.
+* Exact files touched:
+  - `app/src/main/java/com/example/feature/system_hub/RecordingActionHelper.kt`
+  - `app/src/main/java/com/example/feature/system_hub/AudioRecordFloatingPanel.kt`
+  - `app/src/main/java/com/example/feature/system_hub/AudioRecordPermissionActivity.kt`
+  - `app/src/main/java/com/example/core/CallRecorderManager.kt`
+  - `app/src/main/java/com/example/feature/system_hub/CursorManager.kt`
+  - `app/src/main/java/com/example/feature/system_hub/RedactScreenshotActivity.kt`
+  - `app/src/main/java/com/example/feature/system_hub/SecureScreenScannerActivity.kt`
+  - `app/src/main/java/com/example/feature/system_hub/SecureCameraScannerActivity.kt`
+  - `app/src/main/java/com/example/feature/element/ElementActionDispatcher.kt`
+  - `app/src/main/java/com/example/feature/settings/CallRecorderSettingsScreen.kt`
+  - `app/src/main/java/com/example/feature/sidebar/SidebarItem.kt`
+  - `app/src/test/java/com/example/feature/system_hub/AccessibilityAndRecordingElementsTest.kt`
+  - `receipts/RECEIPTS_095.md`
+* What was actually done:
+  - Audio Record Element: Enforced pre-check for RECORD_AUDIO; if missing, ElementActionDispatcher and RecordingActionHelper launch AudioRecordPermissionActivity to request runtime permission safely without attempting MediaRecorder. AudioRecordFloatingPanel releases all resources (MediaRecorder, ParcelFileDescriptor, and timers) upon stop.
+  - Call Recorder Startup Crash: Guarded startListening in CallRecorderManager with isEnabled check, READ_PHONE_STATE permission check, and caught SecurityException during telephony callback/listener registration, transitioning cleanly to ListenerStatus (DISABLED, PERMISSION_MISSING, UNAVAILABLE) without crashing resident HandleService.
+  - Cursor Fake Touch: Implemented real dispatchGesture touch sequence in CursorManager at cursor position with display coordinate conversion, down/up duration, short interval between double-clicks, and distinguished logging ("tap detected -> gesture dispatched -> gesture accepted/completed"). Added buildGestureSafely to prevent null assertions.
+  - Redact Screenshot: Redesigned redact_screenshot as non-OCR visual image redaction flow using Accessibility screenshot capture, temporary app-private PNG URI, blackout and blur rectangle drawing in RedactScreenshotActivity (:heavy), MediaStore/cache export, and immediate temporary source cleanup in onDestroy.
+  - Secure Screen Scanner: Built screen capture and drag-to-crop selection flow in SecureScreenScannerActivity using roundToInt crop math; scanner capabilities execute on selected crop only without requiring OCR engine pre-installation.
+  - Secure Camera Scanner: Built camera capture and crop UI in SecureCameraScannerActivity, loading scanner modules on-demand without initialization during Sidebar startup.
+  - Settings Recording Reuse: Established RecordingActionHelper unifying audio record toggle, call recorder settings, and recordings browser across Sidebar elements and CallRecorderSettingsScreen.
+  - Focused Test Suite: Added AccessibilityAndRecordingElementsTest covering all 11 test cases (microphone permission check/trampoline, call recorder listener guarding, cursor gesture dispatch and double-click sequence, non-OCR redact screenshot, screen/camera scanner cropping, missing scanner resilience, and unified recording action).
+* How it was verified: local build only (`compile_applet` passed cleanly; `gradle :app:testDebugUnitTest` executed and passed all 124 unit tests across 41 test suites with 0 failures).
+* Any deviation from what was requested, and why: None.
 * Any known issue or follow-up needed: None.
