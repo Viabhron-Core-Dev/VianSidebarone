@@ -12,12 +12,15 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -25,9 +28,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathFillType
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
@@ -108,10 +114,14 @@ fun SecureScreenScannerContent(
     onClose: () -> Unit
 ) {
     val context = LocalContext.current
-    var cropLeft by remember { mutableStateOf(0.1f) }
-    var cropTop by remember { mutableStateOf(0.2f) }
-    var cropRight by remember { mutableStateOf(0.9f) }
-    var cropBottom by remember { mutableStateOf(0.6f) }
+    var selectedShape by remember { mutableStateOf(SelectionShape.RECTANGLE) }
+    var startPoint by remember { mutableStateOf<Offset?>(null) }
+    var endPoint by remember { mutableStateOf<Offset?>(null) }
+    var canvasSize by remember { mutableStateOf(Size.Zero) }
+
+    var cropBounds by remember {
+        mutableStateOf(NormalizedCropBounds(0.1f, 0.2f, 0.9f, 0.6f))
+    }
 
     var scanResultDialog by remember { mutableStateOf<ScannerResult?>(null) }
     var lastCroppedDimensions by remember { mutableStateOf("") }
@@ -128,24 +138,16 @@ fun SecureScreenScannerContent(
             },
             actions = {
                 IconButton(onClick = {
-                    cropLeft = 0.1f
-                    cropTop = 0.2f
-                    cropRight = 0.9f
-                    cropBottom = 0.6f
+                    startPoint = null
+                    endPoint = null
+                    cropBounds = NormalizedCropBounds(0.1f, 0.2f, 0.9f, 0.6f)
                 }) {
-                    Icon(Icons.Default.Refresh, contentDescription = "Reset Crop", tint = Color.White)
+                    Icon(Icons.Default.Refresh, contentDescription = "Reset Selection", tint = Color.White)
                 }
                 Button(
                     onClick = {
-                        val bw = originalBitmap.width
-                        val bh = originalBitmap.height
-                        val x = (cropLeft * bw).roundToInt().coerceIn(0, bw - 1)
-                        val y = (cropTop * bh).roundToInt().coerceIn(0, bh - 1)
-                        val w = ((cropRight - cropLeft) * bw).roundToInt().coerceIn(1, bw - x)
-                        val h = ((cropBottom - cropTop) * bh).roundToInt().coerceIn(1, bh - y)
-
-                        val cropped = Bitmap.createBitmap(originalBitmap, x, y, w, h)
-                        lastCroppedDimensions = "${w}x${h} px"
+                        val cropped = ScannerSelectionHelper.createCroppedBitmap(originalBitmap, cropBounds, selectedShape)
+                        lastCroppedDimensions = "${cropped.width}x${cropped.height} px (${selectedShape.displayName})"
                         val result = ScannerCapabilityBridge.scanBitmap(cropped)
                         scanResultDialog = result
                     },
@@ -160,8 +162,55 @@ fun SecureScreenScannerContent(
             colors = TopAppBarDefaults.topAppBarColors(containerColor = Color(0xFF1E1E1E))
         )
 
+        // Shape Selection Toolbar
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(Color(0xFF222222))
+                .padding(horizontal = 12.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("Shape:", color = Color.LightGray, style = MaterialTheme.typography.labelMedium)
+            SelectionShape.values().forEach { shape ->
+                val isSelected = (shape == selectedShape)
+                Button(
+                    onClick = {
+                        selectedShape = shape
+                        val sp = startPoint
+                        val ep = endPoint
+                        if (sp != null && ep != null && canvasSize.width > 0f && canvasSize.height > 0f) {
+                            cropBounds = ScannerSelectionHelper.calculateBounds(
+                                startX = sp.x,
+                                startY = sp.y,
+                                endX = ep.x,
+                                endY = ep.y,
+                                canvasWidth = canvasSize.width,
+                                canvasHeight = canvasSize.height,
+                                shape = shape
+                            )
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (isSelected) MaterialTheme.colorScheme.primary else Color(0xFF333333),
+                        contentColor = if (isSelected) Color.White else Color.LightGray
+                    ),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                    modifier = Modifier.height(34.dp)
+                ) {
+                    Text(shape.displayName, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        }
+
+        // Instructions
+        val instructionText = when {
+            startPoint == null -> "Tap anywhere to set start point, or drag across the screen."
+            endPoint == null -> "Start point set. Tap second point or drag to complete selection."
+            else -> "Mode: ${selectedShape.displayName}. Tap to start new selection or drag to reselect."
+        }
         Text(
-            text = "Drag across the screen to select the region to scan and inspect.",
+            text = instructionText,
             color = Color.LightGray,
             style = MaterialTheme.typography.bodySmall,
             modifier = Modifier
@@ -179,26 +228,70 @@ fun SecureScreenScannerContent(
             Canvas(
                 modifier = Modifier
                     .fillMaxSize()
-                    .pointerInput(Unit) {
-                        var start = Offset.Zero
-                        detectDragGestures(
-                            onDragStart = { offset ->
-                                start = offset
-                                cropLeft = (offset.x / size.width).coerceIn(0f, 1f)
-                                cropTop = (offset.y / size.height).coerceIn(0f, 1f)
-                                cropRight = cropLeft
-                                cropBottom = cropTop
-                            },
-                            onDrag = { change, _ ->
-                                change.consume()
-                                val curX = change.position.x
-                                val curY = change.position.y
-                                cropLeft = (min(start.x, curX) / size.width).coerceIn(0f, 1f)
-                                cropTop = (min(start.y, curY) / size.height).coerceIn(0f, 1f)
-                                cropRight = (max(start.x, curX) / size.width).coerceIn(0f, 1f)
-                                cropBottom = (max(start.y, curY) / size.height).coerceIn(0f, 1f)
+                    .onSizeChanged {
+                        canvasSize = Size(it.width.toFloat(), it.height.toFloat())
+                    }
+                    .pointerInput(selectedShape) {
+                        awaitEachGesture {
+                            val down = awaitFirstDown()
+                            val downPos = down.position
+                            var isDragging = false
+                            var currentPos = downPos
+
+                            // If startPoint is already set and awaiting second tap, initialStart is that anchor.
+                            // If a previous selection was already completed (endPoint != null), tapping starts fresh.
+                            val initialStart = if (endPoint == null) startPoint else null
+
+                            while (true) {
+                                val event = awaitPointerEvent()
+                                val change = event.changes.firstOrNull() ?: break
+                                if (change.pressed) {
+                                    val dist = (change.position - downPos).getDistance()
+                                    if (dist > 15f) {
+                                        isDragging = true
+                                        change.consume()
+                                        currentPos = change.position
+
+                                        val activeStart = initialStart ?: downPos
+                                        startPoint = activeStart
+                                        endPoint = currentPos
+
+                                        cropBounds = ScannerSelectionHelper.calculateBounds(
+                                            startX = activeStart.x,
+                                            startY = activeStart.y,
+                                            endX = currentPos.x,
+                                            endY = currentPos.y,
+                                            canvasWidth = size.width.toFloat(),
+                                            canvasHeight = size.height.toFloat(),
+                                            shape = selectedShape
+                                        )
+                                    }
+                                } else {
+                                    // Pointer released
+                                    if (!isDragging) {
+                                        // Tap gesture
+                                        if (initialStart == null) {
+                                            // First tap establishes starting point
+                                            startPoint = downPos
+                                            endPoint = null
+                                        } else {
+                                            // Second tap completes the selection
+                                            endPoint = downPos
+                                            cropBounds = ScannerSelectionHelper.calculateBounds(
+                                                startX = initialStart.x,
+                                                startY = initialStart.y,
+                                                endX = downPos.x,
+                                                endY = downPos.y,
+                                                canvasWidth = size.width.toFloat(),
+                                                canvasHeight = size.height.toFloat(),
+                                                shape = selectedShape
+                                            )
+                                        }
+                                    }
+                                    break
+                                }
                             }
-                        )
+                        }
                     }
             ) {
                 // Background image
@@ -208,25 +301,108 @@ fun SecureScreenScannerContent(
                     dstSize = IntSize(size.width.toInt(), size.height.toInt())
                 )
 
-                // Semi-transparent darkened overlay outside crop box
-                val cX = cropLeft * size.width
-                val cY = cropTop * size.height
-                val cW = (cropRight - cropLeft) * size.width
-                val cH = (cropBottom - cropTop) * size.height
+                val cX = cropBounds.left * size.width
+                val cY = cropBounds.top * size.height
+                val cW = (cropBounds.right - cropBounds.left) * size.width
+                val cH = (cropBounds.bottom - cropBounds.top) * size.height
 
-                // Dim areas around crop
-                drawRect(Color(0x88000000), Offset.Zero, Size(size.width, cY))
-                drawRect(Color(0x88000000), Offset(0f, cY + cH), Size(size.width, size.height - (cY + cH)))
-                drawRect(Color(0x88000000), Offset(0f, cY), Size(cX, cH))
-                drawRect(Color(0x88000000), Offset(cX + cW, cY), Size(size.width - (cX + cW), cH))
+                if (selectedShape == SelectionShape.CIRCLE) {
+                    val radius = min(cW, cH) / 2f
+                    val centerX = cX + radius
+                    val centerY = cY + radius
 
-                // Crop border & corner accents
-                drawRect(
-                    color = Color(0xFF00E676),
-                    topLeft = Offset(cX, cY),
-                    size = Size(cW, cH),
-                    style = Stroke(width = 2.dp.toPx())
-                )
+                    val cutoutPath = Path().apply {
+                        fillType = PathFillType.EvenOdd
+                        addRect(androidx.compose.ui.geometry.Rect(0f, 0f, size.width, size.height))
+                        addOval(androidx.compose.ui.geometry.Rect(centerX - radius, centerY - radius, centerX + radius, centerY + radius))
+                    }
+                    drawPath(cutoutPath, color = Color(0x88000000))
+
+                    drawCircle(
+                        color = Color(0xFF00E676),
+                        radius = radius,
+                        center = Offset(centerX, centerY),
+                        style = Stroke(width = 2.dp.toPx())
+                    )
+                } else {
+                    // Dim areas around crop rectangle / square
+                    drawRect(Color(0x88000000), Offset.Zero, Size(size.width, cY))
+                    drawRect(Color(0x88000000), Offset(0f, cY + cH), Size(size.width, size.height - (cY + cH)))
+                    drawRect(Color(0x88000000), Offset(0f, cY), Size(cX, cH))
+                    drawRect(Color(0x88000000), Offset(cX + cW, cY), Size(size.width - (cX + cW), cH))
+
+                    // Crop border
+                    drawRect(
+                        color = Color(0xFF00E676),
+                        topLeft = Offset(cX, cY),
+                        size = Size(cW, cH),
+                        style = Stroke(width = 2.dp.toPx())
+                    )
+                }
+
+                // If first tap is active and awaiting second tap, render clear visual anchor target
+                val firstTap = startPoint
+                if (firstTap != null && endPoint == null) {
+                    drawCircle(
+                        color = Color(0xFF00E676),
+                        radius = 16.dp.toPx(),
+                        center = firstTap,
+                        style = Stroke(width = 2.dp.toPx())
+                    )
+                    drawCircle(
+                        color = Color(0xFF00E676),
+                        radius = 4.dp.toPx(),
+                        center = firstTap
+                    )
+                }
+            }
+        }
+
+        // Dedicated Post-Selection Action Bar (Share, QR Code, OCR)
+        Surface(
+            color = Color(0xFF1E1E1E),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Button(
+                    onClick = {
+                        val cropped = ScannerSelectionHelper.createCroppedBitmap(originalBitmap, cropBounds, selectedShape)
+                        ScannerSelectionHelper.shareBitmap(context, cropped)
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF333333))
+                ) {
+                    Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Share")
+                }
+
+                Button(
+                    onClick = {
+                        Toast.makeText(context, "QR Code scanning coming soon", Toast.LENGTH_SHORT).show()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF333333))
+                ) {
+                    Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("QR Code")
+                }
+
+                Button(
+                    onClick = {
+                        Toast.makeText(context, "OCR coming soon", Toast.LENGTH_SHORT).show()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF333333))
+                ) {
+                    Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("OCR")
+                }
             }
         }
     }

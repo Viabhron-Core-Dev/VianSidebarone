@@ -273,6 +273,40 @@ class ElementActionRegistry private constructor(private val context: Context) {
                 }
             }
         }
+
+        register(
+            ElementDescriptor(
+                actionKey = "display:keep_screen_on",
+                displayName = "Keep Screen On",
+                category = ElementCategory.TOOL_ACTION,
+                description = "Toggles persistent screen-awake state without modifying system timeout."
+            )
+        ) {
+            object : ElementActionContract {
+                override val descriptor = descriptors["display:keep_screen_on"]!!
+                override fun execute(executionContext: ElementExecutionContext): Boolean {
+                    com.example.feature.system_hub.DisplayHandler.handleDisplayAction(executionContext.context, "keep_screen_on")
+                    return true
+                }
+            }
+        }
+
+        register(
+            ElementDescriptor(
+                actionKey = "display:screen_orientation",
+                displayName = "Screen Orientation",
+                category = ElementCategory.TOOL_ACTION,
+                description = "Toggles screen orientation across Auto-Rotate, Portrait, and Landscape modes."
+            )
+        ) {
+            object : ElementActionContract {
+                override val descriptor = descriptors["display:screen_orientation"]!!
+                override fun execute(executionContext: ElementExecutionContext): Boolean {
+                    com.example.feature.system_hub.DisplayHandler.handleDisplayAction(executionContext.context, "screen_orientation")
+                    return true
+                }
+            }
+        }
     }
 
     companion object {

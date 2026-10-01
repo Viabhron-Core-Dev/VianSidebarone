@@ -99,6 +99,8 @@ class ElementSystemTest {
         assertTrue(ALL_SETTINGS_SHORTCUTS.any { it.action == "wifi" })
         assertTrue(ALL_DISPLAY_ACTIONS.any { it.action == "torch_toggle" })
         assertTrue(ALL_UTILITIES_ACTIONS.any { it.id == "system:force_stop_running_apps" })
+        assertTrue(ALL_UTILITIES_ACTIONS.any { it.id == "display:keep_screen_on" })
+        assertTrue(ALL_UTILITIES_ACTIONS.any { it.id == "display:screen_orientation" })
     }
 
     @Test
@@ -109,6 +111,8 @@ class ElementSystemTest {
         assertTrue(registry.isRegistered("system:screenshot"))
         assertTrue(registry.isRegistered("volume:media_vol_up"))
         assertTrue(registry.isRegistered("display:torch_toggle"))
+        assertTrue(registry.isRegistered("display:keep_screen_on"))
+        assertTrue(registry.isRegistered("display:screen_orientation"))
         assertTrue(registry.isRegistered("quicktile:torch"))
         assertTrue(registry.isRegistered("link:uuid-123"))
         assertTrue(registry.isRegistered("folder:uuid-456"))
@@ -124,6 +128,12 @@ class ElementSystemTest {
 
         val resolved = registry.resolve("display:torch_toggle")
         assertNotNull(resolved)
+
+        val resolvedKeepScreenOn = registry.resolve("display:keep_screen_on")
+        assertNotNull(resolvedKeepScreenOn)
+
+        val resolvedScreenOrientation = registry.resolve("display:screen_orientation")
+        assertNotNull(resolvedScreenOrientation)
     }
 
     @Test

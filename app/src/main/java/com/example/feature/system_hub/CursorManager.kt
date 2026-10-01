@@ -40,7 +40,8 @@ class CursorManager(
     var isRunning = false
         private set
     private var isPaused = false
-    private var isGlassShield = false
+    private var isGlassShield = true
+    private var isDoubleTapPending = false
 
     private var pointerX = 0f
     private var pointerY = 0f
@@ -245,21 +246,37 @@ class CursorManager(
                 override fun onDown(e: MotionEvent): Boolean = true
 
                 override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
-                    handleSingleTap()
+                    // Single tap on the trackpad is completely inert (NO ACTION)
+                    LogKeeper.writeLog("Cursor", "Single tap on trackpad ignored (inert)")
                     return true
                 }
 
                 override fun onDoubleTap(e: MotionEvent): Boolean {
-                    handleDoubleTap()
+                    // Physical second tap DOWN - do NOT inject click yet
+                    isDoubleTapPending = true
+                    LogKeeper.writeLog("Cursor", "tap detected: double tap DOWN at ($pointerX, $pointerY), awaiting physical release")
                     return true
                 }
 
                 override fun onDoubleTapEvent(e: MotionEvent): Boolean {
-                    // Handled in onDoubleTap - do not dispatch duplicate gesture on ACTION_UP
+                    if (e.actionMasked == MotionEvent.ACTION_UP) {
+                        if (isDoubleTapPending) {
+                            isDoubleTapPending = false
+                            LogKeeper.writeLog("Cursor", "tap detected: double tap UP released at ($pointerX, $pointerY) -> scheduling single click")
+                            // Wait 1 frame (~16ms) to ensure physical touch is completely cleared from OS input pipeline
+                            postDelayedHandler(Runnable {
+                                performClick(pointerX, pointerY)
+                            }, 16L)
+                            return true
+                        }
+                    } else if (e.actionMasked == MotionEvent.ACTION_CANCEL) {
+                        isDoubleTapPending = false
+                    }
                     return true
                 }
 
                 override fun onLongPress(e: MotionEvent) {
+                    if (isDoubleTapPending) return
                     val (targetX, targetY) = getDisplayCoordinates(pointerX, pointerY)
                     LogKeeper.writeLog("Cursor", "tap detected: long press at ($targetX, $targetY)")
                     performLongClick(targetX, targetY)
@@ -271,6 +288,10 @@ class CursorManager(
                     distanceX: Float,
                     distanceY: Float
                 ): Boolean {
+                    if (isDoubleTapPending) {
+                        // Prevent accidental cursor drift during double tap
+                        return true
+                    }
                     pointerX -= distanceX * 1.35f
                     pointerY -= distanceY * 1.35f
 
@@ -406,7 +427,7 @@ class CursorManager(
 
     internal fun handleDoubleTap() {
         LogKeeper.writeLog("Cursor", "tap detected: double tap at ($pointerX, $pointerY)")
-        performDoubleClick(pointerX, pointerY)
+        performClick(pointerX, pointerY)
     }
 
     private fun buildGestureSafely(builder: GestureDescription.Builder): GestureDescription? {
@@ -431,6 +452,24 @@ class CursorManager(
 
     internal var postDelayedHandler: (Runnable, Long) -> Unit = { r, delay -> mainHandler.postDelayed(r, delay) }
 
+    internal fun setTrackpadTouchable(touchable: Boolean) {
+        val view = trackpadView ?: return
+        val wm = windowManager ?: return
+        val params = view.layoutParams as? WindowManager.LayoutParams ?: return
+        val isCurrentlyNotTouchable = (params.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE) != 0
+        val desiredNotTouchable = !touchable
+        if (isCurrentlyNotTouchable == desiredNotTouchable) return
+
+        if (desiredNotTouchable) {
+            params.flags = params.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+        } else {
+            params.flags = params.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
+        }
+        try {
+            wm.updateViewLayout(view, params)
+        } catch (_: Exception) {}
+    }
+
     internal fun performClick(x: Float, y: Float, onFinished: ((Boolean) -> Unit)? = null) {
         showClickAnimation()
 
@@ -446,17 +485,32 @@ class CursorManager(
             gestureBuilder.setDisplayId(displayId)
         }
 
+        // Temporarily disable trackpad touch reception so the synthetic gesture passes directly to the underlying app
+        setTrackpadTouchable(false)
+        var restored = false
+        val restoreTouchableOnce = {
+            if (!restored) {
+                restored = true
+                setTrackpadTouchable(true)
+            }
+        }
+        postDelayedHandler(Runnable {
+            restoreTouchableOnce()
+        }, 350L)
+
         try {
             val gesture = buildGestureSafely(gestureBuilder)
             val accepted = dispatchGestureToService(
                 gesture,
                 object : AccessibilityService.GestureResultCallback() {
                     override fun onCompleted(gestureDescription: GestureDescription?) {
+                        restoreTouchableOnce()
                         LogKeeper.writeLog("Cursor", "gesture accepted/completed: single click at ($targetX, $targetY)")
                         onFinished?.invoke(true)
                     }
 
                     override fun onCancelled(gestureDescription: GestureDescription?) {
+                        restoreTouchableOnce()
                         LogKeeper.writeLog("Cursor", "gesture cancelled: single click at ($targetX, $targetY)")
                         onFinished?.invoke(false)
                     }
@@ -464,10 +518,12 @@ class CursorManager(
             )
             LogKeeper.writeLog("Cursor", "gesture dispatched: single click at ($targetX, $targetY), accepted=$accepted")
             if (!accepted) {
+                restoreTouchableOnce()
                 onFinished?.invoke(false)
             }
         } catch (e: Exception) {
             e.printStackTrace()
+            restoreTouchableOnce()
             LogKeeper.writeLog("Cursor", "gesture dispatch error at ($targetX, $targetY): ${e.message}")
             onFinished?.invoke(false)
         }
@@ -488,6 +544,18 @@ class CursorManager(
             val displayId = try { service.display?.displayId ?: android.view.Display.DEFAULT_DISPLAY } catch (_: Exception) { android.view.Display.DEFAULT_DISPLAY }
             gestureBuilder1.setDisplayId(displayId)
         }
+
+        setTrackpadTouchable(false)
+        var restored = false
+        val restoreTouchableOnce = {
+            if (!restored) {
+                restored = true
+                setTrackpadTouchable(true)
+            }
+        }
+        postDelayedHandler(Runnable {
+            restoreTouchableOnce()
+        }, 500L)
 
         try {
             val gesture1 = buildGestureSafely(gestureBuilder1)
@@ -516,11 +584,13 @@ class CursorManager(
                                     gesture2,
                                     object : AccessibilityService.GestureResultCallback() {
                                         override fun onCompleted(gd: GestureDescription?) {
+                                            restoreTouchableOnce()
                                             LogKeeper.writeLog("Cursor", "gesture accepted/completed: double click [2/2] at ($targetX, $targetY)")
                                             onFinished?.invoke(true)
                                         }
 
                                         override fun onCancelled(gd: GestureDescription?) {
+                                            restoreTouchableOnce()
                                             LogKeeper.writeLog("Cursor", "gesture cancelled: double click [2/2] at ($targetX, $targetY)")
                                             onFinished?.invoke(false)
                                         }
@@ -528,9 +598,11 @@ class CursorManager(
                                 )
                                 LogKeeper.writeLog("Cursor", "gesture dispatched: double click [2/2] at ($targetX, $targetY), accepted=$accepted2")
                                 if (!accepted2) {
+                                    restoreTouchableOnce()
                                     onFinished?.invoke(false)
                                 }
                             } catch (e: Exception) {
+                                restoreTouchableOnce()
                                 LogKeeper.writeLog("Cursor", "gesture dispatch error on double click [2/2]: ${e.message}")
                                 onFinished?.invoke(false)
                             }
@@ -538,6 +610,7 @@ class CursorManager(
                     }
 
                     override fun onCancelled(gestureDescription: GestureDescription?) {
+                        restoreTouchableOnce()
                         LogKeeper.writeLog("Cursor", "gesture cancelled: double click [1/2] at ($targetX, $targetY)")
                         onFinished?.invoke(false)
                     }
@@ -545,9 +618,11 @@ class CursorManager(
             )
             LogKeeper.writeLog("Cursor", "gesture dispatched: double click [1/2] at ($targetX, $targetY), accepted=$accepted1")
             if (!accepted1) {
+                restoreTouchableOnce()
                 onFinished?.invoke(false)
             }
         } catch (e: Exception) {
+            restoreTouchableOnce()
             LogKeeper.writeLog("Cursor", "gesture dispatch error on double click [1/2]: ${e.message}")
             onFinished?.invoke(false)
         }
@@ -564,21 +639,40 @@ class CursorManager(
         val gestureBuilder = GestureDescription.Builder()
         gestureBuilder.addStroke(GestureDescription.StrokeDescription(path, 0, 600))
 
+        setTrackpadTouchable(false)
+        var restored = false
+        val restoreTouchableOnce = {
+            if (!restored) {
+                restored = true
+                setTrackpadTouchable(true)
+            }
+        }
+        postDelayedHandler(Runnable {
+            restoreTouchableOnce()
+        }, 800L)
+
         try {
+            val gesture = buildGestureSafely(gestureBuilder)
             val accepted = dispatchGestureToService(
-                gestureBuilder.build(),
+                gesture,
                 object : AccessibilityService.GestureResultCallback() {
                     override fun onCompleted(gestureDescription: GestureDescription?) {
+                        restoreTouchableOnce()
                         LogKeeper.writeLog("Cursor", "gesture accepted/completed: long press at ($targetX, $targetY)")
                     }
 
                     override fun onCancelled(gestureDescription: GestureDescription?) {
+                        restoreTouchableOnce()
                         LogKeeper.writeLog("Cursor", "gesture cancelled: long press at ($targetX, $targetY)")
                     }
                 }
             )
             LogKeeper.writeLog("Cursor", "gesture dispatched: long press at ($targetX, $targetY), accepted=$accepted")
+            if (!accepted) {
+                restoreTouchableOnce()
+            }
         } catch (e: Exception) {
+            restoreTouchableOnce()
             LogKeeper.writeLog("Cursor", "Long press dispatch error: ${e.message}")
         }
     }

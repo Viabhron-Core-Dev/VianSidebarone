@@ -440,3 +440,56 @@
 * How it was verified: local build only (`compile_applet` passed cleanly; `gradle :app:testDebugUnitTest` executed and passed all 124 unit tests across 41 test suites with 0 failures).
 * Any deviation from what was requested, and why: None.
 * Any known issue or follow-up needed: None.
+
+### Entry: 2026-10-01T12:24:00Z
+* Timestamp: 2026-10-01T12:24:00Z
+* One-line summary: Resolved Cursor double-tap click touch conflict, made full-screen trackpad the default, and ensured single taps remain inert.
+* Exact files touched:
+  - `app/src/main/java/com/example/feature/system_hub/CursorManager.kt`
+  - `receipts/RECEIPTS_095.md`
+* What was actually done:
+  - Default Trackpad Mode: Set `isGlassShield = true` so full-screen transparent trackpad mode is the default on launch, while retaining small visible trackpad mode toggleable via control bar.
+  - Inert Single Tap: Changed `onSingleTapConfirmed` on the trackpad to log and perform no action, keeping single tap completely inert.
+  - Release-Gated Double Tap: In `onDoubleTap`, recorded `isDoubleTapPending = true` on the second physical down-touch without injecting synthetic clicks. In `onDoubleTapEvent`, detected physical `ACTION_UP` release of the second tap and scheduled single click injection via a 16ms delay (1 frame) so the physical finger is completely lifted from the screen before synthetic injection begins.
+  - Anti-Drift Guard: Suppressed `onScroll` cursor movement during pending double-tap to prevent accidental pointer jitter.
+  - Overlay Non-Touchable Protection: Implemented `setTrackpadTouchable(touchable: Boolean)` applying `FLAG_NOT_TOUCHABLE` to `trackpadView` immediately before `dispatchGestureToService()`, and restoring touchability in `onCompleted`, `onCancelled`, and a 350ms safety watchdog. This prevents `trackpadView` from swallowing or intercepting the synthetic click gesture.
+  - Single Click Execution: Updated `handleDoubleTap` and double-tap event pipeline to execute exactly one click (`performClick`) at current cursor coordinates.
+* How it was verified: local build only (`compile_applet` passed cleanly; `gradle :app:testDebugUnitTest` executed and passed all unit tests including `testCursorClickDispatchReportsRealGestureSuccessAndFailure` and `testDoubleClickPerformsTwoActualFakeTouchGestures`).
+
+### Entry: 2026-10-01T12:42:00Z
+* Timestamp: 2026-10-01T12:42:00Z
+* One-line summary: Implemented multi-shape selection (Rectangle, Square, Circle) and tap-to-start selection with Share, QR Code, and OCR actions in Secure Screen Scanner and Secure Camera Scanner.
+* Exact files touched:
+  - `app/src/main/java/com/example/feature/system_hub/ScannerSelectionHelper.kt`
+  - `app/src/main/java/com/example/feature/system_hub/SecureScreenScannerActivity.kt`
+  - `app/src/main/java/com/example/feature/system_hub/SecureCameraScannerActivity.kt`
+  - `receipts/RECEIPTS_095.md`
+* What was actually done:
+  - Multi-Shape Selection: Extended `ScannerSelectionHelper` to support `SelectionShape.RECTANGLE`, `SelectionShape.SQUARE`, and `SelectionShape.CIRCLE`. Added boundary calculation with screen edge clamping that preserves anchor coordinates. In circular selection, pixel areas outside the circle are masked transparent via `PorterDuff.Mode.SRC_IN`.
+  - Tap-To-Start Selection: Updated gesture detection in both `SecureScreenScannerActivity` and `SecureCameraScannerActivity` so the first tap places an anchor marker, and the second tap or drag completes the region selection. Dragging directly without prior tap continues to work seamlessly.
+  - Visual Overlays: Rendered shape-specific previews on Canvas (rectangular cutout and dimming for Rectangle/Square; EvenOdd path cutout and green circular boundary for Circle; bullseye anchor indicator during pending second tap).
+  - Post-Selection Action Bar: Added bottom action bar in both scanner activities containing "Share" (creates cropped bitmap and shares via FileProvider intent), "QR Code" (displays "QR Code scanning coming soon" Toast without recognition), and "OCR" (displays "OCR coming soon" Toast without recognition).
+  - Maintained Architecture: Retained heavy-process (`:heavy`) isolation and `ScannerCapabilityBridge` boundary without introducing any external ML Kit or ZXing dependencies.
+* How it was verified: local build only (`compile_applet` passed cleanly; `gradle :app:testDebugUnitTest` executed and passed all unit tests with 0 failures).
+* Any deviation from what was requested, and why: None.
+* Any known issue or follow-up needed: None.
+
+### Entry: 2026-10-01T12:59:00Z
+* Timestamp: 2026-10-01T12:59:00Z
+* One-line summary: Added Keep Screen On and full-range Screen Orientation elements to the Utility section and ActionPicker.
+* Exact files touched:
+  - `app/src/main/java/com/example/feature/sidebar/SidebarItem.kt`
+  - `app/src/main/java/com/example/feature/system_hub/DisplayHandler.kt`
+  - `app/src/main/java/com/example/feature/element/ElementActionRegistry.kt`
+  - `app/src/test/java/com/example/feature/element/ElementSystemTest.kt`
+  - `receipts/RECEIPTS_095.md`
+* What was actually done:
+  - Audited Add Element Utility Section: Identified existing 7 utility elements (`arrangement_checker`, `camera_measure`, `force_stop_running_apps`, `auto_scroll`, `blue_light_filter`, `log_keeper`, `cursor`) as active and working; identified `keep_screen_on` as missing, and `screen_orientation` as missing from Utility and incomplete in Display.
+  - Added Keep Screen On: Added `SidebarItem.DisplayAction("keep_screen_on", "Keep Screen On", ...)` to `ALL_UTILITIES_ACTIONS`. Implemented in `DisplayHandler` using overlay `FLAG_KEEP_SCREEN_ON` and `WakeLock` with state broadcasting and Toasts.
+  - Added Screen Orientation: Added `SidebarItem.DisplayAction("screen_orientation", "Screen Orientation", ...)` to `ALL_UTILITIES_ACTIONS`. Upgraded `DisplayHandler` to cycle through Auto-Rotate, Portrait (`ROTATION_0`), and Landscape (`ROTATION_90`) via `Settings.System.ACCELEROMETER_ROTATION` and `USER_ROTATION`.
+  - Action Registry: Registered `display:keep_screen_on` and `display:screen_orientation` in `ElementActionRegistry`.
+  - Testing: Extended `ElementSystemTest` asserting presence in `ALL_UTILITIES_ACTIONS`, registration, and resolution.
+* How it was verified: local build only (`compile_applet` passed cleanly; `gradle :app:testDebugUnitTest` executed and passed all unit tests with 0 failures).
+* Any deviation from what was requested, and why: None.
+* Any known issue or follow-up needed: None.
+

@@ -287,7 +287,9 @@ val ALL_UTILITIES_ACTIONS = listOf(
     SidebarItem.SystemAction("auto_scroll", "Auto Scroll", android.R.drawable.ic_menu_sort_by_size),
     SidebarItem.DisplayAction("blue_light_filter", "Blue Light Filter", android.R.drawable.ic_menu_view),
     SidebarItem.SystemAction("log_keeper", "Log Keeper", android.R.drawable.ic_menu_agenda),
-    SidebarItem.SystemAction("cursor", "Cursor", android.R.drawable.ic_menu_directions)
+    SidebarItem.SystemAction("cursor", "Cursor", android.R.drawable.ic_menu_directions),
+    SidebarItem.DisplayAction("keep_screen_on", "Keep Screen On", android.R.drawable.ic_lock_idle_alarm),
+    SidebarItem.DisplayAction("screen_orientation", "Screen Orientation", android.R.drawable.ic_menu_always_landscape_portrait)
 )
 
 val ALL_FLOATING_WINDOWS = listOf(
