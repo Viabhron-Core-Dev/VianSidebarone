@@ -1143,3 +1143,652 @@ java.lang.IllegalStateException: Hardware engine crashed unexpectedly
 [2026-10-01 19:59:01.577] [pid-0] [Test worker] [ElementActionDispatcher] System action performed by accessibility service: barcode_scanner
 [2026-10-01 19:59:01.577] [pid-0] [Test worker] [ElementActionDispatcher] Handling system action: redact_screenshot
 [2026-10-01 19:59:01.578] [pid-0] [Test worker] [ElementActionDispatcher] System action performed by accessibility service: redact_screenshot
+[2026-10-02 06:18:54.429] [pid-0] [Test worker] [HandleManager] Migrated legacy page stack from 'handle_1_pages' to isolated container key 'handle_handle_1_swipe_left_pages'
+[2026-10-02 06:18:54.613] [pid-0] [Test worker] [CapabilityManager] CapabilityManager: released all active capabilities and sessions
+[2026-10-02 06:18:54.616] [pid-0] [Test worker] [CapabilityManager] Registered local capability: shared_local_tool
+[2026-10-02 06:18:54.622] [pid-0] [Test worker] [CapabilityManager] Mounted capability 'shared_local_tool' [LOCAL_MAIN] session 'cap_shared_local_tool_44b099a0' (owner=ownerA)
+[2026-10-02 06:18:54.623] [pid-0] [Test worker] [CapabilityManager] Mounted capability 'shared_local_tool' [LOCAL_MAIN] session 'cap_shared_local_tool_b704a6a9' (owner=ownerB)
+[2026-10-02 06:18:54.623] [pid-0] [Test worker] [CapabilityManager] Unmounted session 'cap_shared_local_tool_44b099a0' of capability 'shared_local_tool'
+[2026-10-02 06:18:54.624] [pid-0] [Test worker] [CapabilityManager] Discarded idle local module 'shared_local_tool'
+[2026-10-02 06:18:54.624] [pid-0] [Test worker] [CapabilityManager] Unmounted session 'cap_shared_local_tool_b704a6a9' of capability 'shared_local_tool'
+[2026-10-02 06:18:54.624] [pid-0] [Test worker] [CapabilityManager] CapabilityManager: released all active capabilities and sessions
+[2026-10-02 06:18:54.625] [pid-0] [Test worker] [CapabilityManager] Registered local capability: element_helper_cap
+[2026-10-02 06:18:54.627] [pid-0] [Test worker] [CapabilityManager] Mounted capability 'element_helper_cap' [LOCAL_MAIN] session 'cap_element_helper_cap_62ac6b25' (owner=page_1_action_mock_tool)
+[2026-10-02 06:18:54.630] [pid-0] [Test worker] [CapabilityManager] Discarded idle local module 'element_helper_cap'
+[2026-10-02 06:18:54.630] [pid-0] [Test worker] [CapabilityManager] Unmounted session 'cap_element_helper_cap_62ac6b25' of capability 'element_helper_cap'
+[2026-10-02 06:18:54.630] [pid-0] [Test worker] [CapabilityManager] Unmounted 1 capabilities for owner 'page_1_action_mock_tool'
+[2026-10-02 06:18:54.632] [pid-0] [Test worker] [CapabilityManager] CapabilityManager: released all active capabilities and sessions
+[2026-10-02 06:18:54.633] [pid-0] [Test worker] [HeavyProcessConnectionManager] Connection aborted: Context package name is null or blank
+[2026-10-02 06:18:54.633] [pid-0] [Test worker] [CapabilityManager] CapabilityManager: released all active capabilities and sessions
+[2026-10-02 06:18:54.635] [pid-0] [Test worker] [CapabilityManager] Mount failed: capability 'non_existent_capability' not found
+[2026-10-02 06:18:54.636] [pid-0] [Test worker] [CapabilityManager] CapabilityManager: released all active capabilities and sessions
+[2026-10-02 06:18:54.636] [pid-0] [Test worker] [CapabilityManager] Registered Heavy-routed capability: future_heavy_mini_app
+[2026-10-02 06:18:54.637] [pid-0] [Test worker] [HeavyCapRouter] Mounting Heavy capability 'future_heavy_mini_app' for session 'cap_future_heavy_mini_app_613675f1'
+[2026-10-02 06:18:54.639] [pid-0] [Test worker] [CapabilityManager] Mounted capability 'future_heavy_mini_app' [REMOTE_HEAVY] session 'cap_future_heavy_mini_app_613675f1' (owner=element_heavy)
+[2026-10-02 06:18:54.640] [pid-0] [Test worker] [HeavyCapRouter] Unmounting Heavy capability 'future_heavy_mini_app' for session 'cap_future_heavy_mini_app_613675f1'
+[2026-10-02 06:18:54.640] [pid-0] [Test worker] [CapabilityManager] Unmounted session 'cap_future_heavy_mini_app_613675f1' of capability 'future_heavy_mini_app'
+[2026-10-02 06:18:54.654] [pid-0] [Test worker] [CapabilityManager] CapabilityManager: released all active capabilities and sessions
+[2026-10-02 06:18:54.655] [pid-0] [Test worker] [CapabilityManager] Registered local capability: cap_a
+[2026-10-02 06:18:54.656] [pid-0] [Test worker] [CapabilityManager] Registered local capability: cap_b
+[2026-10-02 06:18:54.656] [pid-0] [Test worker] [CapabilityManager] Mounted capability 'cap_a' [LOCAL_MAIN] session 'cap_cap_a_343dc340' (owner=element_weather)
+[2026-10-02 06:18:54.657] [pid-0] [Test worker] [CapabilityManager] Mounted capability 'cap_b' [LOCAL_MAIN] session 'cap_cap_b_1bbc7895' (owner=element_weather)
+[2026-10-02 06:18:54.657] [pid-0] [Test worker] [CapabilityManager] Discarded idle local module 'cap_a'
+[2026-10-02 06:18:54.657] [pid-0] [Test worker] [CapabilityManager] Unmounted session 'cap_cap_a_343dc340' of capability 'cap_a'
+[2026-10-02 06:18:54.658] [pid-0] [Test worker] [CapabilityManager] Discarded idle local module 'cap_b'
+[2026-10-02 06:18:54.658] [pid-0] [Test worker] [CapabilityManager] Unmounted session 'cap_cap_b_1bbc7895' of capability 'cap_b'
+[2026-10-02 06:18:54.658] [pid-0] [Test worker] [CapabilityManager] Unmounted 2 capabilities for owner 'element_weather'
+[2026-10-02 06:18:54.659] [pid-0] [Test worker] [CapabilityManager] CapabilityManager: released all active capabilities and sessions
+[2026-10-02 06:18:54.660] [pid-0] [Test worker] [CapabilityManager] Registered local capability: test_local_math
+[2026-10-02 06:18:54.661] [pid-0] [Test worker] [CapabilityManager] Mounted capability 'test_local_math' [LOCAL_MAIN] session 'cap_test_local_math_f273d28c' (owner=element_1)
+[2026-10-02 06:18:54.661] [pid-0] [Test worker] [CapabilityManager] Discarded idle local module 'test_local_math'
+[2026-10-02 06:18:54.661] [pid-0] [Test worker] [CapabilityManager] Unmounted session 'cap_test_local_math_f273d28c' of capability 'test_local_math'
+[2026-10-02 06:18:54.662] [pid-0] [Test worker] [CapabilityManager] CapabilityManager: released all active capabilities and sessions
+[2026-10-02 06:18:54.662] [pid-0] [Test worker] [CapabilityManager] Registered Heavy-routed capability: heavy_resilience_test
+[2026-10-02 06:18:54.662] [pid-0] [Test worker] [HeavyCapRouter] Mounting Heavy capability 'heavy_resilience_test' for session 'cap_heavy_resilience_test_5957cb41'
+[2026-10-02 06:18:54.663] [pid-0] [Test worker] [HeavyProcessConnectionManager] bindService failed: setClassName(...) must not be null
+[2026-10-02 06:18:54.663] [pid-0] [Test worker] [HeavyProcessConnectionManager] Heavy process binder died (DeathRecipient triggered)
+[2026-10-02 06:18:54.663] [pid-0] [Test worker] [Lifecycle] [HeavyProcess] HEAVY_PROCESS_DIED - DeathRecipient triggered: Binder connection to :heavy terminated
+[2026-10-02 06:18:54.858] [pid-0] [Test worker] [HeavyModuleManager] Registered Heavy module: shared_engine (lazy=true)
+[2026-10-02 06:18:54.858] [pid-0] [Test worker] [HeavyModuleManager] Instantiating Heavy module 'shared_engine' lazily
+[2026-10-02 06:18:54.868] [pid-0] [Test worker] [HeavyModuleManager] Mounted module 'shared_engine' session 'session_1' (owner=null, activeRef=1)
+[2026-10-02 06:18:54.869] [pid-0] [Test worker] [HeavyModuleManager] Mounted module 'shared_engine' session 'session_2' (owner=null, activeRef=2)
+[2026-10-02 06:18:54.870] [pid-0] [Test worker] [HeavyModuleManager] Unmounted session 'session_1' of module 'shared_engine' (remaining sessions: 1)
+[2026-10-02 06:18:54.870] [pid-0] [Test worker] [HeavyModuleManager] Disposed idle module instance 'shared_engine'
+[2026-10-02 06:18:54.870] [pid-0] [Test worker] [HeavyModuleManager] Unmounted session 'session_2' of module 'shared_engine' (remaining sessions: 0)
+[2026-10-02 06:18:54.871] [pid-0] [Test worker] [HeavyModuleManager] Registered Heavy module: heavy_logger (lazy=true)
+[2026-10-02 06:18:54.872] [pid-0] [Test worker] [HeavyModuleManager] Instantiating Heavy module 'heavy_logger' lazily
+[2026-10-02 06:18:54.873] [pid-0] [Test worker] [HeavyModuleManager] Mounted module 'heavy_logger' session 'hmod_heavy_logger_d87393a9' (owner=null, activeRef=1)
+[2026-10-02 06:18:54.873] [pid-0] [Test worker] [HeavyModuleManager] Disposed idle module instance 'heavy_logger'
+[2026-10-02 06:18:54.873] [pid-0] [Test worker] [HeavyModuleManager] Unmounted session 'hmod_heavy_logger_d87393a9' of module 'heavy_logger' (remaining sessions: 0)
+[2026-10-02 06:18:54.874] [pid-0] [Test worker] [HeavyModuleManager] Registered Heavy module: modular_widget (lazy=true)
+[2026-10-02 06:18:54.874] [pid-0] [Test worker] [HeavyModuleManager] Instantiating Heavy module 'modular_widget' lazily
+[2026-10-02 06:18:54.875] [pid-0] [Test worker] [HeavyModuleManager] Mounted module 'modular_widget' session 'hmod_modular_widget_6e1fcc95' (owner=owner_page_1, activeRef=1)
+[2026-10-02 06:18:54.876] [pid-0] [Test worker] [HeavyModuleManager] Mounted module 'modular_widget' session 'hmod_modular_widget_c21e7d16' (owner=owner_page_1, activeRef=2)
+[2026-10-02 06:18:54.876] [pid-0] [Test worker] [HeavyModuleManager] Mounted module 'modular_widget' session 'hmod_modular_widget_1856f9f3' (owner=owner_page_1, activeRef=3)
+[2026-10-02 06:18:54.876] [pid-0] [Test worker] [HeavyModuleManager] Mounted module 'modular_widget' session 'hmod_modular_widget_9db0dd5b' (owner=owner_page_2, activeRef=4)
+[2026-10-02 06:18:54.876] [pid-0] [Test worker] [HeavyModuleManager] Unmounted session 'hmod_modular_widget_c21e7d16' of module 'modular_widget' (remaining sessions: 3)
+[2026-10-02 06:18:54.877] [pid-0] [Test worker] [HeavyModuleManager] Unmounted session 'hmod_modular_widget_1856f9f3' of module 'modular_widget' (remaining sessions: 2)
+[2026-10-02 06:18:54.877] [pid-0] [Test worker] [HeavyModuleManager] Unmounted session 'hmod_modular_widget_6e1fcc95' of module 'modular_widget' (remaining sessions: 1)
+[2026-10-02 06:18:54.877] [pid-0] [Test worker] [HeavyModuleManager] Unmounted 3 module sessions for owner 'owner_page_1'
+[2026-10-02 06:18:54.878] [pid-0] [Test worker] [HeavyModuleManager] Disposed idle module instance 'modular_widget'
+[2026-10-02 06:18:54.878] [pid-0] [Test worker] [HeavyModuleManager] Unmounted session 'hmod_modular_widget_9db0dd5b' of module 'modular_widget' (remaining sessions: 0)
+[2026-10-02 06:18:54.878] [pid-0] [Test worker] [HeavyModuleManager] Unmounted 1 module sessions for owner 'owner_page_2'
+[2026-10-02 06:18:54.879] [pid-0] [Test worker] [HeavyModuleManager] Mount failed: module 'non_existent_module_999' not registered
+[2026-10-02 06:18:54.881] [pid-0] [Test worker] [HeavyModuleManager] Registered Heavy module: heavy_evaluator (lazy=true)
+[2026-10-02 06:18:54.882] [pid-0] [Test worker] [HeavyModuleManager] Instantiating Heavy module 'heavy_evaluator' lazily
+[2026-10-02 06:18:54.883] [pid-0] [Test worker] [HeavyModuleManager] Mounted module 'heavy_evaluator' session 'hmod_heavy_evaluator_6bf1b7d6' (owner=null, activeRef=1)
+[2026-10-02 06:18:54.885] [pid-0] [Test worker] [HeavyModuleManager] Registered Heavy module: test_mod (lazy=true)
+[2026-10-02 06:18:54.885] [pid-0] [Test worker] [HeavyModuleManager] Instantiating Heavy module 'test_mod' lazily
+[2026-10-02 06:18:54.886] [pid-0] [Test worker] [HeavyModuleManager] Mounted module 'test_mod' session 'hmod_test_mod_f405a004' (owner=null, activeRef=1)
+[2026-10-02 06:18:54.887] [pid-0] [Test worker] [HeavyModuleManager] Disposed idle module instance 'test_mod'
+[2026-10-02 06:18:54.887] [pid-0] [Test worker] [HeavyModuleManager] Unmounted session 'hmod_test_mod_f405a004' of module 'test_mod' (remaining sessions: 0)
+[2026-10-02 06:18:54.889] [pid-0] [Test worker] [HeavyModuleManager] Registered Heavy module: faulty_module (lazy=true)
+[2026-10-02 06:18:54.889] [pid-0] [Test worker] [HeavyModuleManager] Instantiating Heavy module 'faulty_module' lazily
+[2026-10-02 06:18:54.889] [pid-0] [Test worker] [HeavyModuleManager] Mounted module 'faulty_module' session 'hmod_faulty_module_10c2e0bd' (owner=null, activeRef=1)
+[2026-10-02 06:18:54.890] [pid-0] [Test worker] [ERROR:HeavyModuleManager] Error executing operation 'crash_test' on 'faulty_module'
+java.lang.IllegalStateException: Hardware engine crashed unexpectedly
+	at com.example.feature.heavy.module.HeavyModuleManagerTest$testOperationFailure$1$1.onUse(HeavyModuleManagerTest.kt:403)
+	at com.example.feature.heavy.module.HeavyModuleManager.use(HeavyModuleManager.kt:343)
+	at com.example.feature.heavy.module.HeavyModuleSessionImpl.use(HeavyModuleManager.kt:39)
+	at com.example.feature.heavy.module.HeavyModuleSession$DefaultImpls.use$default(HeavyModuleContract.kt:19)
+	at com.example.feature.heavy.module.HeavyModuleManagerTest.testOperationFailure(HeavyModuleManagerTest.kt:411)
+	at java.base/jdk.internal.reflect.DirectMethodHandleAccessor.invoke(DirectMethodHandleAccessor.java:103)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:580)
+	at org.junit.runners.model.FrameworkMethod$1.runReflectiveCall(FrameworkMethod.java:59)
+	at org.junit.internal.runners.model.ReflectiveCallable.run(ReflectiveCallable.java:12)
+	at org.junit.runners.model.FrameworkMethod.invokeExplosively(FrameworkMethod.java:56)
+	at org.junit.internal.runners.statements.InvokeMethod.evaluate(InvokeMethod.java:17)
+	at org.junit.internal.runners.statements.RunBefores.evaluate(RunBefores.java:26)
+	at org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)
+	at org.junit.runners.BlockJUnit4ClassRunner$1.evaluate(BlockJUnit4ClassRunner.java:100)
+	at org.junit.runners.ParentRunner.runLeaf(ParentRunner.java:366)
+	at org.junit.runners.BlockJUnit4ClassRunner.runChild(BlockJUnit4ClassRunner.java:103)
+	at org.junit.runners.BlockJUnit4ClassRunner.runChild(BlockJUnit4ClassRunner.java:63)
+	at org.junit.runners.ParentRunner$4.run(ParentRunner.java:331)
+	at org.junit.runners.ParentRunner$1.schedule(ParentRunner.java:79)
+	at org.junit.runners.ParentRunner.runChildren(ParentRunner.java:329)
+	at org.junit.runners.ParentRunner.access$100(ParentRunner.java:66)
+	at org.junit.runners.ParentRunner$2.evaluate(ParentRunner.java:293)
+	at org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)
+	at org.junit.runners.ParentRunner.run(ParentRunner.java:413)
+	at org.junit.runner.JUnitCore.run(JUnitCore.java:137)
+	at org.junit.runner.JUnitCore.run(JUnitCore.java:115)
+	at org.gradle.api.internal.tasks.testing.junit.JUnitTestExecutor.runRequest(JUnitTestExecutor.java:175)
+	at org.gradle.api.internal.tasks.testing.junit.JUnitTestExecutor.accept(JUnitTestExecutor.java:84)
+	at org.gradle.api.internal.tasks.testing.junit.JUnitTestExecutor.accept(JUnitTestExecutor.java:47)
+	at org.gradle.api.internal.tasks.testing.junit.AbstractJUnitTestDefinitionProcessor.processTestDefinition(AbstractJUnitTestDefinitionProcessor.java:65)
+	at org.gradle.api.internal.tasks.testing.SuiteTestDefinitionProcessor.processTestDefinition(SuiteTestDefinitionProcessor.java:54)
+	at java.base/jdk.internal.reflect.DirectMethodHandleAccessor.invoke(DirectMethodHandleAccessor.java:103)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:580)
+	at org.gradle.internal.dispatch.MethodInvocation.invokeOn(MethodInvocation.java:77)
+	at org.gradle.internal.dispatch.ReflectionDispatch.dispatch(ReflectionDispatch.java:28)
+	at org.gradle.internal.dispatch.ReflectionDispatch.dispatch(ReflectionDispatch.java:19)
+	at org.gradle.internal.dispatch.ContextClassLoaderDispatch.dispatch(ContextClassLoaderDispatch.java:33)
+	at org.gradle.internal.dispatch.ProxyDispatchAdapter$DispatchingInvocationHandler.invoke(ProxyDispatchAdapter.java:88)
+	at jdk.proxy1/jdk.proxy1.$Proxy4.processTestDefinition(Unknown Source)
+	at org.gradle.api.internal.tasks.testing.worker.TestWorker$2.run(TestWorker.java:178)
+	at org.gradle.api.internal.tasks.testing.worker.TestWorker.executeAndMaintainThreadName(TestWorker.java:126)
+	at org.gradle.api.internal.tasks.testing.worker.TestWorker.execute(TestWorker.java:103)
+	at org.gradle.api.internal.tasks.testing.worker.TestWorker.execute(TestWorker.java:63)
+	at org.gradle.process.internal.worker.child.ActionExecutionWorker.execute(ActionExecutionWorker.java:56)
+	at org.gradle.process.internal.worker.child.SystemApplicationClassLoaderWorker.call(SystemApplicationClassLoaderWorker.java:122)
+	at org.gradle.process.internal.worker.child.SystemApplicationClassLoaderWorker.call(SystemApplicationClassLoaderWorker.java:72)
+	at worker.org.gradle.process.internal.worker.GradleWorkerMain.run(GradleWorkerMain.java:69)
+	at worker.org.gradle.process.internal.worker.GradleWorkerMain.main(GradleWorkerMain.java:74)
+
+[2026-10-02 06:18:54.893] [pid-0] [Test worker] [HeavyModuleManager] Registered Heavy module: safe_release_mod (lazy=true)
+[2026-10-02 06:18:54.893] [pid-0] [Test worker] [HeavyModuleManager] Instantiating Heavy module 'safe_release_mod' lazily
+[2026-10-02 06:18:54.894] [pid-0] [Test worker] [HeavyModuleManager] Mounted module 'safe_release_mod' session 'hmod_safe_release_mod_0f388c18' (owner=null, activeRef=1)
+[2026-10-02 06:18:54.894] [pid-0] [Test worker] [HeavyModuleManager] Disposed idle module instance 'safe_release_mod'
+[2026-10-02 06:18:54.894] [pid-0] [Test worker] [HeavyModuleManager] Unmounted session 'hmod_safe_release_mod_0f388c18' of module 'safe_release_mod' (remaining sessions: 0)
+[2026-10-02 06:18:54.895] [pid-0] [Test worker] [HeavyModuleManager] Registered Heavy module: unavailable_module (lazy=true)
+[2026-10-02 06:18:54.895] [pid-0] [Test worker] [HeavyModuleManager] Instantiating Heavy module 'unavailable_module' lazily
+[2026-10-02 06:18:54.896] [pid-0] [Test worker] [HeavyModuleManager] Mounted module 'unavailable_module' session 'hmod_unavailable_module_891a559c' (owner=null, activeRef=1)
+[2026-10-02 06:18:54.896] [pid-0] [Test worker] [HeavyModuleManager] Mount failed: module 'unavailable_module' is unavailable
+[2026-10-02 06:18:54.897] [pid-0] [Test worker] [HeavyModuleManager] Registered Heavy module: ipc_test_mod (lazy=true)
+[2026-10-02 06:18:54.897] [pid-0] [Test worker] [HeavyModuleManager] Instantiating Heavy module 'ipc_test_mod' lazily
+[2026-10-02 06:18:54.898] [pid-0] [Test worker] [HeavyModuleManager] Mounted module 'ipc_test_mod' session 'ipc_token_1' (owner=ipc_owner_1, activeRef=1)
+[2026-10-02 06:18:54.899] [pid-0] [Test worker] [HeavyModuleManager] Disposed idle module instance 'ipc_test_mod'
+[2026-10-02 06:18:54.899] [pid-0] [Test worker] [HeavyModuleManager] Unmounted session 'ipc_token_1' of module 'ipc_test_mod' (remaining sessions: 0)
+[2026-10-02 06:18:54.899] [pid-0] [Test worker] [HeavyModuleManager] Instantiating Heavy module 'ipc_test_mod' lazily
+[2026-10-02 06:18:54.899] [pid-0] [Test worker] [HeavyModuleManager] Mounted module 'ipc_test_mod' session 'token_a' (owner=owner_x, activeRef=1)
+[2026-10-02 06:18:54.900] [pid-0] [Test worker] [HeavyModuleManager] Mounted module 'ipc_test_mod' session 'token_b' (owner=owner_x, activeRef=2)
+[2026-10-02 06:18:54.900] [pid-0] [Test worker] [HeavyModuleManager] Unmounted session 'token_a' of module 'ipc_test_mod' (remaining sessions: 1)
+[2026-10-02 06:18:54.900] [pid-0] [Test worker] [HeavyModuleManager] Disposed idle module instance 'ipc_test_mod'
+[2026-10-02 06:18:54.900] [pid-0] [Test worker] [HeavyModuleManager] Unmounted session 'token_b' of module 'ipc_test_mod' (remaining sessions: 0)
+[2026-10-02 06:18:54.900] [pid-0] [Test worker] [HeavyModuleManager] Unmounted 2 module sessions for owner 'owner_x'
+[2026-10-02 06:18:54.901] [pid-0] [Test worker] [HeavyModuleManager] Registered Heavy module: heavy_calc (lazy=true)
+[2026-10-02 06:18:54.901] [pid-0] [Test worker] [HeavyModuleManager] Instantiating Heavy module 'heavy_calc' lazily
+[2026-10-02 06:18:54.902] [pid-0] [Test worker] [HeavyModuleManager] Mounted module 'heavy_calc' session 'session_calc_1' (owner=owner_widget_1, activeRef=1)
+[2026-10-02 06:18:54.903] [pid-0] [Test worker] [HeavyModuleManager] Registered Heavy module: heavy_reader (lazy=true)
+[2026-10-02 06:18:54.904] [pid-0] [Test worker] [HeavyModuleManager] Registered Heavy module: ephemeral_module (lazy=true)
+[2026-10-02 06:18:54.904] [pid-0] [Test worker] [HeavyModuleManager] Instantiating Heavy module 'ephemeral_module' lazily
+[2026-10-02 06:18:54.905] [pid-0] [Test worker] [HeavyModuleManager] Mounted module 'ephemeral_module' session 'hmod_ephemeral_module_b1f75aa9' (owner=null, activeRef=1)
+[2026-10-02 06:18:54.905] [pid-0] [Test worker] [HeavyModuleManager] Disposed idle module instance 'ephemeral_module'
+[2026-10-02 06:18:54.905] [pid-0] [Test worker] [HeavyModuleManager] Unmounted session 'hmod_ephemeral_module_b1f75aa9' of module 'ephemeral_module' (remaining sessions: 0)
+[2026-10-02 06:18:54.907] [pid-0] [Test worker] [HeavyModuleManager] Registered Heavy module: module_1 (lazy=true)
+[2026-10-02 06:18:54.908] [pid-0] [Test worker] [HeavyModuleManager] Registered Heavy module: module_2 (lazy=true)
+[2026-10-02 06:18:54.908] [pid-0] [Test worker] [HeavyModuleManager] Registered Heavy module: module_3 (lazy=true)
+[2026-10-02 06:18:54.908] [pid-0] [Test worker] [HeavyModuleManager] Registered Heavy module: module_4 (lazy=true)
+[2026-10-02 06:18:54.908] [pid-0] [Test worker] [HeavyModuleManager] Registered Heavy module: module_5 (lazy=true)
+[2026-10-02 06:18:54.908] [pid-0] [Test worker] [HeavyModuleManager] Instantiating Heavy module 'module_3' lazily
+[2026-10-02 06:18:54.909] [pid-0] [Test worker] [HeavyModuleManager] Mounted module 'module_3' session 'hmod_module_3_92441248' (owner=null, activeRef=1)
+[2026-10-02 06:18:54.927] [pid-0] [Test worker] [RecordingActionHelper] RECORD_AUDIO missing, launching AudioRecordPermissionActivity
+[2026-10-02 06:18:54.927] [pid-0] [Test worker] [RecordingActionHelper] Opening RecordingsActivity
+[2026-10-02 06:18:54.949] [pid-0] [Test worker] [ElementActionDispatcher] Handling system action: audio_record
+[2026-10-02 06:18:54.949] [pid-0] [Test worker] [RecordingActionHelper] RECORD_AUDIO missing, launching AudioRecordPermissionActivity
+[2026-10-02 06:18:54.962] [pid-0] [Test worker] [CallRecorderManager] Call recorder listener unavailable: missing READ_PHONE_STATE permission
+[2026-10-02 06:18:54.969] [pid-0] [Test worker] [CallRecorderManager] Call recorder listener unavailable: listen: Neither user nor current process has android.permission.READ_PHONE_STATE
+[2026-10-02 06:18:54.997] [pid-0] [Test worker] [ElementActionDispatcher] Handling system action: back
+[2026-10-02 06:18:54.999] [pid-0] [Test worker] [ElementActionDispatcher] System action performed by accessibility service: back
+[2026-10-02 06:18:55.000] [pid-0] [Test worker] [ElementActionDispatcher] Handling system action: home
+[2026-10-02 06:18:55.000] [pid-0] [Test worker] [ElementActionDispatcher] System action performed by accessibility service: home
+[2026-10-02 06:18:55.001] [pid-0] [Test worker] [ElementActionDispatcher] Handling system action: recents
+[2026-10-02 06:18:55.001] [pid-0] [Test worker] [ElementActionDispatcher] System action performed by accessibility service: recents
+[2026-10-02 06:18:55.001] [pid-0] [Test worker] [ElementActionDispatcher] Handling system action: notifications
+[2026-10-02 06:18:55.001] [pid-0] [Test worker] [ElementActionDispatcher] System action performed by accessibility service: notifications
+[2026-10-02 06:18:55.001] [pid-0] [Test worker] [ElementActionDispatcher] Handling system action: quick_settings
+[2026-10-02 06:18:55.001] [pid-0] [Test worker] [ElementActionDispatcher] System action performed by accessibility service: quick_settings
+[2026-10-02 06:18:55.002] [pid-0] [Test worker] [ElementActionDispatcher] Handling system action: lock_screen
+[2026-10-02 06:18:55.002] [pid-0] [Test worker] [ElementActionDispatcher] System action performed by accessibility service: lock_screen
+[2026-10-02 06:18:55.002] [pid-0] [Test worker] [ElementActionDispatcher] Handling system action: splitscreen
+[2026-10-02 06:18:55.002] [pid-0] [Test worker] [ElementActionDispatcher] System action performed by accessibility service: splitscreen
+[2026-10-02 06:18:55.006] [pid-0] [Test worker] [ElementActionDispatcher] Handling system action: non_existent_action_xyz
+[2026-10-02 06:18:55.006] [pid-0] [Test worker] [ElementActionDispatcher] Accessibility action 'non_existent_action_xyz' unavailable: Action 'non_existent_action_xyz' is not supported
+[2026-10-02 06:18:55.009] [pid-0] [Test worker] [ElementActionDispatcher] Handling system action: screenshot
+[2026-10-02 06:18:55.009] [pid-0] [Test worker] [ElementActionDispatcher] System action performed by accessibility service: screenshot
+[2026-10-02 06:18:55.010] [pid-0] [Test worker] [ElementActionDispatcher] Handling system action: back
+[2026-10-02 06:18:55.011] [pid-0] [Test worker] [ElementActionDispatcher] Accessibility action 'back' failed: System rejected global action 'back'
+[2026-10-02 06:18:55.013] [pid-0] [Test worker] [ElementActionDispatcher] Handling system action: back
+[2026-10-02 06:18:55.013] [pid-0] [Test worker] [ElementActionDispatcher] Accessibility service not running/enabled for action: back
+[2026-10-02 06:18:55.014] [pid-0] [Test worker] [ElementActionDispatcher] Handling system action: qr_scan
+[2026-10-02 06:18:55.015] [pid-0] [Test worker] [ElementActionDispatcher] System action performed by accessibility service: qr_scan
+[2026-10-02 06:18:55.015] [pid-0] [Test worker] [ElementActionDispatcher] Handling system action: barcode_scanner
+[2026-10-02 06:18:55.016] [pid-0] [Test worker] [ElementActionDispatcher] System action performed by accessibility service: barcode_scanner
+[2026-10-02 06:18:55.016] [pid-0] [Test worker] [ElementActionDispatcher] Handling system action: redact_screenshot
+[2026-10-02 06:18:55.016] [pid-0] [Test worker] [ElementActionDispatcher] System action performed by accessibility service: redact_screenshot
+[2026-10-02 06:19:31.543] [pid-0] [Test worker] [RecordingActionHelper] RECORD_AUDIO missing, launching AudioRecordPermissionActivity
+[2026-10-02 06:19:31.565] [pid-0] [Test worker] [RecordingActionHelper] Opening RecordingsActivity
+[2026-10-02 06:19:31.602] [pid-0] [Test worker] [ElementActionDispatcher] Handling system action: audio_record
+[2026-10-02 06:19:31.602] [pid-0] [Test worker] [RecordingActionHelper] RECORD_AUDIO missing, launching AudioRecordPermissionActivity
+[2026-10-02 06:19:31.627] [pid-0] [Test worker] [CallRecorderManager] Call recorder listener unavailable: missing READ_PHONE_STATE permission
+[2026-10-02 06:19:31.633] [pid-0] [Test worker] [CallRecorderManager] Call recorder listener unavailable: listen: Neither user nor current process has android.permission.READ_PHONE_STATE
+[2026-10-02 06:19:31.705] [pid-0] [Test worker] [HandleManager] Migrated legacy page stack from 'handle_1_pages' to isolated container key 'handle_handle_1_swipe_left_pages'
+[2026-10-02 06:19:31.841] [pid-0] [Test worker] [CapabilityManager] CapabilityManager: released all active capabilities and sessions
+[2026-10-02 06:19:31.843] [pid-0] [Test worker] [CapabilityManager] Registered local capability: shared_local_tool
+[2026-10-02 06:19:31.850] [pid-0] [Test worker] [CapabilityManager] Mounted capability 'shared_local_tool' [LOCAL_MAIN] session 'cap_shared_local_tool_98892c84' (owner=ownerA)
+[2026-10-02 06:19:31.851] [pid-0] [Test worker] [CapabilityManager] Mounted capability 'shared_local_tool' [LOCAL_MAIN] session 'cap_shared_local_tool_5cd979ff' (owner=ownerB)
+[2026-10-02 06:19:31.852] [pid-0] [Test worker] [CapabilityManager] Unmounted session 'cap_shared_local_tool_98892c84' of capability 'shared_local_tool'
+[2026-10-02 06:19:31.852] [pid-0] [Test worker] [CapabilityManager] Discarded idle local module 'shared_local_tool'
+[2026-10-02 06:19:31.852] [pid-0] [Test worker] [CapabilityManager] Unmounted session 'cap_shared_local_tool_5cd979ff' of capability 'shared_local_tool'
+[2026-10-02 06:19:31.853] [pid-0] [Test worker] [CapabilityManager] CapabilityManager: released all active capabilities and sessions
+[2026-10-02 06:19:31.853] [pid-0] [Test worker] [CapabilityManager] Registered local capability: element_helper_cap
+[2026-10-02 06:19:31.856] [pid-0] [Test worker] [CapabilityManager] Mounted capability 'element_helper_cap' [LOCAL_MAIN] session 'cap_element_helper_cap_0c9e3f91' (owner=page_1_action_mock_tool)
+[2026-10-02 06:19:31.858] [pid-0] [Test worker] [CapabilityManager] Discarded idle local module 'element_helper_cap'
+[2026-10-02 06:19:31.858] [pid-0] [Test worker] [CapabilityManager] Unmounted session 'cap_element_helper_cap_0c9e3f91' of capability 'element_helper_cap'
+[2026-10-02 06:19:31.858] [pid-0] [Test worker] [CapabilityManager] Unmounted 1 capabilities for owner 'page_1_action_mock_tool'
+[2026-10-02 06:19:31.859] [pid-0] [Test worker] [CapabilityManager] CapabilityManager: released all active capabilities and sessions
+[2026-10-02 06:19:31.859] [pid-0] [Test worker] [HeavyProcessConnectionManager] Connection aborted: Context package name is null or blank
+[2026-10-02 06:19:31.860] [pid-0] [Test worker] [CapabilityManager] CapabilityManager: released all active capabilities and sessions
+[2026-10-02 06:19:31.860] [pid-0] [Test worker] [CapabilityManager] Mount failed: capability 'non_existent_capability' not found
+[2026-10-02 06:19:31.861] [pid-0] [Test worker] [CapabilityManager] CapabilityManager: released all active capabilities and sessions
+[2026-10-02 06:19:31.861] [pid-0] [Test worker] [CapabilityManager] Registered Heavy-routed capability: future_heavy_mini_app
+[2026-10-02 06:19:31.862] [pid-0] [Test worker] [HeavyCapRouter] Mounting Heavy capability 'future_heavy_mini_app' for session 'cap_future_heavy_mini_app_9a6f0f58'
+[2026-10-02 06:19:31.863] [pid-0] [Test worker] [CapabilityManager] Mounted capability 'future_heavy_mini_app' [REMOTE_HEAVY] session 'cap_future_heavy_mini_app_9a6f0f58' (owner=element_heavy)
+[2026-10-02 06:19:31.865] [pid-0] [Test worker] [HeavyCapRouter] Unmounting Heavy capability 'future_heavy_mini_app' for session 'cap_future_heavy_mini_app_9a6f0f58'
+[2026-10-02 06:19:31.865] [pid-0] [Test worker] [CapabilityManager] Unmounted session 'cap_future_heavy_mini_app_9a6f0f58' of capability 'future_heavy_mini_app'
+[2026-10-02 06:19:31.866] [pid-0] [Test worker] [CapabilityManager] CapabilityManager: released all active capabilities and sessions
+[2026-10-02 06:19:31.867] [pid-0] [Test worker] [CapabilityManager] Registered local capability: cap_a
+[2026-10-02 06:19:31.868] [pid-0] [Test worker] [CapabilityManager] Registered local capability: cap_b
+[2026-10-02 06:19:31.868] [pid-0] [Test worker] [CapabilityManager] Mounted capability 'cap_a' [LOCAL_MAIN] session 'cap_cap_a_4e124b5e' (owner=element_weather)
+[2026-10-02 06:19:31.869] [pid-0] [Test worker] [CapabilityManager] Mounted capability 'cap_b' [LOCAL_MAIN] session 'cap_cap_b_b9517957' (owner=element_weather)
+[2026-10-02 06:19:31.869] [pid-0] [Test worker] [CapabilityManager] Discarded idle local module 'cap_a'
+[2026-10-02 06:19:31.869] [pid-0] [Test worker] [CapabilityManager] Unmounted session 'cap_cap_a_4e124b5e' of capability 'cap_a'
+[2026-10-02 06:19:31.869] [pid-0] [Test worker] [CapabilityManager] Discarded idle local module 'cap_b'
+[2026-10-02 06:19:31.869] [pid-0] [Test worker] [CapabilityManager] Unmounted session 'cap_cap_b_b9517957' of capability 'cap_b'
+[2026-10-02 06:19:31.869] [pid-0] [Test worker] [CapabilityManager] Unmounted 2 capabilities for owner 'element_weather'
+[2026-10-02 06:19:31.870] [pid-0] [Test worker] [CapabilityManager] CapabilityManager: released all active capabilities and sessions
+[2026-10-02 06:19:31.871] [pid-0] [Test worker] [CapabilityManager] Registered local capability: test_local_math
+[2026-10-02 06:19:31.871] [pid-0] [Test worker] [CapabilityManager] Mounted capability 'test_local_math' [LOCAL_MAIN] session 'cap_test_local_math_ef755ad0' (owner=element_1)
+[2026-10-02 06:19:31.872] [pid-0] [Test worker] [CapabilityManager] Discarded idle local module 'test_local_math'
+[2026-10-02 06:19:31.872] [pid-0] [Test worker] [CapabilityManager] Unmounted session 'cap_test_local_math_ef755ad0' of capability 'test_local_math'
+[2026-10-02 06:19:31.872] [pid-0] [Test worker] [CapabilityManager] CapabilityManager: released all active capabilities and sessions
+[2026-10-02 06:19:31.873] [pid-0] [Test worker] [CapabilityManager] Registered Heavy-routed capability: heavy_resilience_test
+[2026-10-02 06:19:31.873] [pid-0] [Test worker] [HeavyCapRouter] Mounting Heavy capability 'heavy_resilience_test' for session 'cap_heavy_resilience_test_0f3c218f'
+[2026-10-02 06:19:31.873] [pid-0] [Test worker] [HeavyProcessConnectionManager] bindService failed: setClassName(...) must not be null
+[2026-10-02 06:19:31.873] [pid-0] [Test worker] [HeavyProcessConnectionManager] Heavy process binder died (DeathRecipient triggered)
+[2026-10-02 06:19:31.874] [pid-0] [Test worker] [Lifecycle] [HeavyProcess] HEAVY_PROCESS_DIED - DeathRecipient triggered: Binder connection to :heavy terminated
+[2026-10-02 06:19:31.874] [pid-0] [Test worker] [CallRecorderManager] Heavy process died while call state was 0
+[2026-10-02 06:19:31.874] [pid-0] [Test worker] [CallRecorderManager] Heavy process died while call state was 0
+[2026-10-02 06:19:31.874] [pid-0] [Test worker] [CallRecorderManager] Heavy process died while call state was 0
+[2026-10-02 06:19:32.040] [pid-0] [Test worker] [HeavyModuleManager] Registered Heavy module: shared_engine (lazy=true)
+[2026-10-02 06:19:32.040] [pid-0] [Test worker] [HeavyModuleManager] Instantiating Heavy module 'shared_engine' lazily
+[2026-10-02 06:19:32.049] [pid-0] [Test worker] [HeavyModuleManager] Mounted module 'shared_engine' session 'session_1' (owner=null, activeRef=1)
+[2026-10-02 06:19:32.052] [pid-0] [Test worker] [HeavyModuleManager] Mounted module 'shared_engine' session 'session_2' (owner=null, activeRef=2)
+[2026-10-02 06:19:32.052] [pid-0] [Test worker] [HeavyModuleManager] Unmounted session 'session_1' of module 'shared_engine' (remaining sessions: 1)
+[2026-10-02 06:19:32.053] [pid-0] [Test worker] [HeavyModuleManager] Disposed idle module instance 'shared_engine'
+[2026-10-02 06:19:32.053] [pid-0] [Test worker] [HeavyModuleManager] Unmounted session 'session_2' of module 'shared_engine' (remaining sessions: 0)
+[2026-10-02 06:19:32.054] [pid-0] [Test worker] [HeavyModuleManager] Registered Heavy module: heavy_logger (lazy=true)
+[2026-10-02 06:19:32.055] [pid-0] [Test worker] [HeavyModuleManager] Instantiating Heavy module 'heavy_logger' lazily
+[2026-10-02 06:19:32.055] [pid-0] [Test worker] [HeavyModuleManager] Mounted module 'heavy_logger' session 'hmod_heavy_logger_0d4b25ba' (owner=null, activeRef=1)
+[2026-10-02 06:19:32.056] [pid-0] [Test worker] [HeavyModuleManager] Disposed idle module instance 'heavy_logger'
+[2026-10-02 06:19:32.056] [pid-0] [Test worker] [HeavyModuleManager] Unmounted session 'hmod_heavy_logger_0d4b25ba' of module 'heavy_logger' (remaining sessions: 0)
+[2026-10-02 06:19:32.057] [pid-0] [Test worker] [HeavyModuleManager] Registered Heavy module: modular_widget (lazy=true)
+[2026-10-02 06:19:32.057] [pid-0] [Test worker] [HeavyModuleManager] Instantiating Heavy module 'modular_widget' lazily
+[2026-10-02 06:19:32.058] [pid-0] [Test worker] [HeavyModuleManager] Mounted module 'modular_widget' session 'hmod_modular_widget_904b9c27' (owner=owner_page_1, activeRef=1)
+[2026-10-02 06:19:32.059] [pid-0] [Test worker] [HeavyModuleManager] Mounted module 'modular_widget' session 'hmod_modular_widget_f328615a' (owner=owner_page_1, activeRef=2)
+[2026-10-02 06:19:32.059] [pid-0] [Test worker] [HeavyModuleManager] Mounted module 'modular_widget' session 'hmod_modular_widget_a691d296' (owner=owner_page_1, activeRef=3)
+[2026-10-02 06:19:32.059] [pid-0] [Test worker] [HeavyModuleManager] Mounted module 'modular_widget' session 'hmod_modular_widget_9dc16dc9' (owner=owner_page_2, activeRef=4)
+[2026-10-02 06:19:32.060] [pid-0] [Test worker] [HeavyModuleManager] Unmounted session 'hmod_modular_widget_a691d296' of module 'modular_widget' (remaining sessions: 3)
+[2026-10-02 06:19:32.060] [pid-0] [Test worker] [HeavyModuleManager] Unmounted session 'hmod_modular_widget_f328615a' of module 'modular_widget' (remaining sessions: 2)
+[2026-10-02 06:19:32.060] [pid-0] [Test worker] [HeavyModuleManager] Unmounted session 'hmod_modular_widget_904b9c27' of module 'modular_widget' (remaining sessions: 1)
+[2026-10-02 06:19:32.062] [pid-0] [Test worker] [HeavyModuleManager] Unmounted 3 module sessions for owner 'owner_page_1'
+[2026-10-02 06:19:32.063] [pid-0] [Test worker] [HeavyModuleManager] Disposed idle module instance 'modular_widget'
+[2026-10-02 06:19:32.063] [pid-0] [Test worker] [HeavyModuleManager] Unmounted session 'hmod_modular_widget_9dc16dc9' of module 'modular_widget' (remaining sessions: 0)
+[2026-10-02 06:19:32.063] [pid-0] [Test worker] [HeavyModuleManager] Unmounted 1 module sessions for owner 'owner_page_2'
+[2026-10-02 06:19:32.064] [pid-0] [Test worker] [HeavyModuleManager] Mount failed: module 'non_existent_module_999' not registered
+[2026-10-02 06:19:32.065] [pid-0] [Test worker] [HeavyModuleManager] Registered Heavy module: heavy_evaluator (lazy=true)
+[2026-10-02 06:19:32.065] [pid-0] [Test worker] [HeavyModuleManager] Instantiating Heavy module 'heavy_evaluator' lazily
+[2026-10-02 06:19:32.066] [pid-0] [Test worker] [HeavyModuleManager] Mounted module 'heavy_evaluator' session 'hmod_heavy_evaluator_328d2736' (owner=null, activeRef=1)
+[2026-10-02 06:19:32.069] [pid-0] [Test worker] [HeavyModuleManager] Registered Heavy module: test_mod (lazy=true)
+[2026-10-02 06:19:32.069] [pid-0] [Test worker] [HeavyModuleManager] Instantiating Heavy module 'test_mod' lazily
+[2026-10-02 06:19:32.072] [pid-0] [Test worker] [HeavyModuleManager] Mounted module 'test_mod' session 'hmod_test_mod_1135b571' (owner=null, activeRef=1)
+[2026-10-02 06:19:32.073] [pid-0] [Test worker] [HeavyModuleManager] Disposed idle module instance 'test_mod'
+[2026-10-02 06:19:32.073] [pid-0] [Test worker] [HeavyModuleManager] Unmounted session 'hmod_test_mod_1135b571' of module 'test_mod' (remaining sessions: 0)
+[2026-10-02 06:19:32.074] [pid-0] [Test worker] [HeavyModuleManager] Registered Heavy module: faulty_module (lazy=true)
+[2026-10-02 06:19:32.074] [pid-0] [Test worker] [HeavyModuleManager] Instantiating Heavy module 'faulty_module' lazily
+[2026-10-02 06:19:32.076] [pid-0] [Test worker] [HeavyModuleManager] Mounted module 'faulty_module' session 'hmod_faulty_module_b5600e3c' (owner=null, activeRef=1)
+[2026-10-02 06:19:32.076] [pid-0] [Test worker] [ERROR:HeavyModuleManager] Error executing operation 'crash_test' on 'faulty_module'
+java.lang.IllegalStateException: Hardware engine crashed unexpectedly
+	at com.example.feature.heavy.module.HeavyModuleManagerTest$testOperationFailure$1$1.onUse(HeavyModuleManagerTest.kt:403)
+	at com.example.feature.heavy.module.HeavyModuleManager.use(HeavyModuleManager.kt:343)
+	at com.example.feature.heavy.module.HeavyModuleSessionImpl.use(HeavyModuleManager.kt:39)
+	at com.example.feature.heavy.module.HeavyModuleSession$DefaultImpls.use$default(HeavyModuleContract.kt:19)
+	at com.example.feature.heavy.module.HeavyModuleManagerTest.testOperationFailure(HeavyModuleManagerTest.kt:411)
+	at java.base/jdk.internal.reflect.DirectMethodHandleAccessor.invoke(DirectMethodHandleAccessor.java:103)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:580)
+	at org.junit.runners.model.FrameworkMethod$1.runReflectiveCall(FrameworkMethod.java:59)
+	at org.junit.internal.runners.model.ReflectiveCallable.run(ReflectiveCallable.java:12)
+	at org.junit.runners.model.FrameworkMethod.invokeExplosively(FrameworkMethod.java:56)
+	at org.junit.internal.runners.statements.InvokeMethod.evaluate(InvokeMethod.java:17)
+	at org.junit.internal.runners.statements.RunBefores.evaluate(RunBefores.java:26)
+	at org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)
+	at org.junit.runners.BlockJUnit4ClassRunner$1.evaluate(BlockJUnit4ClassRunner.java:100)
+	at org.junit.runners.ParentRunner.runLeaf(ParentRunner.java:366)
+	at org.junit.runners.BlockJUnit4ClassRunner.runChild(BlockJUnit4ClassRunner.java:103)
+	at org.junit.runners.BlockJUnit4ClassRunner.runChild(BlockJUnit4ClassRunner.java:63)
+	at org.junit.runners.ParentRunner$4.run(ParentRunner.java:331)
+	at org.junit.runners.ParentRunner$1.schedule(ParentRunner.java:79)
+	at org.junit.runners.ParentRunner.runChildren(ParentRunner.java:329)
+	at org.junit.runners.ParentRunner.access$100(ParentRunner.java:66)
+	at org.junit.runners.ParentRunner$2.evaluate(ParentRunner.java:293)
+	at org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)
+	at org.junit.runners.ParentRunner.run(ParentRunner.java:413)
+	at org.junit.runner.JUnitCore.run(JUnitCore.java:137)
+	at org.junit.runner.JUnitCore.run(JUnitCore.java:115)
+	at org.gradle.api.internal.tasks.testing.junit.JUnitTestExecutor.runRequest(JUnitTestExecutor.java:175)
+	at org.gradle.api.internal.tasks.testing.junit.JUnitTestExecutor.accept(JUnitTestExecutor.java:84)
+	at org.gradle.api.internal.tasks.testing.junit.JUnitTestExecutor.accept(JUnitTestExecutor.java:47)
+	at org.gradle.api.internal.tasks.testing.junit.AbstractJUnitTestDefinitionProcessor.processTestDefinition(AbstractJUnitTestDefinitionProcessor.java:65)
+	at org.gradle.api.internal.tasks.testing.SuiteTestDefinitionProcessor.processTestDefinition(SuiteTestDefinitionProcessor.java:54)
+	at java.base/jdk.internal.reflect.DirectMethodHandleAccessor.invoke(DirectMethodHandleAccessor.java:103)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:580)
+	at org.gradle.internal.dispatch.MethodInvocation.invokeOn(MethodInvocation.java:77)
+	at org.gradle.internal.dispatch.ReflectionDispatch.dispatch(ReflectionDispatch.java:28)
+	at org.gradle.internal.dispatch.ReflectionDispatch.dispatch(ReflectionDispatch.java:19)
+	at org.gradle.internal.dispatch.ContextClassLoaderDispatch.dispatch(ContextClassLoaderDispatch.java:33)
+	at org.gradle.internal.dispatch.ProxyDispatchAdapter$DispatchingInvocationHandler.invoke(ProxyDispatchAdapter.java:88)
+	at jdk.proxy1/jdk.proxy1.$Proxy4.processTestDefinition(Unknown Source)
+	at org.gradle.api.internal.tasks.testing.worker.TestWorker$2.run(TestWorker.java:178)
+	at org.gradle.api.internal.tasks.testing.worker.TestWorker.executeAndMaintainThreadName(TestWorker.java:126)
+	at org.gradle.api.internal.tasks.testing.worker.TestWorker.execute(TestWorker.java:103)
+	at org.gradle.api.internal.tasks.testing.worker.TestWorker.execute(TestWorker.java:63)
+	at org.gradle.process.internal.worker.child.ActionExecutionWorker.execute(ActionExecutionWorker.java:56)
+	at org.gradle.process.internal.worker.child.SystemApplicationClassLoaderWorker.call(SystemApplicationClassLoaderWorker.java:122)
+	at org.gradle.process.internal.worker.child.SystemApplicationClassLoaderWorker.call(SystemApplicationClassLoaderWorker.java:72)
+	at worker.org.gradle.process.internal.worker.GradleWorkerMain.run(GradleWorkerMain.java:69)
+	at worker.org.gradle.process.internal.worker.GradleWorkerMain.main(GradleWorkerMain.java:74)
+
+[2026-10-02 06:19:32.079] [pid-0] [Test worker] [HeavyModuleManager] Registered Heavy module: safe_release_mod (lazy=true)
+[2026-10-02 06:19:32.079] [pid-0] [Test worker] [HeavyModuleManager] Instantiating Heavy module 'safe_release_mod' lazily
+[2026-10-02 06:19:32.080] [pid-0] [Test worker] [HeavyModuleManager] Mounted module 'safe_release_mod' session 'hmod_safe_release_mod_0bf1ca4c' (owner=null, activeRef=1)
+[2026-10-02 06:19:32.080] [pid-0] [Test worker] [HeavyModuleManager] Disposed idle module instance 'safe_release_mod'
+[2026-10-02 06:19:32.080] [pid-0] [Test worker] [HeavyModuleManager] Unmounted session 'hmod_safe_release_mod_0bf1ca4c' of module 'safe_release_mod' (remaining sessions: 0)
+[2026-10-02 06:19:32.082] [pid-0] [Test worker] [HeavyModuleManager] Registered Heavy module: unavailable_module (lazy=true)
+[2026-10-02 06:19:32.082] [pid-0] [Test worker] [HeavyModuleManager] Instantiating Heavy module 'unavailable_module' lazily
+[2026-10-02 06:19:32.083] [pid-0] [Test worker] [HeavyModuleManager] Mounted module 'unavailable_module' session 'hmod_unavailable_module_b90ffb85' (owner=null, activeRef=1)
+[2026-10-02 06:19:32.084] [pid-0] [Test worker] [HeavyModuleManager] Mount failed: module 'unavailable_module' is unavailable
+[2026-10-02 06:19:32.087] [pid-0] [Test worker] [HeavyModuleManager] Registered Heavy module: ipc_test_mod (lazy=true)
+[2026-10-02 06:19:32.087] [pid-0] [Test worker] [HeavyModuleManager] Instantiating Heavy module 'ipc_test_mod' lazily
+[2026-10-02 06:19:32.088] [pid-0] [Test worker] [HeavyModuleManager] Mounted module 'ipc_test_mod' session 'ipc_token_1' (owner=ipc_owner_1, activeRef=1)
+[2026-10-02 06:19:32.088] [pid-0] [Test worker] [HeavyModuleManager] Disposed idle module instance 'ipc_test_mod'
+[2026-10-02 06:19:32.088] [pid-0] [Test worker] [HeavyModuleManager] Unmounted session 'ipc_token_1' of module 'ipc_test_mod' (remaining sessions: 0)
+[2026-10-02 06:19:32.089] [pid-0] [Test worker] [HeavyModuleManager] Instantiating Heavy module 'ipc_test_mod' lazily
+[2026-10-02 06:19:32.089] [pid-0] [Test worker] [HeavyModuleManager] Mounted module 'ipc_test_mod' session 'token_a' (owner=owner_x, activeRef=1)
+[2026-10-02 06:19:32.089] [pid-0] [Test worker] [HeavyModuleManager] Mounted module 'ipc_test_mod' session 'token_b' (owner=owner_x, activeRef=2)
+[2026-10-02 06:19:32.089] [pid-0] [Test worker] [HeavyModuleManager] Unmounted session 'token_a' of module 'ipc_test_mod' (remaining sessions: 1)
+[2026-10-02 06:19:32.089] [pid-0] [Test worker] [HeavyModuleManager] Disposed idle module instance 'ipc_test_mod'
+[2026-10-02 06:19:32.089] [pid-0] [Test worker] [HeavyModuleManager] Unmounted session 'token_b' of module 'ipc_test_mod' (remaining sessions: 0)
+[2026-10-02 06:19:32.089] [pid-0] [Test worker] [HeavyModuleManager] Unmounted 2 module sessions for owner 'owner_x'
+[2026-10-02 06:19:32.092] [pid-0] [Test worker] [HeavyModuleManager] Registered Heavy module: heavy_calc (lazy=true)
+[2026-10-02 06:19:32.093] [pid-0] [Test worker] [HeavyModuleManager] Instantiating Heavy module 'heavy_calc' lazily
+[2026-10-02 06:19:32.094] [pid-0] [Test worker] [HeavyModuleManager] Mounted module 'heavy_calc' session 'session_calc_1' (owner=owner_widget_1, activeRef=1)
+[2026-10-02 06:19:32.094] [pid-0] [Test worker] [HeavyModuleManager] Registered Heavy module: heavy_reader (lazy=true)
+[2026-10-02 06:19:32.099] [pid-0] [Test worker] [HeavyModuleManager] Registered Heavy module: ephemeral_module (lazy=true)
+[2026-10-02 06:19:32.100] [pid-0] [Test worker] [HeavyModuleManager] Instantiating Heavy module 'ephemeral_module' lazily
+[2026-10-02 06:19:32.100] [pid-0] [Test worker] [HeavyModuleManager] Mounted module 'ephemeral_module' session 'hmod_ephemeral_module_d6a8d4e9' (owner=null, activeRef=1)
+[2026-10-02 06:19:32.101] [pid-0] [Test worker] [HeavyModuleManager] Disposed idle module instance 'ephemeral_module'
+[2026-10-02 06:19:32.101] [pid-0] [Test worker] [HeavyModuleManager] Unmounted session 'hmod_ephemeral_module_d6a8d4e9' of module 'ephemeral_module' (remaining sessions: 0)
+[2026-10-02 06:19:32.104] [pid-0] [Test worker] [HeavyModuleManager] Registered Heavy module: module_1 (lazy=true)
+[2026-10-02 06:19:32.104] [pid-0] [Test worker] [HeavyModuleManager] Registered Heavy module: module_2 (lazy=true)
+[2026-10-02 06:19:32.105] [pid-0] [Test worker] [HeavyModuleManager] Registered Heavy module: module_3 (lazy=true)
+[2026-10-02 06:19:32.105] [pid-0] [Test worker] [HeavyModuleManager] Registered Heavy module: module_4 (lazy=true)
+[2026-10-02 06:19:32.105] [pid-0] [Test worker] [HeavyModuleManager] Registered Heavy module: module_5 (lazy=true)
+[2026-10-02 06:19:32.105] [pid-0] [Test worker] [HeavyModuleManager] Instantiating Heavy module 'module_3' lazily
+[2026-10-02 06:19:32.106] [pid-0] [Test worker] [HeavyModuleManager] Mounted module 'module_3' session 'hmod_module_3_d9c6ac37' (owner=null, activeRef=1)
+[2026-10-02 06:19:32.126] [pid-0] [Test worker] [ElementActionDispatcher] Handling system action: back
+[2026-10-02 06:19:32.130] [pid-0] [Test worker] [ElementActionDispatcher] System action performed by accessibility service: back
+[2026-10-02 06:19:32.130] [pid-0] [Test worker] [ElementActionDispatcher] Handling system action: home
+[2026-10-02 06:19:32.130] [pid-0] [Test worker] [ElementActionDispatcher] System action performed by accessibility service: home
+[2026-10-02 06:19:32.131] [pid-0] [Test worker] [ElementActionDispatcher] Handling system action: recents
+[2026-10-02 06:19:32.131] [pid-0] [Test worker] [ElementActionDispatcher] System action performed by accessibility service: recents
+[2026-10-02 06:19:32.131] [pid-0] [Test worker] [ElementActionDispatcher] Handling system action: notifications
+[2026-10-02 06:19:32.131] [pid-0] [Test worker] [ElementActionDispatcher] System action performed by accessibility service: notifications
+[2026-10-02 06:19:32.131] [pid-0] [Test worker] [ElementActionDispatcher] Handling system action: quick_settings
+[2026-10-02 06:19:32.131] [pid-0] [Test worker] [ElementActionDispatcher] System action performed by accessibility service: quick_settings
+[2026-10-02 06:19:32.131] [pid-0] [Test worker] [ElementActionDispatcher] Handling system action: lock_screen
+[2026-10-02 06:19:32.132] [pid-0] [Test worker] [ElementActionDispatcher] System action performed by accessibility service: lock_screen
+[2026-10-02 06:19:32.132] [pid-0] [Test worker] [ElementActionDispatcher] Handling system action: splitscreen
+[2026-10-02 06:19:32.132] [pid-0] [Test worker] [ElementActionDispatcher] System action performed by accessibility service: splitscreen
+[2026-10-02 06:19:32.137] [pid-0] [Test worker] [ElementActionDispatcher] Handling system action: non_existent_action_xyz
+[2026-10-02 06:19:32.137] [pid-0] [Test worker] [ElementActionDispatcher] Accessibility action 'non_existent_action_xyz' unavailable: Action 'non_existent_action_xyz' is not supported
+[2026-10-02 06:19:32.139] [pid-0] [Test worker] [ElementActionDispatcher] Handling system action: screenshot
+[2026-10-02 06:19:32.139] [pid-0] [Test worker] [ElementActionDispatcher] System action performed by accessibility service: screenshot
+[2026-10-02 06:19:32.140] [pid-0] [Test worker] [ElementActionDispatcher] Handling system action: back
+[2026-10-02 06:19:32.140] [pid-0] [Test worker] [ElementActionDispatcher] Accessibility action 'back' failed: System rejected global action 'back'
+[2026-10-02 06:19:32.141] [pid-0] [Test worker] [ElementActionDispatcher] Handling system action: back
+[2026-10-02 06:19:32.142] [pid-0] [Test worker] [ElementActionDispatcher] Accessibility service not running/enabled for action: back
+[2026-10-02 06:19:32.143] [pid-0] [Test worker] [ElementActionDispatcher] Handling system action: qr_scan
+[2026-10-02 06:19:32.143] [pid-0] [Test worker] [ElementActionDispatcher] System action performed by accessibility service: qr_scan
+[2026-10-02 06:19:32.144] [pid-0] [Test worker] [ElementActionDispatcher] Handling system action: barcode_scanner
+[2026-10-02 06:19:32.144] [pid-0] [Test worker] [ElementActionDispatcher] System action performed by accessibility service: barcode_scanner
+[2026-10-02 06:19:32.145] [pid-0] [Test worker] [ElementActionDispatcher] Handling system action: redact_screenshot
+[2026-10-02 06:19:32.145] [pid-0] [Test worker] [ElementActionDispatcher] System action performed by accessibility service: redact_screenshot
+[2026-10-02 10:08:36.138] [pid-0] [Test worker] [HandleManager] Migrated legacy page stack from 'handle_1_pages' to isolated container key 'handle_handle_1_swipe_left_pages'
+[2026-10-02 10:08:36.377] [pid-0] [Test worker] [CapabilityManager] CapabilityManager: released all active capabilities and sessions
+[2026-10-02 10:08:36.380] [pid-0] [Test worker] [CapabilityManager] Registered local capability: shared_local_tool
+[2026-10-02 10:08:36.411] [pid-0] [Test worker] [CapabilityManager] Mounted capability 'shared_local_tool' [LOCAL_MAIN] session 'cap_shared_local_tool_890dc4e7' (owner=ownerA)
+[2026-10-02 10:08:36.412] [pid-0] [Test worker] [CapabilityManager] Mounted capability 'shared_local_tool' [LOCAL_MAIN] session 'cap_shared_local_tool_c56e91d7' (owner=ownerB)
+[2026-10-02 10:08:36.412] [pid-0] [Test worker] [CapabilityManager] Unmounted session 'cap_shared_local_tool_890dc4e7' of capability 'shared_local_tool'
+[2026-10-02 10:08:36.413] [pid-0] [Test worker] [CapabilityManager] Discarded idle local module 'shared_local_tool'
+[2026-10-02 10:08:36.413] [pid-0] [Test worker] [CapabilityManager] Unmounted session 'cap_shared_local_tool_c56e91d7' of capability 'shared_local_tool'
+[2026-10-02 10:08:36.413] [pid-0] [Test worker] [CapabilityManager] CapabilityManager: released all active capabilities and sessions
+[2026-10-02 10:08:36.414] [pid-0] [Test worker] [CapabilityManager] Registered local capability: element_helper_cap
+[2026-10-02 10:08:36.416] [pid-0] [Test worker] [CapabilityManager] Mounted capability 'element_helper_cap' [LOCAL_MAIN] session 'cap_element_helper_cap_a550768e' (owner=page_1_action_mock_tool)
+[2026-10-02 10:08:36.418] [pid-0] [Test worker] [CapabilityManager] Discarded idle local module 'element_helper_cap'
+[2026-10-02 10:08:36.419] [pid-0] [Test worker] [CapabilityManager] Unmounted session 'cap_element_helper_cap_a550768e' of capability 'element_helper_cap'
+[2026-10-02 10:08:36.419] [pid-0] [Test worker] [CapabilityManager] Unmounted 1 capabilities for owner 'page_1_action_mock_tool'
+[2026-10-02 10:08:36.420] [pid-0] [Test worker] [CapabilityManager] CapabilityManager: released all active capabilities and sessions
+[2026-10-02 10:08:36.421] [pid-0] [Test worker] [HeavyProcessConnectionManager] Connection aborted: Context package name is null or blank
+[2026-10-02 10:08:36.421] [pid-0] [Test worker] [CapabilityManager] CapabilityManager: released all active capabilities and sessions
+[2026-10-02 10:08:36.422] [pid-0] [Test worker] [CapabilityManager] Mount failed: capability 'non_existent_capability' not found
+[2026-10-02 10:08:36.422] [pid-0] [Test worker] [CapabilityManager] CapabilityManager: released all active capabilities and sessions
+[2026-10-02 10:08:36.422] [pid-0] [Test worker] [CapabilityManager] Registered Heavy-routed capability: future_heavy_mini_app
+[2026-10-02 10:08:36.423] [pid-0] [Test worker] [HeavyCapRouter] Mounting Heavy capability 'future_heavy_mini_app' for session 'cap_future_heavy_mini_app_7b9dacc0'
+[2026-10-02 10:08:36.424] [pid-0] [Test worker] [CapabilityManager] Mounted capability 'future_heavy_mini_app' [REMOTE_HEAVY] session 'cap_future_heavy_mini_app_7b9dacc0' (owner=element_heavy)
+[2026-10-02 10:08:36.425] [pid-0] [Test worker] [HeavyCapRouter] Unmounting Heavy capability 'future_heavy_mini_app' for session 'cap_future_heavy_mini_app_7b9dacc0'
+[2026-10-02 10:08:36.425] [pid-0] [Test worker] [CapabilityManager] Unmounted session 'cap_future_heavy_mini_app_7b9dacc0' of capability 'future_heavy_mini_app'
+[2026-10-02 10:08:36.426] [pid-0] [Test worker] [CapabilityManager] CapabilityManager: released all active capabilities and sessions
+[2026-10-02 10:08:36.426] [pid-0] [Test worker] [CapabilityManager] Registered local capability: cap_a
+[2026-10-02 10:08:36.427] [pid-0] [Test worker] [CapabilityManager] Registered local capability: cap_b
+[2026-10-02 10:08:36.427] [pid-0] [Test worker] [CapabilityManager] Mounted capability 'cap_a' [LOCAL_MAIN] session 'cap_cap_a_7d02c2fd' (owner=element_weather)
+[2026-10-02 10:08:36.428] [pid-0] [Test worker] [CapabilityManager] Mounted capability 'cap_b' [LOCAL_MAIN] session 'cap_cap_b_92858f54' (owner=element_weather)
+[2026-10-02 10:08:36.428] [pid-0] [Test worker] [CapabilityManager] Discarded idle local module 'cap_a'
+[2026-10-02 10:08:36.428] [pid-0] [Test worker] [CapabilityManager] Unmounted session 'cap_cap_a_7d02c2fd' of capability 'cap_a'
+[2026-10-02 10:08:36.428] [pid-0] [Test worker] [CapabilityManager] Discarded idle local module 'cap_b'
+[2026-10-02 10:08:36.428] [pid-0] [Test worker] [CapabilityManager] Unmounted session 'cap_cap_b_92858f54' of capability 'cap_b'
+[2026-10-02 10:08:36.429] [pid-0] [Test worker] [CapabilityManager] Unmounted 2 capabilities for owner 'element_weather'
+[2026-10-02 10:08:36.429] [pid-0] [Test worker] [CapabilityManager] CapabilityManager: released all active capabilities and sessions
+[2026-10-02 10:08:36.430] [pid-0] [Test worker] [CapabilityManager] Registered local capability: test_local_math
+[2026-10-02 10:08:36.431] [pid-0] [Test worker] [CapabilityManager] Mounted capability 'test_local_math' [LOCAL_MAIN] session 'cap_test_local_math_2d190b4a' (owner=element_1)
+[2026-10-02 10:08:36.431] [pid-0] [Test worker] [CapabilityManager] Discarded idle local module 'test_local_math'
+[2026-10-02 10:08:36.432] [pid-0] [Test worker] [CapabilityManager] Unmounted session 'cap_test_local_math_2d190b4a' of capability 'test_local_math'
+[2026-10-02 10:08:36.432] [pid-0] [Test worker] [CapabilityManager] CapabilityManager: released all active capabilities and sessions
+[2026-10-02 10:08:36.433] [pid-0] [Test worker] [CapabilityManager] Registered Heavy-routed capability: heavy_resilience_test
+[2026-10-02 10:08:36.433] [pid-0] [Test worker] [HeavyCapRouter] Mounting Heavy capability 'heavy_resilience_test' for session 'cap_heavy_resilience_test_1ab895cc'
+[2026-10-02 10:08:36.434] [pid-0] [Test worker] [HeavyProcessConnectionManager] bindService failed: setClassName(...) must not be null
+[2026-10-02 10:08:36.434] [pid-0] [Test worker] [HeavyProcessConnectionManager] Heavy process binder died (DeathRecipient triggered)
+[2026-10-02 10:08:36.434] [pid-0] [Test worker] [Lifecycle] [HeavyProcess] HEAVY_PROCESS_DIED - DeathRecipient triggered: Binder connection to :heavy terminated
+[2026-10-02 10:08:36.663] [pid-0] [Test worker] [HeavyModuleManager] Registered Heavy module: shared_engine (lazy=true)
+[2026-10-02 10:08:36.664] [pid-0] [Test worker] [HeavyModuleManager] Instantiating Heavy module 'shared_engine' lazily
+[2026-10-02 10:08:36.669] [pid-0] [Test worker] [HeavyModuleManager] Mounted module 'shared_engine' session 'session_1' (owner=null, activeRef=1)
+[2026-10-02 10:08:36.669] [pid-0] [Test worker] [HeavyModuleManager] Mounted module 'shared_engine' session 'session_2' (owner=null, activeRef=2)
+[2026-10-02 10:08:36.670] [pid-0] [Test worker] [HeavyModuleManager] Unmounted session 'session_1' of module 'shared_engine' (remaining sessions: 1)
+[2026-10-02 10:08:36.670] [pid-0] [Test worker] [HeavyModuleManager] Disposed idle module instance 'shared_engine'
+[2026-10-02 10:08:36.670] [pid-0] [Test worker] [HeavyModuleManager] Unmounted session 'session_2' of module 'shared_engine' (remaining sessions: 0)
+[2026-10-02 10:08:36.671] [pid-0] [Test worker] [HeavyModuleManager] Registered Heavy module: heavy_logger (lazy=true)
+[2026-10-02 10:08:36.671] [pid-0] [Test worker] [HeavyModuleManager] Instantiating Heavy module 'heavy_logger' lazily
+[2026-10-02 10:08:36.672] [pid-0] [Test worker] [HeavyModuleManager] Mounted module 'heavy_logger' session 'hmod_heavy_logger_27f4ed1f' (owner=null, activeRef=1)
+[2026-10-02 10:08:36.672] [pid-0] [Test worker] [HeavyModuleManager] Disposed idle module instance 'heavy_logger'
+[2026-10-02 10:08:36.672] [pid-0] [Test worker] [HeavyModuleManager] Unmounted session 'hmod_heavy_logger_27f4ed1f' of module 'heavy_logger' (remaining sessions: 0)
+[2026-10-02 10:08:36.673] [pid-0] [Test worker] [HeavyModuleManager] Registered Heavy module: modular_widget (lazy=true)
+[2026-10-02 10:08:36.673] [pid-0] [Test worker] [HeavyModuleManager] Instantiating Heavy module 'modular_widget' lazily
+[2026-10-02 10:08:36.674] [pid-0] [Test worker] [HeavyModuleManager] Mounted module 'modular_widget' session 'hmod_modular_widget_15f7a2cf' (owner=owner_page_1, activeRef=1)
+[2026-10-02 10:08:36.674] [pid-0] [Test worker] [HeavyModuleManager] Mounted module 'modular_widget' session 'hmod_modular_widget_1db09d89' (owner=owner_page_1, activeRef=2)
+[2026-10-02 10:08:36.674] [pid-0] [Test worker] [HeavyModuleManager] Mounted module 'modular_widget' session 'hmod_modular_widget_366bf2ad' (owner=owner_page_1, activeRef=3)
+[2026-10-02 10:08:36.675] [pid-0] [Test worker] [HeavyModuleManager] Mounted module 'modular_widget' session 'hmod_modular_widget_aea3a196' (owner=owner_page_2, activeRef=4)
+[2026-10-02 10:08:36.675] [pid-0] [Test worker] [HeavyModuleManager] Unmounted session 'hmod_modular_widget_366bf2ad' of module 'modular_widget' (remaining sessions: 3)
+[2026-10-02 10:08:36.675] [pid-0] [Test worker] [HeavyModuleManager] Unmounted session 'hmod_modular_widget_1db09d89' of module 'modular_widget' (remaining sessions: 2)
+[2026-10-02 10:08:36.675] [pid-0] [Test worker] [HeavyModuleManager] Unmounted session 'hmod_modular_widget_15f7a2cf' of module 'modular_widget' (remaining sessions: 1)
+[2026-10-02 10:08:36.675] [pid-0] [Test worker] [HeavyModuleManager] Unmounted 3 module sessions for owner 'owner_page_1'
+[2026-10-02 10:08:36.675] [pid-0] [Test worker] [HeavyModuleManager] Disposed idle module instance 'modular_widget'
+[2026-10-02 10:08:36.676] [pid-0] [Test worker] [HeavyModuleManager] Unmounted session 'hmod_modular_widget_aea3a196' of module 'modular_widget' (remaining sessions: 0)
+[2026-10-02 10:08:36.676] [pid-0] [Test worker] [HeavyModuleManager] Unmounted 1 module sessions for owner 'owner_page_2'
+[2026-10-02 10:08:36.676] [pid-0] [Test worker] [HeavyModuleManager] Mount failed: module 'non_existent_module_999' not registered
+[2026-10-02 10:08:36.677] [pid-0] [Test worker] [HeavyModuleManager] Registered Heavy module: heavy_evaluator (lazy=true)
+[2026-10-02 10:08:36.677] [pid-0] [Test worker] [HeavyModuleManager] Instantiating Heavy module 'heavy_evaluator' lazily
+[2026-10-02 10:08:36.678] [pid-0] [Test worker] [HeavyModuleManager] Mounted module 'heavy_evaluator' session 'hmod_heavy_evaluator_6d6d666f' (owner=null, activeRef=1)
+[2026-10-02 10:08:36.679] [pid-0] [Test worker] [HeavyModuleManager] Registered Heavy module: test_mod (lazy=true)
+[2026-10-02 10:08:36.679] [pid-0] [Test worker] [HeavyModuleManager] Instantiating Heavy module 'test_mod' lazily
+[2026-10-02 10:08:36.680] [pid-0] [Test worker] [HeavyModuleManager] Mounted module 'test_mod' session 'hmod_test_mod_536129a0' (owner=null, activeRef=1)
+[2026-10-02 10:08:36.704] [pid-0] [Test worker] [HeavyModuleManager] Disposed idle module instance 'test_mod'
+[2026-10-02 10:08:36.704] [pid-0] [Test worker] [HeavyModuleManager] Unmounted session 'hmod_test_mod_536129a0' of module 'test_mod' (remaining sessions: 0)
+[2026-10-02 10:08:36.706] [pid-0] [Test worker] [HeavyModuleManager] Registered Heavy module: faulty_module (lazy=true)
+[2026-10-02 10:08:36.706] [pid-0] [Test worker] [HeavyModuleManager] Instantiating Heavy module 'faulty_module' lazily
+[2026-10-02 10:08:36.707] [pid-0] [Test worker] [HeavyModuleManager] Mounted module 'faulty_module' session 'hmod_faulty_module_cee7c91c' (owner=null, activeRef=1)
+[2026-10-02 10:08:36.707] [pid-0] [Test worker] [ERROR:HeavyModuleManager] Error executing operation 'crash_test' on 'faulty_module'
+java.lang.IllegalStateException: Hardware engine crashed unexpectedly
+	at com.example.feature.heavy.module.HeavyModuleManagerTest$testOperationFailure$1$1.onUse(HeavyModuleManagerTest.kt:403)
+	at com.example.feature.heavy.module.HeavyModuleManager.use(HeavyModuleManager.kt:343)
+	at com.example.feature.heavy.module.HeavyModuleSessionImpl.use(HeavyModuleManager.kt:39)
+	at com.example.feature.heavy.module.HeavyModuleSession$DefaultImpls.use$default(HeavyModuleContract.kt:19)
+	at com.example.feature.heavy.module.HeavyModuleManagerTest.testOperationFailure(HeavyModuleManagerTest.kt:411)
+	at java.base/jdk.internal.reflect.DirectMethodHandleAccessor.invoke(DirectMethodHandleAccessor.java:103)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:580)
+	at org.junit.runners.model.FrameworkMethod$1.runReflectiveCall(FrameworkMethod.java:59)
+	at org.junit.internal.runners.model.ReflectiveCallable.run(ReflectiveCallable.java:12)
+	at org.junit.runners.model.FrameworkMethod.invokeExplosively(FrameworkMethod.java:56)
+	at org.junit.internal.runners.statements.InvokeMethod.evaluate(InvokeMethod.java:17)
+	at org.junit.internal.runners.statements.RunBefores.evaluate(RunBefores.java:26)
+	at org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)
+	at org.junit.runners.BlockJUnit4ClassRunner$1.evaluate(BlockJUnit4ClassRunner.java:100)
+	at org.junit.runners.ParentRunner.runLeaf(ParentRunner.java:366)
+	at org.junit.runners.BlockJUnit4ClassRunner.runChild(BlockJUnit4ClassRunner.java:103)
+	at org.junit.runners.BlockJUnit4ClassRunner.runChild(BlockJUnit4ClassRunner.java:63)
+	at org.junit.runners.ParentRunner$4.run(ParentRunner.java:331)
+	at org.junit.runners.ParentRunner$1.schedule(ParentRunner.java:79)
+	at org.junit.runners.ParentRunner.runChildren(ParentRunner.java:329)
+	at org.junit.runners.ParentRunner.access$100(ParentRunner.java:66)
+	at org.junit.runners.ParentRunner$2.evaluate(ParentRunner.java:293)
+	at org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)
+	at org.junit.runners.ParentRunner.run(ParentRunner.java:413)
+	at org.junit.runner.JUnitCore.run(JUnitCore.java:137)
+	at org.junit.runner.JUnitCore.run(JUnitCore.java:115)
+	at org.gradle.api.internal.tasks.testing.junit.JUnitTestExecutor.runRequest(JUnitTestExecutor.java:175)
+	at org.gradle.api.internal.tasks.testing.junit.JUnitTestExecutor.accept(JUnitTestExecutor.java:84)
+	at org.gradle.api.internal.tasks.testing.junit.JUnitTestExecutor.accept(JUnitTestExecutor.java:47)
+	at org.gradle.api.internal.tasks.testing.junit.AbstractJUnitTestDefinitionProcessor.processTestDefinition(AbstractJUnitTestDefinitionProcessor.java:65)
+	at org.gradle.api.internal.tasks.testing.SuiteTestDefinitionProcessor.processTestDefinition(SuiteTestDefinitionProcessor.java:54)
+	at java.base/jdk.internal.reflect.DirectMethodHandleAccessor.invoke(DirectMethodHandleAccessor.java:103)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:580)
+	at org.gradle.internal.dispatch.MethodInvocation.invokeOn(MethodInvocation.java:77)
+	at org.gradle.internal.dispatch.ReflectionDispatch.dispatch(ReflectionDispatch.java:28)
+	at org.gradle.internal.dispatch.ReflectionDispatch.dispatch(ReflectionDispatch.java:19)
+	at org.gradle.internal.dispatch.ContextClassLoaderDispatch.dispatch(ContextClassLoaderDispatch.java:33)
+	at org.gradle.internal.dispatch.ProxyDispatchAdapter$DispatchingInvocationHandler.invoke(ProxyDispatchAdapter.java:88)
+	at jdk.proxy1/jdk.proxy1.$Proxy4.processTestDefinition(Unknown Source)
+	at org.gradle.api.internal.tasks.testing.worker.TestWorker$2.run(TestWorker.java:178)
+	at org.gradle.api.internal.tasks.testing.worker.TestWorker.executeAndMaintainThreadName(TestWorker.java:126)
+	at org.gradle.api.internal.tasks.testing.worker.TestWorker.execute(TestWorker.java:103)
+	at org.gradle.api.internal.tasks.testing.worker.TestWorker.execute(TestWorker.java:63)
+	at org.gradle.process.internal.worker.child.ActionExecutionWorker.execute(ActionExecutionWorker.java:56)
+	at org.gradle.process.internal.worker.child.SystemApplicationClassLoaderWorker.call(SystemApplicationClassLoaderWorker.java:122)
+	at org.gradle.process.internal.worker.child.SystemApplicationClassLoaderWorker.call(SystemApplicationClassLoaderWorker.java:72)
+	at worker.org.gradle.process.internal.worker.GradleWorkerMain.run(GradleWorkerMain.java:69)
+	at worker.org.gradle.process.internal.worker.GradleWorkerMain.main(GradleWorkerMain.java:74)
+
+[2026-10-02 10:08:36.710] [pid-0] [Test worker] [HeavyModuleManager] Registered Heavy module: safe_release_mod (lazy=true)
+[2026-10-02 10:08:36.710] [pid-0] [Test worker] [HeavyModuleManager] Instantiating Heavy module 'safe_release_mod' lazily
+[2026-10-02 10:08:36.710] [pid-0] [Test worker] [HeavyModuleManager] Mounted module 'safe_release_mod' session 'hmod_safe_release_mod_df618b6b' (owner=null, activeRef=1)
+[2026-10-02 10:08:36.710] [pid-0] [Test worker] [HeavyModuleManager] Disposed idle module instance 'safe_release_mod'
+[2026-10-02 10:08:36.710] [pid-0] [Test worker] [HeavyModuleManager] Unmounted session 'hmod_safe_release_mod_df618b6b' of module 'safe_release_mod' (remaining sessions: 0)
+[2026-10-02 10:08:36.711] [pid-0] [Test worker] [HeavyModuleManager] Registered Heavy module: unavailable_module (lazy=true)
+[2026-10-02 10:08:36.711] [pid-0] [Test worker] [HeavyModuleManager] Instantiating Heavy module 'unavailable_module' lazily
+[2026-10-02 10:08:36.712] [pid-0] [Test worker] [HeavyModuleManager] Mounted module 'unavailable_module' session 'hmod_unavailable_module_3384d57b' (owner=null, activeRef=1)
+[2026-10-02 10:08:36.712] [pid-0] [Test worker] [HeavyModuleManager] Mount failed: module 'unavailable_module' is unavailable
+[2026-10-02 10:08:36.712] [pid-0] [Test worker] [HeavyModuleManager] Registered Heavy module: ipc_test_mod (lazy=true)
+[2026-10-02 10:08:36.713] [pid-0] [Test worker] [HeavyModuleManager] Instantiating Heavy module 'ipc_test_mod' lazily
+[2026-10-02 10:08:36.713] [pid-0] [Test worker] [HeavyModuleManager] Mounted module 'ipc_test_mod' session 'ipc_token_1' (owner=ipc_owner_1, activeRef=1)
+[2026-10-02 10:08:36.713] [pid-0] [Test worker] [HeavyModuleManager] Disposed idle module instance 'ipc_test_mod'
+[2026-10-02 10:08:36.714] [pid-0] [Test worker] [HeavyModuleManager] Unmounted session 'ipc_token_1' of module 'ipc_test_mod' (remaining sessions: 0)
+[2026-10-02 10:08:36.714] [pid-0] [Test worker] [HeavyModuleManager] Instantiating Heavy module 'ipc_test_mod' lazily
+[2026-10-02 10:08:36.714] [pid-0] [Test worker] [HeavyModuleManager] Mounted module 'ipc_test_mod' session 'token_a' (owner=owner_x, activeRef=1)
+[2026-10-02 10:08:36.714] [pid-0] [Test worker] [HeavyModuleManager] Mounted module 'ipc_test_mod' session 'token_b' (owner=owner_x, activeRef=2)
+[2026-10-02 10:08:36.714] [pid-0] [Test worker] [HeavyModuleManager] Unmounted session 'token_a' of module 'ipc_test_mod' (remaining sessions: 1)
+[2026-10-02 10:08:36.714] [pid-0] [Test worker] [HeavyModuleManager] Disposed idle module instance 'ipc_test_mod'
+[2026-10-02 10:08:36.714] [pid-0] [Test worker] [HeavyModuleManager] Unmounted session 'token_b' of module 'ipc_test_mod' (remaining sessions: 0)
+[2026-10-02 10:08:36.714] [pid-0] [Test worker] [HeavyModuleManager] Unmounted 2 module sessions for owner 'owner_x'
+[2026-10-02 10:08:36.715] [pid-0] [Test worker] [HeavyModuleManager] Registered Heavy module: heavy_calc (lazy=true)
+[2026-10-02 10:08:36.715] [pid-0] [Test worker] [HeavyModuleManager] Instantiating Heavy module 'heavy_calc' lazily
+[2026-10-02 10:08:36.716] [pid-0] [Test worker] [HeavyModuleManager] Mounted module 'heavy_calc' session 'session_calc_1' (owner=owner_widget_1, activeRef=1)
+[2026-10-02 10:08:36.716] [pid-0] [Test worker] [HeavyModuleManager] Registered Heavy module: heavy_reader (lazy=true)
+[2026-10-02 10:08:36.717] [pid-0] [Test worker] [HeavyModuleManager] Registered Heavy module: ephemeral_module (lazy=true)
+[2026-10-02 10:08:36.718] [pid-0] [Test worker] [HeavyModuleManager] Instantiating Heavy module 'ephemeral_module' lazily
+[2026-10-02 10:08:36.718] [pid-0] [Test worker] [HeavyModuleManager] Mounted module 'ephemeral_module' session 'hmod_ephemeral_module_20fe0ed6' (owner=null, activeRef=1)
+[2026-10-02 10:08:36.718] [pid-0] [Test worker] [HeavyModuleManager] Disposed idle module instance 'ephemeral_module'
+[2026-10-02 10:08:36.718] [pid-0] [Test worker] [HeavyModuleManager] Unmounted session 'hmod_ephemeral_module_20fe0ed6' of module 'ephemeral_module' (remaining sessions: 0)
+[2026-10-02 10:08:36.720] [pid-0] [Test worker] [HeavyModuleManager] Registered Heavy module: module_1 (lazy=true)
+[2026-10-02 10:08:36.720] [pid-0] [Test worker] [HeavyModuleManager] Registered Heavy module: module_2 (lazy=true)
+[2026-10-02 10:08:36.720] [pid-0] [Test worker] [HeavyModuleManager] Registered Heavy module: module_3 (lazy=true)
+[2026-10-02 10:08:36.720] [pid-0] [Test worker] [HeavyModuleManager] Registered Heavy module: module_4 (lazy=true)
+[2026-10-02 10:08:36.720] [pid-0] [Test worker] [HeavyModuleManager] Registered Heavy module: module_5 (lazy=true)
+[2026-10-02 10:08:36.721] [pid-0] [Test worker] [HeavyModuleManager] Instantiating Heavy module 'module_3' lazily
+[2026-10-02 10:08:36.721] [pid-0] [Test worker] [HeavyModuleManager] Mounted module 'module_3' session 'hmod_module_3_fcce26d0' (owner=null, activeRef=1)
+[2026-10-02 10:08:36.735] [pid-0] [Test worker] [RecordingActionHelper] RECORD_AUDIO missing, launching AudioRecordPermissionActivity
+[2026-10-02 10:08:36.735] [pid-0] [Test worker] [RecordingActionHelper] Opening RecordingsActivity
+[2026-10-02 10:08:36.757] [pid-0] [Test worker] [ElementActionDispatcher] Handling system action: audio_record
+[2026-10-02 10:08:36.757] [pid-0] [Test worker] [RecordingActionHelper] RECORD_AUDIO missing, launching AudioRecordPermissionActivity
+[2026-10-02 10:08:36.769] [pid-0] [Test worker] [CallRecorderManager] Call recorder listener unavailable: missing READ_PHONE_STATE permission
+[2026-10-02 10:08:36.776] [pid-0] [Test worker] [CallRecorderManager] Call recorder listener unavailable: listen: Neither user nor current process has android.permission.READ_PHONE_STATE
+[2026-10-02 10:08:36.792] [pid-0] [Test worker] [ElementActionDispatcher] Handling system action: back
+[2026-10-02 10:08:36.798] [pid-0] [Test worker] [ElementActionDispatcher] System action performed by accessibility service: back
+[2026-10-02 10:08:36.798] [pid-0] [Test worker] [ElementActionDispatcher] Handling system action: home
+[2026-10-02 10:08:36.799] [pid-0] [Test worker] [ElementActionDispatcher] System action performed by accessibility service: home
+[2026-10-02 10:08:36.799] [pid-0] [Test worker] [ElementActionDispatcher] Handling system action: recents
+[2026-10-02 10:08:36.799] [pid-0] [Test worker] [ElementActionDispatcher] System action performed by accessibility service: recents
+[2026-10-02 10:08:36.799] [pid-0] [Test worker] [ElementActionDispatcher] Handling system action: notifications
+[2026-10-02 10:08:36.799] [pid-0] [Test worker] [ElementActionDispatcher] System action performed by accessibility service: notifications
+[2026-10-02 10:08:36.799] [pid-0] [Test worker] [ElementActionDispatcher] Handling system action: quick_settings
+[2026-10-02 10:08:36.799] [pid-0] [Test worker] [ElementActionDispatcher] System action performed by accessibility service: quick_settings
+[2026-10-02 10:08:36.799] [pid-0] [Test worker] [ElementActionDispatcher] Handling system action: lock_screen
+[2026-10-02 10:08:36.799] [pid-0] [Test worker] [ElementActionDispatcher] System action performed by accessibility service: lock_screen
+[2026-10-02 10:08:36.800] [pid-0] [Test worker] [ElementActionDispatcher] Handling system action: splitscreen
+[2026-10-02 10:08:36.800] [pid-0] [Test worker] [ElementActionDispatcher] System action performed by accessibility service: splitscreen
+[2026-10-02 10:08:36.803] [pid-0] [Test worker] [ElementActionDispatcher] Handling system action: non_existent_action_xyz
+[2026-10-02 10:08:36.803] [pid-0] [Test worker] [ElementActionDispatcher] Accessibility action 'non_existent_action_xyz' unavailable: Action 'non_existent_action_xyz' is not supported
+[2026-10-02 10:08:36.810] [pid-0] [Test worker] [ElementActionDispatcher] Handling system action: screenshot
+[2026-10-02 10:08:36.811] [pid-0] [Test worker] [ElementActionDispatcher] System action performed by accessibility service: screenshot
+[2026-10-02 10:08:36.811] [pid-0] [Test worker] [ElementActionDispatcher] Handling system action: back
+[2026-10-02 10:08:36.812] [pid-0] [Test worker] [ElementActionDispatcher] Accessibility action 'back' failed: System rejected global action 'back'
+[2026-10-02 10:08:36.813] [pid-0] [Test worker] [ElementActionDispatcher] Handling system action: back
+[2026-10-02 10:08:36.813] [pid-0] [Test worker] [ElementActionDispatcher] Accessibility service not running/enabled for action: back
+[2026-10-02 10:08:36.814] [pid-0] [Test worker] [ElementActionDispatcher] Handling system action: qr_scan
+[2026-10-02 10:08:36.814] [pid-0] [Test worker] [ElementActionDispatcher] System action performed by accessibility service: qr_scan
+[2026-10-02 10:08:36.814] [pid-0] [Test worker] [ElementActionDispatcher] Handling system action: barcode_scanner
+[2026-10-02 10:08:36.815] [pid-0] [Test worker] [ElementActionDispatcher] System action performed by accessibility service: barcode_scanner
+[2026-10-02 10:08:36.815] [pid-0] [Test worker] [ElementActionDispatcher] Handling system action: redact_screenshot
+[2026-10-02 10:08:36.815] [pid-0] [Test worker] [ElementActionDispatcher] System action performed by accessibility service: redact_screenshot
+[2026-10-02 18:06:22.247] [pid-0] [Test worker] [RecordingActionHelper] RECORD_AUDIO missing, launching AudioRecordPermissionActivity
+[2026-10-02 18:06:22.255] [pid-0] [Test worker] [RecordingActionHelper] Opening RecordingsActivity
+[2026-10-02 18:06:22.284] [pid-0] [Test worker] [ElementActionDispatcher] Handling system action: audio_record
+[2026-10-02 18:06:22.284] [pid-0] [Test worker] [RecordingActionHelper] RECORD_AUDIO missing, launching AudioRecordPermissionActivity
+[2026-10-02 18:06:22.307] [pid-0] [Test worker] [CallRecorderManager] Call recorder listener unavailable: missing READ_PHONE_STATE permission
+[2026-10-02 18:06:22.311] [pid-0] [Test worker] [CallRecorderManager] Call recorder listener unavailable: listen: Neither user nor current process has android.permission.READ_PHONE_STATE
+[2026-10-02 18:06:22.334] [pid-0] [Test worker] [ElementActionDispatcher] Handling system action: back
+[2026-10-02 18:06:22.336] [pid-0] [Test worker] [ElementActionDispatcher] System action performed by accessibility service: back
+[2026-10-02 18:06:22.337] [pid-0] [Test worker] [ElementActionDispatcher] Handling system action: home
+[2026-10-02 18:06:22.337] [pid-0] [Test worker] [ElementActionDispatcher] System action performed by accessibility service: home
+[2026-10-02 18:06:22.337] [pid-0] [Test worker] [ElementActionDispatcher] Handling system action: recents
+[2026-10-02 18:06:22.337] [pid-0] [Test worker] [ElementActionDispatcher] System action performed by accessibility service: recents
+[2026-10-02 18:06:22.337] [pid-0] [Test worker] [ElementActionDispatcher] Handling system action: notifications
+[2026-10-02 18:06:22.338] [pid-0] [Test worker] [ElementActionDispatcher] System action performed by accessibility service: notifications
+[2026-10-02 18:06:22.338] [pid-0] [Test worker] [ElementActionDispatcher] Handling system action: quick_settings
+[2026-10-02 18:06:22.338] [pid-0] [Test worker] [ElementActionDispatcher] System action performed by accessibility service: quick_settings
+[2026-10-02 18:06:22.338] [pid-0] [Test worker] [ElementActionDispatcher] Handling system action: lock_screen
+[2026-10-02 18:06:22.338] [pid-0] [Test worker] [ElementActionDispatcher] System action performed by accessibility service: lock_screen
+[2026-10-02 18:06:22.338] [pid-0] [Test worker] [ElementActionDispatcher] Handling system action: splitscreen
+[2026-10-02 18:06:22.338] [pid-0] [Test worker] [ElementActionDispatcher] System action performed by accessibility service: splitscreen
+[2026-10-02 18:06:22.342] [pid-0] [Test worker] [ElementActionDispatcher] Handling system action: non_existent_action_xyz
+[2026-10-02 18:06:22.343] [pid-0] [Test worker] [ElementActionDispatcher] Accessibility action 'non_existent_action_xyz' unavailable: Action 'non_existent_action_xyz' is not supported
+[2026-10-02 18:06:22.344] [pid-0] [Test worker] [ElementActionDispatcher] Handling system action: screenshot
+[2026-10-02 18:06:22.344] [pid-0] [Test worker] [ElementActionDispatcher] System action performed by accessibility service: screenshot
+[2026-10-02 18:06:22.345] [pid-0] [Test worker] [ElementActionDispatcher] Handling system action: back
+[2026-10-02 18:06:22.345] [pid-0] [Test worker] [ElementActionDispatcher] Accessibility action 'back' failed: System rejected global action 'back'
+[2026-10-02 18:06:22.347] [pid-0] [Test worker] [ElementActionDispatcher] Handling system action: back
+[2026-10-02 18:06:22.347] [pid-0] [Test worker] [ElementActionDispatcher] Accessibility service not running/enabled for action: back
+[2026-10-02 18:06:22.348] [pid-0] [Test worker] [ElementActionDispatcher] Handling system action: qr_scan
+[2026-10-02 18:06:22.348] [pid-0] [Test worker] [ElementActionDispatcher] System action performed by accessibility service: qr_scan
+[2026-10-02 18:06:22.349] [pid-0] [Test worker] [ElementActionDispatcher] Handling system action: barcode_scanner
+[2026-10-02 18:06:22.349] [pid-0] [Test worker] [ElementActionDispatcher] System action performed by accessibility service: barcode_scanner
+[2026-10-02 18:06:22.349] [pid-0] [Test worker] [ElementActionDispatcher] Handling system action: redact_screenshot
+[2026-10-02 18:06:22.350] [pid-0] [Test worker] [ElementActionDispatcher] System action performed by accessibility service: redact_screenshot

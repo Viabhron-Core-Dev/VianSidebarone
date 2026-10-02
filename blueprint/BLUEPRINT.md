@@ -97,6 +97,22 @@
   - **Structured Diagnostic Logging**: Exact diagnostic format logging requested action ID, selected module/handler, module load, execution result, module unload, and failure reason.
   - **Test Suite (`ModularAccessibilityActionTest.kt`)**: 8 comprehensive unit tests verifying service unavailable redirection, global navigation dispatch, screenshot execution, toggle lifecycle loading/unloading, scanner capability unavailable reporting without settings redirect, and diagnostic log verification.
 
+### 12.14 — Precision Tooling: Freehand Redaction, Multi-Shape Scanner & Cursor Click (Completed)
+- [x] **Freehand Brush-Based Screenshot Redaction** (`RedactScreenshotActivity`):
+  - Replaced legacy drag bounding boxes with a path-based freehand brush engine (`RedactStroke`, `RedactPoint`).
+  - Supports Blackout mode (solid black `#000000` with round cap/join) and Blur / Mosaic mode (high-quality localized pixelated mosaic rendering).
+  - Top bar features Undo, Clear All, and Save & Share; toolbar provides brush size presets (Small, Medium, Large) and mode toggles.
+- [x] **Interactive Multi-Shape Scanner Selection & Handles** (`SecureScreenScannerActivity`, `SecureCameraScannerActivity`, `ScannerSelectionHelper`):
+  - Replaced multi-point tap-to-start with an immediate single-drag initial region creation gesture.
+  - Interactive grab handles across all shapes: 4 corner handles + 4 edge handles for Rectangle & Square, 4 cardinal handles for Circle, and 4 independently movable vertex handles for Custom freeform polygon.
+  - Full region translation by dragging inside bounds, and single-drag redraw by dragging outside or tapping Reset.
+  - Post-selection action bar with Share, QR Code ("QR Code scanning coming soon"), and OCR ("OCR coming soon") with zero external recognition dependencies.
+- [x] **Cursor Precision Double-Tap Synthetic Click Injection** (`CursorManager`):
+  - Restored reliable synthetic click delivery by solving Android `InputDispatcher` hit-test overlay interception.
+  - Arms on second tap `ACTION_DOWN` and dispatches only upon physical `ACTION_UP` release.
+  - Temporarily sets `FLAG_NOT_TOUCHABLE`, hides trackpad view (`visibility = View.GONE`), and delays dispatch by 80ms for Binder IPC synchronization.
+  - Employs calibrated 50ms synthetic touch stroke with buffered touch restoration upon completion.
+
 ---
 
 ## Phase 13: Floating Window Mini-Apps (Ordered by Complexity & Difficulty)
@@ -109,7 +125,7 @@
   - `DurableMiniAppStore`: Atomic JSON file persistence (`filesDir/floating_miniapps/`) preserving mini-app state across Heavy process death, Heavy process restart, and full app restarts.
   - `FloatingMiniAppBridge`: Main-side coordinator bridging lifecycle events to `:heavy` via minimal IPC intents while maintaining all window hierarchy and Z-ordering in Main.
 
-### 13.1 — Daily Utilities & Fast-Feedback Tools (Tier 1 - Low Difficulty)
+- [x] **Privacy Curtain (Anti-Peep Mode)** (`PrivacyCurtainManager`): Full-screen darkening overlay with resizable transparent rectangular viewing box, 100% native touch pass-through for underlying apps, dark area swipe-to-reposition, long-press dismissal exit gate, opacity control, and on-demand toggle in Utilities.
 - [ ] **Work Notes & Scratchpad** (`WorkNotesFloatingWindow`): Lightweight Room-backed markdown/scratchpad floating window with auto-save and responsive drag resize.
 - [ ] **Floating Web Browser** (`FloatingBrowserWindow`): Android `WebView` overlay with back/forward history navigation stack, URL search bar, desktop mode toggle, and multi-tab state.
 

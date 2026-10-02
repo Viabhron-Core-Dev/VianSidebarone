@@ -13,7 +13,7 @@ object DisplayHandler {
     private var torchCallbackRegistered = false
 
     fun handleDisplayAction(context: Context, action: String) {
-        if (!Settings.System.canWrite(context) && action != "torch_toggle" && action != "blue_light_filter" && action != "keep_screen_on") {
+        if (!Settings.System.canWrite(context) && action != "torch_toggle" && action != "blue_light_filter" && action != "keep_screen_on" && action != "privacy_curtain") {
             val intent = Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS).apply {
                 data = Uri.parse("package:${context.packageName}")
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -32,6 +32,22 @@ object DisplayHandler {
                         putExtra("item_id", "display:blue_light_filter")
                         setPackage(context.packageName)
                     })
+                }
+                "privacy_curtain" -> {
+                    if (!Settings.canDrawOverlays(context)) {
+                        val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION).apply {
+                            data = Uri.parse("package:${context.packageName}")
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                        context.startActivity(intent)
+                        Toast.makeText(context, "Please grant Overlay permission for Privacy Curtain", Toast.LENGTH_LONG).show()
+                    } else {
+                        PrivacyCurtainManager.toggle(context)
+                        context.sendBroadcast(Intent("com.example.UPDATE_SIDEBAR_ICONS").apply {
+                            putExtra("item_id", "display:privacy_curtain")
+                            setPackage(context.packageName)
+                        })
+                    }
                 }
                 "torch_toggle" -> toggleTorch(context)
                 "timeout_cycle" -> cycleScreenTimeout(context)

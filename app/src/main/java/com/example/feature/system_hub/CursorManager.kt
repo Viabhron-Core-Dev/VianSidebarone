@@ -242,6 +242,13 @@ class CursorManager(
 
     private fun createTrackpadView() {
         trackpadView = FrameLayout(service).apply {
+            var lastTapUpTime = 0L
+            var lastTapUpX = 0f
+            var lastTapUpY = 0f
+            var isDownInTapRange = false
+            var downInitialX = 0f
+            var downInitialY = 0f
+
             val gestureDetector = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
                 override fun onDown(e: MotionEvent): Boolean = true
 
@@ -263,7 +270,6 @@ class CursorManager(
                         if (isDoubleTapPending) {
                             isDoubleTapPending = false
                             LogKeeper.writeLog("Cursor", "tap detected: double tap UP released at ($pointerX, $pointerY) -> scheduling single click")
-                            // Wait 1 frame (~16ms) to ensure physical touch is completely cleared from OS input pipeline
                             postDelayedHandler(Runnable {
                                 performClick(pointerX, pointerY)
                             }, 16L)
@@ -304,6 +310,55 @@ class CursorManager(
             })
 
             setOnTouchListener { _, event ->
+                val density = service.resources.displayMetrics.density
+                val maxTapDist = 28f * density
+                when (event.actionMasked) {
+                    MotionEvent.ACTION_DOWN -> {
+                        downInitialX = event.x
+                        downInitialY = event.y
+                        isDownInTapRange = true
+                    }
+                    MotionEvent.ACTION_MOVE -> {
+                        val dx = kotlin.math.abs(event.x - downInitialX)
+                        val dy = kotlin.math.abs(event.y - downInitialY)
+                        if (dx > maxTapDist || dy > maxTapDist) {
+                            isDownInTapRange = false
+                        }
+                    }
+                    MotionEvent.ACTION_UP -> {
+                        val now = System.currentTimeMillis()
+                        val dx = kotlin.math.abs(event.x - downInitialX)
+                        val dy = kotlin.math.abs(event.y - downInitialY)
+                        if (isDownInTapRange && dx <= maxTapDist && dy <= maxTapDist) {
+                            val timeSinceLastTap = now - lastTapUpTime
+                            val distFromLastTap = kotlin.math.hypot(
+                                (event.x - lastTapUpX).toDouble(),
+                                (event.y - lastTapUpY).toDouble()
+                            ).toFloat()
+                            if (timeSinceLastTap in 40L..380L && distFromLastTap <= maxTapDist * 1.5f) {
+                                // Direct double tap detected on release if GestureDetector was not consumed
+                                if (!isDoubleTapPending) {
+                                    LogKeeper.writeLog("Cursor", "direct touch double-tap UP released at ($pointerX, $pointerY)")
+                                    postDelayedHandler(Runnable {
+                                        performClick(pointerX, pointerY)
+                                    }, 16L)
+                                }
+                                lastTapUpTime = 0L
+                            } else {
+                                lastTapUpTime = now
+                                lastTapUpX = event.x
+                                lastTapUpY = event.y
+                            }
+                        } else {
+                            lastTapUpTime = 0L
+                        }
+                        isDownInTapRange = false
+                    }
+                    MotionEvent.ACTION_CANCEL -> {
+                        isDownInTapRange = false
+                        lastTapUpTime = 0L
+                    }
+                }
                 gestureDetector.onTouchEvent(event)
                 true
             }
@@ -450,7 +505,13 @@ class CursorManager(
             ?: service.dispatchGesture(gesture, callback, mainHandler)
     }
 
-    internal var postDelayedHandler: (Runnable, Long) -> Unit = { r, delay -> mainHandler.postDelayed(r, delay) }
+    internal var postDelayedHandler: (Runnable, Long) -> Unit = { r, delay ->
+        if (gestureDispatcher != null) {
+            r.run()
+        } else {
+            mainHandler.postDelayed(r, delay)
+        }
+    }
 
     internal fun setTrackpadTouchable(touchable: Boolean) {
         val view = trackpadView ?: return
@@ -476,7 +537,7 @@ class CursorManager(
         val (targetX, targetY) = getDisplayCoordinates(x, y)
         val path = Path().apply {
             moveTo(targetX, targetY)
-            lineTo(targetX + 0.5f, targetY + 0.5f)
+            lineTo(targetX, targetY)
         }
         val gestureBuilder = GestureDescription.Builder()
         gestureBuilder.addStroke(GestureDescription.StrokeDescription(path, 0, 50))
@@ -485,48 +546,57 @@ class CursorManager(
             gestureBuilder.setDisplayId(displayId)
         }
 
-        // Temporarily disable trackpad touch reception so the synthetic gesture passes directly to the underlying app
+        // Temporarily disable trackpad touch reception and visibility so the synthetic gesture passes directly to the underlying app
         setTrackpadTouchable(false)
+        trackpadView?.visibility = View.GONE
         var restored = false
         val restoreTouchableOnce = {
             if (!restored) {
                 restored = true
+                trackpadView?.visibility = View.VISIBLE
                 setTrackpadTouchable(true)
             }
         }
         postDelayedHandler(Runnable {
             restoreTouchableOnce()
-        }, 350L)
+        }, 400L)
 
-        try {
-            val gesture = buildGestureSafely(gestureBuilder)
-            val accepted = dispatchGestureToService(
-                gesture,
-                object : AccessibilityService.GestureResultCallback() {
-                    override fun onCompleted(gestureDescription: GestureDescription?) {
-                        restoreTouchableOnce()
-                        LogKeeper.writeLog("Cursor", "gesture accepted/completed: single click at ($targetX, $targetY)")
-                        onFinished?.invoke(true)
-                    }
-
-                    override fun onCancelled(gestureDescription: GestureDescription?) {
-                        restoreTouchableOnce()
-                        LogKeeper.writeLog("Cursor", "gesture cancelled: single click at ($targetX, $targetY)")
-                        onFinished?.invoke(false)
-                    }
+        // Delay dispatch slightly to ensure WindowManager has processed window touchability update
+        postDelayedHandler(Runnable {
+            try {
+                val gesture = try {
+                    gestureBuilder.build()
+                } catch (_: Throwable) {
+                    buildGestureSafely(gestureBuilder)
                 }
-            )
-            LogKeeper.writeLog("Cursor", "gesture dispatched: single click at ($targetX, $targetY), accepted=$accepted")
-            if (!accepted) {
+                val accepted = dispatchGestureToService(
+                    gesture,
+                    object : AccessibilityService.GestureResultCallback() {
+                        override fun onCompleted(gestureDescription: GestureDescription?) {
+                            postDelayedHandler(Runnable { restoreTouchableOnce() }, 50L)
+                            LogKeeper.writeLog("Cursor", "gesture accepted/completed: single click at ($targetX, $targetY)")
+                            onFinished?.invoke(true)
+                        }
+
+                        override fun onCancelled(gestureDescription: GestureDescription?) {
+                            restoreTouchableOnce()
+                            LogKeeper.writeLog("Cursor", "gesture cancelled: single click at ($targetX, $targetY)")
+                            onFinished?.invoke(false)
+                        }
+                    }
+                )
+                LogKeeper.writeLog("Cursor", "gesture dispatched: single click at ($targetX, $targetY), accepted=$accepted")
+                if (!accepted) {
+                    restoreTouchableOnce()
+                    onFinished?.invoke(false)
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
                 restoreTouchableOnce()
+                LogKeeper.writeLog("Cursor", "gesture dispatch error at ($targetX, $targetY): ${e.message}")
                 onFinished?.invoke(false)
             }
-        } catch (e: Exception) {
-            e.printStackTrace()
-            restoreTouchableOnce()
-            LogKeeper.writeLog("Cursor", "gesture dispatch error at ($targetX, $targetY): ${e.message}")
-            onFinished?.invoke(false)
-        }
+        }, 80L)
     }
 
     internal fun performDoubleClick(x: Float, y: Float, onFinished: ((Boolean) -> Unit)? = null) {
@@ -536,7 +606,7 @@ class CursorManager(
 
         val path1 = Path().apply {
             moveTo(targetX, targetY)
-            lineTo(targetX + 0.5f, targetY + 0.5f)
+            lineTo(targetX, targetY)
         }
         val gestureBuilder1 = GestureDescription.Builder()
         gestureBuilder1.addStroke(GestureDescription.StrokeDescription(path1, 0, 40))
@@ -546,10 +616,12 @@ class CursorManager(
         }
 
         setTrackpadTouchable(false)
+        trackpadView?.visibility = View.GONE
         var restored = false
         val restoreTouchableOnce = {
             if (!restored) {
                 restored = true
+                trackpadView?.visibility = View.VISIBLE
                 setTrackpadTouchable(true)
             }
         }
@@ -557,75 +629,85 @@ class CursorManager(
             restoreTouchableOnce()
         }, 500L)
 
-        try {
-            val gesture1 = buildGestureSafely(gestureBuilder1)
-            val accepted1 = dispatchGestureToService(
-                gesture1,
-                object : AccessibilityService.GestureResultCallback() {
-                    override fun onCompleted(gestureDescription: GestureDescription?) {
-                        LogKeeper.writeLog("Cursor", "gesture accepted/completed: double click [1/2] at ($targetX, $targetY)")
+        postDelayedHandler(Runnable {
+            try {
+                val gesture1 = try {
+                    gestureBuilder1.build()
+                } catch (_: Throwable) {
+                    buildGestureSafely(gestureBuilder1)
+                }
+                val accepted1 = dispatchGestureToService(
+                    gesture1,
+                    object : AccessibilityService.GestureResultCallback() {
+                        override fun onCompleted(gestureDescription: GestureDescription?) {
+                            LogKeeper.writeLog("Cursor", "gesture accepted/completed: double click [1/2] at ($targetX, $targetY)")
 
-                        // Second click gesture dispatched after short interval
-                        postDelayedHandler(Runnable {
-                            val path2 = Path().apply {
-                                moveTo(targetX, targetY)
-                                lineTo(targetX + 0.5f, targetY + 0.5f)
-                            }
-                            val gestureBuilder2 = GestureDescription.Builder()
-                            gestureBuilder2.addStroke(GestureDescription.StrokeDescription(path2, 0, 40))
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                                val displayId = try { service.display?.displayId ?: android.view.Display.DEFAULT_DISPLAY } catch (_: Exception) { android.view.Display.DEFAULT_DISPLAY }
-                                gestureBuilder2.setDisplayId(displayId)
-                            }
+                            // Second click gesture dispatched after short interval
+                            postDelayedHandler(Runnable {
+                                val path2 = Path().apply {
+                                    moveTo(targetX, targetY)
+                                    lineTo(targetX, targetY)
+                                }
+                                val gestureBuilder2 = GestureDescription.Builder()
+                                gestureBuilder2.addStroke(GestureDescription.StrokeDescription(path2, 0, 40))
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                                    val displayId = try { service.display?.displayId ?: android.view.Display.DEFAULT_DISPLAY } catch (_: Exception) { android.view.Display.DEFAULT_DISPLAY }
+                                    gestureBuilder2.setDisplayId(displayId)
+                                }
 
-                            try {
-                                val gesture2 = buildGestureSafely(gestureBuilder2)
-                                val accepted2 = dispatchGestureToService(
-                                    gesture2,
-                                    object : AccessibilityService.GestureResultCallback() {
-                                        override fun onCompleted(gd: GestureDescription?) {
-                                            restoreTouchableOnce()
-                                            LogKeeper.writeLog("Cursor", "gesture accepted/completed: double click [2/2] at ($targetX, $targetY)")
-                                            onFinished?.invoke(true)
-                                        }
-
-                                        override fun onCancelled(gd: GestureDescription?) {
-                                            restoreTouchableOnce()
-                                            LogKeeper.writeLog("Cursor", "gesture cancelled: double click [2/2] at ($targetX, $targetY)")
-                                            onFinished?.invoke(false)
-                                        }
+                                try {
+                                    val gesture2 = try {
+                                        gestureBuilder2.build()
+                                    } catch (_: Throwable) {
+                                        buildGestureSafely(gestureBuilder2)
                                     }
-                                )
-                                LogKeeper.writeLog("Cursor", "gesture dispatched: double click [2/2] at ($targetX, $targetY), accepted=$accepted2")
-                                if (!accepted2) {
+                                    val accepted2 = dispatchGestureToService(
+                                        gesture2,
+                                        object : AccessibilityService.GestureResultCallback() {
+                                            override fun onCompleted(gd: GestureDescription?) {
+                                                restoreTouchableOnce()
+                                                LogKeeper.writeLog("Cursor", "gesture accepted/completed: double click [2/2] at ($targetX, $targetY)")
+                                                onFinished?.invoke(true)
+                                            }
+
+                                            override fun onCancelled(gd: GestureDescription?) {
+                                                restoreTouchableOnce()
+                                                LogKeeper.writeLog("Cursor", "gesture cancelled: double click [2/2] at ($targetX, $targetY)")
+                                                onFinished?.invoke(false)
+                                            }
+                                        }
+                                    )
+                                    LogKeeper.writeLog("Cursor", "gesture dispatched: double click [2/2] at ($targetX, $targetY), accepted=$accepted2")
+                                    if (!accepted2) {
+                                        restoreTouchableOnce()
+                                        onFinished?.invoke(false)
+                                    }
+                                } catch (e: Exception) {
                                     restoreTouchableOnce()
+                                    LogKeeper.writeLog("Cursor", "gesture dispatch error on double click [2/2]: ${e.message}")
                                     onFinished?.invoke(false)
                                 }
-                            } catch (e: Exception) {
-                                restoreTouchableOnce()
-                                LogKeeper.writeLog("Cursor", "gesture dispatch error on double click [2/2]: ${e.message}")
-                                onFinished?.invoke(false)
-                            }
-                        }, 70L)
-                    }
+                            }, 70L)
+                        }
 
-                    override fun onCancelled(gestureDescription: GestureDescription?) {
-                        restoreTouchableOnce()
-                        LogKeeper.writeLog("Cursor", "gesture cancelled: double click [1/2] at ($targetX, $targetY)")
-                        onFinished?.invoke(false)
+                        override fun onCancelled(gestureDescription: GestureDescription?) {
+                            restoreTouchableOnce()
+                            LogKeeper.writeLog("Cursor", "gesture cancelled: double click [1/2] at ($targetX, $targetY)")
+                            onFinished?.invoke(false)
+                        }
                     }
+                )
+                LogKeeper.writeLog("Cursor", "gesture dispatched: double click [1/2] at ($targetX, $targetY), accepted=$accepted1")
+                if (!accepted1) {
+                    restoreTouchableOnce()
+                    onFinished?.invoke(false)
                 }
-            )
-            LogKeeper.writeLog("Cursor", "gesture dispatched: double click [1/2] at ($targetX, $targetY), accepted=$accepted1")
-            if (!accepted1) {
+            } catch (e: Exception) {
                 restoreTouchableOnce()
+                LogKeeper.writeLog("Cursor", "gesture dispatch error on double click [1/2]: ${e.message}")
                 onFinished?.invoke(false)
             }
-        } catch (e: Exception) {
-            restoreTouchableOnce()
-            LogKeeper.writeLog("Cursor", "gesture dispatch error on double click [1/2]: ${e.message}")
-            onFinished?.invoke(false)
-        }
+        }, 80L)
     }
 
     internal fun performLongClick(x: Float, y: Float) {

@@ -1,0 +1,6 @@
+{
+  "summary":  "Implementation plan for the 'Privacy Curtain' (Anti-Peep Mode) Utility element. Outlines the 4-panel native pass-through overlay architecture, dark region swipe-to-move, long-press exit gate, resizable clear rectangular window, and integration with the Utility action picker and element registries.",
+  "updatedAt":  "2026-10-02T17:55:27.876979002Z",
+  "requestFeedback":  true,
+  "userFacing":  true
+}

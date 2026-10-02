@@ -101,6 +101,7 @@ class ElementSystemTest {
         assertTrue(ALL_UTILITIES_ACTIONS.any { it.id == "system:force_stop_running_apps" })
         assertTrue(ALL_UTILITIES_ACTIONS.any { it.id == "display:keep_screen_on" })
         assertTrue(ALL_UTILITIES_ACTIONS.any { it.id == "display:screen_orientation" })
+        assertTrue(ALL_UTILITIES_ACTIONS.any { it.id == "display:privacy_curtain" })
     }
 
     @Test
@@ -113,6 +114,7 @@ class ElementSystemTest {
         assertTrue(registry.isRegistered("display:torch_toggle"))
         assertTrue(registry.isRegistered("display:keep_screen_on"))
         assertTrue(registry.isRegistered("display:screen_orientation"))
+        assertTrue(registry.isRegistered("display:privacy_curtain"))
         assertTrue(registry.isRegistered("quicktile:torch"))
         assertTrue(registry.isRegistered("link:uuid-123"))
         assertTrue(registry.isRegistered("folder:uuid-456"))

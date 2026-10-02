@@ -307,6 +307,23 @@ class ElementActionRegistry private constructor(private val context: Context) {
                 }
             }
         }
+
+        register(
+            ElementDescriptor(
+                actionKey = "display:privacy_curtain",
+                displayName = "Privacy Curtain",
+                category = ElementCategory.TOOL_ACTION,
+                description = "Toggles full-screen privacy darkening overlay with resizable transparent viewing window."
+            )
+        ) {
+            object : ElementActionContract {
+                override val descriptor = descriptors["display:privacy_curtain"]!!
+                override fun execute(executionContext: ElementExecutionContext): Boolean {
+                    com.example.feature.system_hub.DisplayHandler.handleDisplayAction(executionContext.context, "privacy_curtain")
+                    return true
+                }
+            }
+        }
     }
 
     companion object {

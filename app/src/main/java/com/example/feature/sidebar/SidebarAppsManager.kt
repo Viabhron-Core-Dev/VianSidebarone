@@ -273,6 +273,8 @@ class SidebarAppsManager(
             icon.setImageResource(parsed.iconResId)
             if (parsed.action == "blue_light_filter" && com.example.service.BlueLightFilterManager.isEnabled) {
                 icon.setColorFilter(android.graphics.Color.parseColor("#FF9900"))
+            } else if (parsed.action == "privacy_curtain" && com.example.service.PrivacyCurtainManager.isEnabled) {
+                icon.setColorFilter(android.graphics.Color.parseColor("#1DB954"))
             } else {
                 icon.setColorFilter(android.graphics.Color.WHITE)
             }

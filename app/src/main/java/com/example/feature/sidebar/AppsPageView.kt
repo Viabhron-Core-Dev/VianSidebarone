@@ -828,6 +828,8 @@ class AppsPageView(
                 icon.setImageResource(item.iconResId)
                 if (item.action == "blue_light_filter" && com.example.service.BlueLightFilterManager.isEnabled) {
                     icon.setColorFilter(android.graphics.Color.parseColor("#FF9900"))
+                } else if (item.action == "privacy_curtain" && com.example.service.PrivacyCurtainManager.isEnabled) {
+                    icon.setColorFilter(android.graphics.Color.parseColor("#1DB954"))
                 } else {
                     icon.setColorFilter(android.graphics.Color.WHITE)
                 }

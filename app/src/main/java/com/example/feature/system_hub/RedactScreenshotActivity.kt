@@ -17,6 +17,8 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
@@ -30,7 +32,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
@@ -50,6 +56,17 @@ data class RedactBox(
     val normalizedRight: Float,
     val normalizedBottom: Float,
     val isBlur: Boolean = false
+)
+
+data class RedactPoint(
+    val normalizedX: Float,
+    val normalizedY: Float
+)
+
+data class RedactStroke(
+    val points: List<RedactPoint>,
+    val isBlur: Boolean,
+    val strokeWidthDp: Float
 )
 
 /**
@@ -169,11 +186,10 @@ fun RedactScreenContent(
     onSaveAndShare: (Bitmap) -> Unit,
     onClose: () -> Unit
 ) {
-    val boxes = remember { mutableStateListOf<RedactBox>() }
-    var currentBox by remember { mutableStateOf<RedactBox?>(null) }
+    val strokes = remember { mutableStateListOf<RedactStroke>() }
+    var currentStrokePoints by remember { mutableStateOf<List<RedactPoint>>(emptyList()) }
     var isBlurMode by remember { mutableStateOf(false) }
-
-    var canvasSize by remember { mutableStateOf(IntSize(1, 1)) }
+    var selectedStrokeWidthDp by remember { mutableStateOf(32f) }
 
     Column(modifier = Modifier.fillMaxSize()) {
         TopAppBar(
@@ -184,14 +200,21 @@ fun RedactScreenContent(
                 }
             },
             actions = {
-                if (boxes.isNotEmpty()) {
-                    IconButton(onClick = { boxes.clear() }) {
+                if (strokes.isNotEmpty()) {
+                    TextButton(onClick = {
+                        if (strokes.isNotEmpty()) {
+                            strokes.removeAt(strokes.lastIndex)
+                        }
+                    }) {
+                        Text("Undo", color = Color(0xFFFFCC00))
+                    }
+                    IconButton(onClick = { strokes.clear() }) {
                         Icon(Icons.Default.Clear, contentDescription = "Clear All", tint = Color.White)
                     }
                 }
                 Button(
                     onClick = {
-                        val finalBitmap = renderRedactedBitmap(originalBitmap, boxes)
+                        val finalBitmap = renderRedactedBitmap(originalBitmap, strokes)
                         onSaveAndShare(finalBitmap)
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
@@ -205,20 +228,48 @@ fun RedactScreenContent(
             colors = TopAppBarDefaults.topAppBarColors(containerColor = Color(0xFF1E1E1E))
         )
 
+        // Mode and Brush Size Control Toolbar
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .background(Color(0xFF2A2A2A))
-                .padding(horizontal = 16.dp, vertical = 6.dp),
+                .padding(horizontal = 12.dp, vertical = 6.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text("Mode: ${if (isBlurMode) "Blur / Mosaic" else "Blackout Box"}", color = Color.White, style = MaterialTheme.typography.bodyMedium)
             Button(
                 onClick = { isBlurMode = !isBlurMode },
-                colors = ButtonDefaults.buttonColors(containerColor = if (isBlurMode) Color(0xFF4CAF50) else Color(0xFF555555))
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (isBlurMode) Color(0xFF4CAF50) else Color(0xFF333333)
+                ),
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                modifier = Modifier.height(34.dp)
             ) {
-                Text(if (isBlurMode) "Switch to Blackout" else "Switch to Blur")
+                Text(
+                    text = if (isBlurMode) "Brush: Blur / Mosaic" else "Brush: Blackout",
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Size:", color = Color.LightGray, style = MaterialTheme.typography.labelSmall)
+                listOf(16f to "S", 32f to "M", 56f to "L").forEach { (sizeDp, label) ->
+                    val isSelected = (selectedStrokeWidthDp == sizeDp)
+                    Button(
+                        onClick = { selectedStrokeWidthDp = sizeDp },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (isSelected) MaterialTheme.colorScheme.primary else Color(0xFF3A3A3A),
+                            contentColor = if (isSelected) Color.White else Color.LightGray
+                        ),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                        modifier = Modifier.height(30.dp)
+                    ) {
+                        Text(label, style = MaterialTheme.typography.labelSmall)
+                    }
+                }
             }
         }
 
@@ -233,48 +284,41 @@ fun RedactScreenContent(
             Canvas(
                 modifier = Modifier
                     .fillMaxSize()
-                    .pointerInput(isBlurMode) {
-                        var startOffset = Offset.Zero
-                        detectDragGestures(
-                            onDragStart = { offset ->
-                                startOffset = offset
-                                currentBox = RedactBox(
-                                    normalizedLeft = offset.x / size.width,
-                                    normalizedTop = offset.y / size.height,
-                                    normalizedRight = offset.x / size.width,
-                                    normalizedBottom = offset.y / size.height,
-                                    isBlur = isBlurMode
-                                )
-                            },
-                            onDrag = { change, _ ->
-                                change.consume()
-                                val curX = change.position.x
-                                val curY = change.position.y
-                                val left = min(startOffset.x, curX) / size.width
-                                val top = min(startOffset.y, curY) / size.height
-                                val right = max(startOffset.x, curX) / size.width
-                                val bottom = max(startOffset.y, curY) / size.height
+                    .pointerInput(isBlurMode, selectedStrokeWidthDp) {
+                        awaitEachGesture {
+                            val down = awaitFirstDown()
+                            val points = mutableListOf(
+                                RedactPoint(down.position.x / size.width, down.position.y / size.height)
+                            )
+                            currentStrokePoints = points.toList()
 
-                                currentBox = RedactBox(left, top, right, bottom, isBlur = isBlurMode)
-                            },
-                            onDragEnd = {
-                                currentBox?.let { box ->
-                                    if ((box.normalizedRight - box.normalizedLeft) > 0.01f &&
-                                        (box.normalizedBottom - box.normalizedTop) > 0.01f
-                                    ) {
-                                        boxes.add(box)
-                                    }
+                            while (true) {
+                                val event = awaitPointerEvent()
+                                val change = event.changes.firstOrNull() ?: break
+                                if (change.pressed) {
+                                    change.consume()
+                                    points.add(
+                                        RedactPoint(change.position.x / size.width, change.position.y / size.height)
+                                    )
+                                    currentStrokePoints = points.toList()
+                                } else {
+                                    break
                                 }
-                                currentBox = null
-                            },
-                            onDragCancel = {
-                                currentBox = null
                             }
-                        )
+
+                            if (points.isNotEmpty()) {
+                                strokes.add(
+                                    RedactStroke(
+                                        points = points.toList(),
+                                        isBlur = isBlurMode,
+                                        strokeWidthDp = selectedStrokeWidthDp
+                                    )
+                                )
+                            }
+                            currentStrokePoints = emptyList()
+                        }
                     }
             ) {
-                canvasSize = IntSize(size.width.toInt(), size.height.toInt())
-
                 // Draw background screenshot image scaled to canvas
                 drawImage(
                     image = imageBitmap,
@@ -282,51 +326,21 @@ fun RedactScreenContent(
                     dstSize = IntSize(size.width.toInt(), size.height.toInt())
                 )
 
-                // Draw confirmed redaction boxes
-                for (box in boxes) {
-                    val x = box.normalizedLeft * size.width
-                    val y = box.normalizedTop * size.height
-                    val w = (box.normalizedRight - box.normalizedLeft) * size.width
-                    val h = (box.normalizedBottom - box.normalizedTop) * size.height
-
-                    if (box.isBlur) {
-                        drawRect(
-                            color = Color(0xDD333333),
-                            topLeft = Offset(x, y),
-                            size = Size(w, h)
-                        )
-                        drawRect(
-                            color = Color.White,
-                            topLeft = Offset(x, y),
-                            size = Size(w, h),
-                            style = Stroke(width = 2.dp.toPx())
-                        )
-                    } else {
-                        drawRect(
-                            color = Color.Black,
-                            topLeft = Offset(x, y),
-                            size = Size(w, h)
-                        )
-                    }
+                // Draw confirmed strokes
+                for (stroke in strokes) {
+                    drawStrokeOnCanvas(stroke, size.width, size.height)
                 }
 
-                // Draw currently dragging box
-                currentBox?.let { box ->
-                    val x = box.normalizedLeft * size.width
-                    val y = box.normalizedTop * size.height
-                    val w = (box.normalizedRight - box.normalizedLeft) * size.width
-                    val h = (box.normalizedBottom - box.normalizedTop) * size.height
-
-                    drawRect(
-                        color = if (box.isBlur) Color(0x99555555) else Color(0x99000000),
-                        topLeft = Offset(x, y),
-                        size = Size(w, h)
-                    )
-                    drawRect(
-                        color = Color.Red,
-                        topLeft = Offset(x, y),
-                        size = Size(w, h),
-                        style = Stroke(width = 2.dp.toPx())
+                // Draw active stroke in progress
+                if (currentStrokePoints.isNotEmpty()) {
+                    drawStrokeOnCanvas(
+                        RedactStroke(
+                            points = currentStrokePoints,
+                            isBlur = isBlurMode,
+                            strokeWidthDp = selectedStrokeWidthDp
+                        ),
+                        size.width,
+                        size.height
                     )
                 }
             }
@@ -334,9 +348,164 @@ fun RedactScreenContent(
     }
 }
 
+private fun DrawScope.drawStrokeOnCanvas(stroke: RedactStroke, canvasW: Float, canvasH: Float) {
+    if (stroke.points.isEmpty()) return
+    val strokePx = (stroke.strokeWidthDp * (canvasW / 360f)).coerceAtLeast(8f)
+
+    if (stroke.points.size == 1) {
+        val p = stroke.points[0]
+        val center = Offset(p.normalizedX * canvasW, p.normalizedY * canvasH)
+        if (stroke.isBlur) {
+            drawCircle(
+                color = Color(0xDD333333),
+                radius = strokePx / 2f,
+                center = center
+            )
+            drawCircle(
+                color = Color(0x88FFFFFF),
+                radius = strokePx / 2f,
+                center = center,
+                style = Stroke(width = 1.5.dp.toPx())
+            )
+        } else {
+            drawCircle(
+                color = Color.Black,
+                radius = strokePx / 2f,
+                center = center
+            )
+        }
+        return
+    }
+
+    val path = Path().apply {
+        moveTo(stroke.points[0].normalizedX * canvasW, stroke.points[0].normalizedY * canvasH)
+        for (i in 1 until stroke.points.size) {
+            lineTo(stroke.points[i].normalizedX * canvasW, stroke.points[i].normalizedY * canvasH)
+        }
+    }
+
+    if (stroke.isBlur) {
+        drawPath(
+            path = path,
+            color = Color(0xEE2A2A2A),
+            style = Stroke(width = strokePx, cap = StrokeCap.Round, join = StrokeJoin.Round)
+        )
+        drawPath(
+            path = path,
+            color = Color(0x66FFFFFF),
+            style = Stroke(width = strokePx * 0.45f, cap = StrokeCap.Round, join = StrokeJoin.Round)
+        )
+    } else {
+        drawPath(
+            path = path,
+            color = Color.Black,
+            style = Stroke(width = strokePx, cap = StrokeCap.Round, join = StrokeJoin.Round)
+        )
+    }
+}
+
 /**
- * Creates a clean copy of the original bitmap and draws all redactions onto it.
+ * Creates a clean copy of the original bitmap and draws all brush strokes onto it.
  */
+fun renderRedactedBitmap(original: Bitmap, strokes: List<RedactStroke>): Bitmap {
+    val result = original.copy(Bitmap.Config.ARGB_8888, true)
+    val canvas = Canvas(result)
+    val w = original.width.toFloat()
+    val h = original.height.toFloat()
+
+    val blurStrokes = strokes.filter { it.isBlur }
+    val blackoutStrokes = strokes.filter { !it.isBlur }
+
+    // Render blur strokes via authentic pixelated mosaic
+    if (blurStrokes.isNotEmpty()) {
+        val downscaleFactor = 24
+        val smallW = (original.width / downscaleFactor).coerceAtLeast(1)
+        val smallH = (original.height / downscaleFactor).coerceAtLeast(1)
+        val smallBitmap = Bitmap.createScaledBitmap(original, smallW, smallH, false)
+        val mosaicBitmap = Bitmap.createScaledBitmap(smallBitmap, original.width, original.height, false)
+        smallBitmap.recycle()
+
+        for (stroke in blurStrokes) {
+            if (stroke.points.isEmpty()) continue
+            val strokePx = (stroke.strokeWidthDp * (w / 360f)).coerceAtLeast(10f)
+
+            if (stroke.points.size == 1) {
+                val p = stroke.points[0]
+                val path = android.graphics.Path().apply {
+                    addCircle(p.normalizedX * w, p.normalizedY * h, strokePx / 2f, android.graphics.Path.Direction.CW)
+                }
+                canvas.save()
+                canvas.clipPath(path)
+                canvas.drawBitmap(mosaicBitmap, 0f, 0f, null)
+                canvas.restore()
+                continue
+            }
+
+            val strokePath = android.graphics.Path().apply {
+                moveTo(stroke.points[0].normalizedX * w, stroke.points[0].normalizedY * h)
+                for (i in 1 until stroke.points.size) {
+                    lineTo(stroke.points[i].normalizedX * w, stroke.points[i].normalizedY * h)
+                }
+            }
+
+            val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                style = Paint.Style.STROKE
+                strokeCap = Paint.Cap.ROUND
+                strokeJoin = Paint.Join.ROUND
+                strokeWidth = strokePx
+            }
+
+            val fillPath = android.graphics.Path()
+            paint.getFillPath(strokePath, fillPath)
+
+            canvas.save()
+            canvas.clipPath(fillPath)
+            canvas.drawBitmap(mosaicBitmap, 0f, 0f, null)
+            canvas.restore()
+        }
+
+        mosaicBitmap.recycle()
+    }
+
+    // Render blackout strokes in solid black
+    for (stroke in blackoutStrokes) {
+        if (stroke.points.isEmpty()) continue
+        val strokePx = (stroke.strokeWidthDp * (w / 360f)).coerceAtLeast(10f)
+
+        if (stroke.points.size == 1) {
+            val p = stroke.points[0]
+            val circlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = android.graphics.Color.BLACK
+                style = Paint.Style.FILL
+            }
+            canvas.drawCircle(p.normalizedX * w, p.normalizedY * h, strokePx / 2f, circlePaint)
+            continue
+        }
+
+        val strokePath = android.graphics.Path().apply {
+            moveTo(stroke.points[0].normalizedX * w, stroke.points[0].normalizedY * h)
+            for (i in 1 until stroke.points.size) {
+                lineTo(stroke.points[i].normalizedX * w, stroke.points[i].normalizedY * h)
+            }
+        }
+
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = android.graphics.Color.BLACK
+            style = Paint.Style.STROKE
+            strokeCap = Paint.Cap.ROUND
+            strokeJoin = Paint.Join.ROUND
+            strokeWidth = strokePx
+        }
+        canvas.drawPath(strokePath, paint)
+    }
+
+    return result
+}
+
+/**
+ * Backwards-compatibility overload for rectangular box redaction.
+ */
+@JvmName("renderRedactedBitmapFromBoxes")
 fun renderRedactedBitmap(original: Bitmap, boxes: List<RedactBox>): Bitmap {
     val result = original.copy(Bitmap.Config.ARGB_8888, true)
     val canvas = Canvas(result)

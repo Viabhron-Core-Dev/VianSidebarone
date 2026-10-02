@@ -263,12 +263,21 @@ fun CameraCropInspectView(
 ) {
     val context = LocalContext.current
     var selectedShape by remember { mutableStateOf(SelectionShape.RECTANGLE) }
-    var startPoint by remember { mutableStateOf<Offset?>(null) }
-    var endPoint by remember { mutableStateOf<Offset?>(null) }
     var canvasSize by remember { mutableStateOf(Size.Zero) }
 
     var cropBounds by remember {
         mutableStateOf(NormalizedCropBounds(0.15f, 0.25f, 0.85f, 0.65f))
+    }
+
+    var customVertices by remember {
+        mutableStateOf(
+            listOf(
+                NormalizedPoint(0.15f, 0.25f),
+                NormalizedPoint(0.85f, 0.25f),
+                NormalizedPoint(0.85f, 0.65f),
+                NormalizedPoint(0.15f, 0.65f)
+            )
+        )
     }
 
     var scanResultDialog by remember { mutableStateOf<ScannerResult?>(null) }
@@ -290,7 +299,12 @@ fun CameraCropInspectView(
                 }
                 Button(
                     onClick = {
-                        val cropped = ScannerSelectionHelper.createCroppedBitmap(bitmap, cropBounds, selectedShape)
+                        val cropped = ScannerSelectionHelper.createCroppedBitmap(
+                            bitmap,
+                            cropBounds,
+                            selectedShape,
+                            if (selectedShape == SelectionShape.CUSTOM) customVertices else null
+                        )
                         lastCroppedDimensions = "${cropped.width}x${cropped.height} px (${selectedShape.displayName})"
                         val result = ScannerCapabilityBridge.scanBitmap(cropped)
                         scanResultDialog = result
@@ -321,25 +335,27 @@ fun CameraCropInspectView(
                 Button(
                     onClick = {
                         selectedShape = shape
-                        val sp = startPoint
-                        val ep = endPoint
-                        if (sp != null && ep != null && canvasSize.width > 0f && canvasSize.height > 0f) {
-                            cropBounds = ScannerSelectionHelper.calculateBounds(
-                                startX = sp.x,
-                                startY = sp.y,
-                                endX = ep.x,
-                                endY = ep.y,
-                                canvasWidth = canvasSize.width,
-                                canvasHeight = canvasSize.height,
-                                shape = shape
+                        if (shape == SelectionShape.CUSTOM && customVertices.size != 4) {
+                            customVertices = listOf(
+                                NormalizedPoint(cropBounds.left, cropBounds.top),
+                                NormalizedPoint(cropBounds.right, cropBounds.top),
+                                NormalizedPoint(cropBounds.right, cropBounds.bottom),
+                                NormalizedPoint(cropBounds.left, cropBounds.bottom)
                             )
+                        } else if (shape == SelectionShape.SQUARE || shape == SelectionShape.CIRCLE) {
+                            val w = cropBounds.right - cropBounds.left
+                            val h = cropBounds.bottom - cropBounds.top
+                            val side = kotlin.math.max(w, h).coerceAtLeast(0.05f)
+                            val r = (cropBounds.left + side).coerceAtMost(1f)
+                            val b = (cropBounds.top + side).coerceAtMost(1f)
+                            cropBounds = NormalizedCropBounds(cropBounds.left, cropBounds.top, r, b)
                         }
                     },
                     colors = ButtonDefaults.buttonColors(
                         containerColor = if (isSelected) MaterialTheme.colorScheme.primary else Color(0xFF333333),
                         contentColor = if (isSelected) Color.White else Color.LightGray
                     ),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
                     modifier = Modifier.height(34.dp)
                 ) {
                     Text(shape.displayName, style = MaterialTheme.typography.bodySmall)
@@ -348,10 +364,11 @@ fun CameraCropInspectView(
         }
 
         // Instructions
-        val instructionText = when {
-            startPoint == null -> "Tap anywhere to set start point, or drag across the frame."
-            endPoint == null -> "Start point set. Tap second point or drag to complete selection."
-            else -> "Mode: ${selectedShape.displayName}. Tap to start new selection or drag to reselect."
+        val instructionText = when (selectedShape) {
+            SelectionShape.CUSTOM -> "Mode: Custom Polygon. Drag corner handles to reshape vertices, drag inside to move."
+            SelectionShape.CIRCLE -> "Mode: Circle. Drag cardinal handles to resize radius, drag inside to move."
+            SelectionShape.SQUARE -> "Mode: Square. Drag corner/edge handles to resize, drag inside to move."
+            SelectionShape.RECTANGLE -> "Mode: Rectangle. Drag handles to resize, drag inside to move, or drag outside to redraw."
         }
         Text(
             text = instructionText,
@@ -375,63 +392,155 @@ fun CameraCropInspectView(
                     .onSizeChanged {
                         canvasSize = Size(it.width.toFloat(), it.height.toFloat())
                     }
-                    .pointerInput(selectedShape) {
+                    .pointerInput(selectedShape, cropBounds, customVertices) {
                         awaitEachGesture {
                             val down = awaitFirstDown()
                             val downPos = down.position
-                            var isDragging = false
-                            var currentPos = downPos
+                            val cW = size.width.toFloat()
+                            val cH = size.height.toFloat()
+                            if (cW <= 0f || cH <= 0f) return@awaitEachGesture
 
-                            // If startPoint is already set and awaiting second tap, initialStart is that anchor.
-                            // If a previous selection was already completed (endPoint != null), tapping starts fresh.
-                            val initialStart = if (endPoint == null) startPoint else null
+                            val hitThreshold = 32.dp.toPx()
+
+                            // Identify if touching any adjustment handle
+                            var activeHandle = -1 // -1: none, 0..3: custom vertices, 10..17: rect/circle handles
+                            var isMovingEntireSelection = false
+                            var isNewSelection = false
+
+                            if (selectedShape == SelectionShape.CUSTOM && customVertices.size == 4) {
+                                for (i in 0..3) {
+                                    val vx = customVertices[i].x * cW
+                                    val vy = customVertices[i].y * cH
+                                    if (kotlin.math.hypot(downPos.x - vx, downPos.y - vy) <= hitThreshold) {
+                                        activeHandle = i
+                                        break
+                                    }
+                                }
+                            } else {
+                                val leftPx = cropBounds.left * cW
+                                val topPx = cropBounds.top * cH
+                                val rightPx = cropBounds.right * cW
+                                val bottomPx = cropBounds.bottom * cH
+                                val midX = (leftPx + rightPx) / 2f
+                                val midY = (topPx + bottomPx) / 2f
+
+                                val handleMap = listOf(
+                                    10 to Offset(leftPx, topPx), // Top-Left
+                                    11 to Offset(rightPx, topPx), // Top-Right
+                                    12 to Offset(rightPx, bottomPx), // Bottom-Right
+                                    13 to Offset(leftPx, bottomPx), // Bottom-Left
+                                    14 to Offset(midX, topPx), // Top
+                                    15 to Offset(rightPx, midY), // Right
+                                    16 to Offset(midX, bottomPx), // Bottom
+                                    17 to Offset(leftPx, midY) // Left
+                                )
+
+                                for ((id, pos) in handleMap) {
+                                    if (kotlin.math.hypot(downPos.x - pos.x, downPos.y - pos.y) <= hitThreshold) {
+                                        activeHandle = id
+                                        break
+                                    }
+                                }
+                            }
+
+                            if (activeHandle == -1) {
+                                val leftPx = cropBounds.left * cW
+                                val topPx = cropBounds.top * cH
+                                val rightPx = cropBounds.right * cW
+                                val bottomPx = cropBounds.bottom * cH
+                                if (downPos.x in leftPx..rightPx && downPos.y in topPx..bottomPx) {
+                                    isMovingEntireSelection = true
+                                } else {
+                                    isNewSelection = true
+                                }
+                            }
+
+                            var lastTouchPos = downPos
 
                             while (true) {
                                 val event = awaitPointerEvent()
                                 val change = event.changes.firstOrNull() ?: break
                                 if (change.pressed) {
-                                    val dist = (change.position - downPos).getDistance()
-                                    if (dist > 15f) {
-                                        isDragging = true
-                                        change.consume()
-                                        currentPos = change.position
+                                    change.consume()
+                                    val curPos = change.position
 
-                                        val activeStart = initialStart ?: downPos
-                                        startPoint = activeStart
-                                        endPoint = currentPos
-
-                                        cropBounds = ScannerSelectionHelper.calculateBounds(
-                                            startX = activeStart.x,
-                                            startY = activeStart.y,
-                                            endX = currentPos.x,
-                                            endY = currentPos.y,
-                                            canvasWidth = size.width.toFloat(),
-                                            canvasHeight = size.height.toFloat(),
+                                    if (isNewSelection) {
+                                        val newBounds = ScannerSelectionHelper.calculateBounds(
+                                            startX = downPos.x,
+                                            startY = downPos.y,
+                                            endX = curPos.x,
+                                            endY = curPos.y,
+                                            canvasWidth = cW,
+                                            canvasHeight = cH,
                                             shape = selectedShape
                                         )
-                                    }
-                                } else {
-                                    // Pointer released
-                                    if (!isDragging) {
-                                        // Tap gesture
-                                        if (initialStart == null) {
-                                            // First tap establishes starting point
-                                            startPoint = downPos
-                                            endPoint = null
-                                        } else {
-                                            // Second tap completes the selection
-                                            endPoint = downPos
-                                            cropBounds = ScannerSelectionHelper.calculateBounds(
-                                                startX = initialStart.x,
-                                                startY = initialStart.y,
-                                                endX = downPos.x,
-                                                endY = downPos.y,
-                                                canvasWidth = size.width.toFloat(),
-                                                canvasHeight = size.height.toFloat(),
-                                                shape = selectedShape
+                                        cropBounds = newBounds
+                                        if (selectedShape == SelectionShape.CUSTOM) {
+                                            customVertices = listOf(
+                                                NormalizedPoint(newBounds.left, newBounds.top),
+                                                NormalizedPoint(newBounds.right, newBounds.top),
+                                                NormalizedPoint(newBounds.right, newBounds.bottom),
+                                                NormalizedPoint(newBounds.left, newBounds.bottom)
                                             )
                                         }
+                                    } else if (isMovingEntireSelection) {
+                                        val deltaX = (curPos.x - lastTouchPos.x) / cW
+                                        val deltaY = (curPos.y - lastTouchPos.y) / cH
+
+                                        if (selectedShape == SelectionShape.CUSTOM) {
+                                            customVertices = customVertices.map {
+                                                NormalizedPoint(
+                                                    (it.x + deltaX).coerceIn(0f, 1f),
+                                                    (it.y + deltaY).coerceIn(0f, 1f)
+                                                )
+                                            }
+                                        } else {
+                                            val bw = cropBounds.right - cropBounds.left
+                                            val bh = cropBounds.bottom - cropBounds.top
+                                            val newL = (cropBounds.left + deltaX).coerceIn(0f, 1f - bw)
+                                            val newT = (cropBounds.top + deltaY).coerceIn(0f, 1f - bh)
+                                            cropBounds = NormalizedCropBounds(newL, newT, newL + bw, newT + bh)
+                                        }
+                                    } else if (activeHandle in 0..3) {
+                                        val updated = customVertices.toMutableList()
+                                        updated[activeHandle] = NormalizedPoint(
+                                            (curPos.x / cW).coerceIn(0f, 1f),
+                                            (curPos.y / cH).coerceIn(0f, 1f)
+                                        )
+                                        customVertices = updated
+                                    } else if (activeHandle >= 10) {
+                                        var l = cropBounds.left
+                                        var t = cropBounds.top
+                                        var r = cropBounds.right
+                                        var b = cropBounds.bottom
+
+                                        val curNormX = (curPos.x / cW).coerceIn(0f, 1f)
+                                        val curNormY = (curPos.y / cH).coerceIn(0f, 1f)
+
+                                        when (activeHandle) {
+                                            10 -> { l = kotlin.math.min(curNormX, r - 0.05f); t = kotlin.math.min(curNormY, b - 0.05f) }
+                                            11 -> { r = kotlin.math.max(curNormX, l + 0.05f); t = kotlin.math.min(curNormY, b - 0.05f) }
+                                            12 -> { r = kotlin.math.max(curNormX, l + 0.05f); b = kotlin.math.max(curNormY, t + 0.05f) }
+                                            13 -> { l = kotlin.math.min(curNormX, r - 0.05f); b = kotlin.math.max(curNormY, t + 0.05f) }
+                                            14 -> { t = kotlin.math.min(curNormY, b - 0.05f) }
+                                            15 -> { r = kotlin.math.max(curNormX, l + 0.05f) }
+                                            16 -> { b = kotlin.math.max(curNormY, t + 0.05f) }
+                                            17 -> { l = kotlin.math.min(curNormX, r - 0.05f) }
+                                        }
+
+                                        if (selectedShape == SelectionShape.SQUARE || selectedShape == SelectionShape.CIRCLE) {
+                                            val wPx = (r - l) * cW
+                                            val hPx = (b - t) * cH
+                                            val sidePx = kotlin.math.max(wPx, hPx)
+                                            val normSideX = sidePx / cW
+                                            val normSideY = sidePx / cH
+                                            r = (l + normSideX).coerceAtMost(1f)
+                                            b = (t + normSideY).coerceAtMost(1f)
+                                        }
+                                        cropBounds = NormalizedCropBounds(l, t, r, b)
                                     }
+                                    lastTouchPos = curPos
+                                } else {
                                     break
                                 }
                             }
@@ -449,8 +558,39 @@ fun CameraCropInspectView(
                 val cW = (cropBounds.right - cropBounds.left) * size.width
                 val cH = (cropBounds.bottom - cropBounds.top) * size.height
 
-                if (selectedShape == SelectionShape.CIRCLE) {
-                    val radius = min(cW, cH) / 2f
+                fun drawAnchorHandle(pos: Offset) {
+                    drawCircle(color = Color.White, radius = 9.dp.toPx(), center = pos)
+                    drawCircle(color = Color(0xFF00E676), radius = 6.5.dp.toPx(), center = pos)
+                }
+
+                if (selectedShape == SelectionShape.CUSTOM && customVertices.size == 4) {
+                    val p0 = Offset(customVertices[0].x * size.width, customVertices[0].y * size.height)
+                    val p1 = Offset(customVertices[1].x * size.width, customVertices[1].y * size.height)
+                    val p2 = Offset(customVertices[2].x * size.width, customVertices[2].y * size.height)
+                    val p3 = Offset(customVertices[3].x * size.width, customVertices[3].y * size.height)
+
+                    val polyPath = Path().apply {
+                        moveTo(p0.x, p0.y)
+                        lineTo(p1.x, p1.y)
+                        lineTo(p2.x, p2.y)
+                        lineTo(p3.x, p3.y)
+                        close()
+                    }
+
+                    val cutout = Path().apply {
+                        fillType = PathFillType.EvenOdd
+                        addRect(androidx.compose.ui.geometry.Rect(0f, 0f, size.width, size.height))
+                        addPath(polyPath)
+                    }
+                    drawPath(cutout, color = Color(0x88000000))
+                    drawPath(polyPath, color = Color(0xFF00E676), style = Stroke(width = 2.dp.toPx()))
+
+                    drawAnchorHandle(p0)
+                    drawAnchorHandle(p1)
+                    drawAnchorHandle(p2)
+                    drawAnchorHandle(p3)
+                } else if (selectedShape == SelectionShape.CIRCLE) {
+                    val radius = kotlin.math.min(cW, cH) / 2f
                     val centerX = cX + radius
                     val centerY = cY + radius
 
@@ -467,6 +607,12 @@ fun CameraCropInspectView(
                         center = Offset(centerX, centerY),
                         style = Stroke(width = 2.dp.toPx())
                     )
+
+                    // Cardinal handles
+                    drawAnchorHandle(Offset(centerX, centerY - radius))
+                    drawAnchorHandle(Offset(centerX + radius, centerY))
+                    drawAnchorHandle(Offset(centerX, centerY + radius))
+                    drawAnchorHandle(Offset(centerX - radius, centerY))
                 } else {
                     // Dim areas around crop rectangle / square
                     drawRect(Color(0x88000000), Offset.Zero, Size(size.width, cY))
@@ -481,22 +627,18 @@ fun CameraCropInspectView(
                         size = Size(cW, cH),
                         style = Stroke(width = 2.dp.toPx())
                     )
-                }
 
-                // If first tap is active and awaiting second tap, render clear visual anchor target
-                val firstTap = startPoint
-                if (firstTap != null && endPoint == null) {
-                    drawCircle(
-                        color = Color(0xFF00E676),
-                        radius = 16.dp.toPx(),
-                        center = firstTap,
-                        style = Stroke(width = 2.dp.toPx())
-                    )
-                    drawCircle(
-                        color = Color(0xFF00E676),
-                        radius = 4.dp.toPx(),
-                        center = firstTap
-                    )
+                    // 4 corner handles
+                    drawAnchorHandle(Offset(cX, cY))
+                    drawAnchorHandle(Offset(cX + cW, cY))
+                    drawAnchorHandle(Offset(cX + cW, cY + cH))
+                    drawAnchorHandle(Offset(cX, cY + cH))
+
+                    // 4 edge handles
+                    drawAnchorHandle(Offset(cX + cW / 2f, cY))
+                    drawAnchorHandle(Offset(cX + cW, cY + cH / 2f))
+                    drawAnchorHandle(Offset(cX + cW / 2f, cY + cH))
+                    drawAnchorHandle(Offset(cX, cY + cH / 2f))
                 }
             }
         }
@@ -515,7 +657,12 @@ fun CameraCropInspectView(
             ) {
                 Button(
                     onClick = {
-                        val cropped = ScannerSelectionHelper.createCroppedBitmap(bitmap, cropBounds, selectedShape)
+                        val cropped = ScannerSelectionHelper.createCroppedBitmap(
+                            bitmap,
+                            cropBounds,
+                            selectedShape,
+                            if (selectedShape == SelectionShape.CUSTOM) customVertices else null
+                        )
                         ScannerSelectionHelper.shareBitmap(context, cropped)
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF333333))
