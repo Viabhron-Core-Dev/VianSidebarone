@@ -473,18 +473,7 @@ class HybridGridPageView(
                                         showWidgetPopup(elementView, parsed)
                                     }
                                     is SidebarItem.Link -> {
-                                        try {
-                                            com.example.core.LogKeeper.writeLog("HybridGrid", "Open link: ${parsed.url}")
-                                            val intent = if (parsed.url.startsWith("intent:")) {
-                                                Intent.parseUri(parsed.url, Intent.URI_INTENT_SCHEME)
-                                            } else {
-                                                Intent(Intent.ACTION_VIEW, android.net.Uri.parse(parsed.url))
-                                            }
-                                            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                            context.startActivity(intent)
-                                        } catch (e: Exception) {
-                                            com.example.core.LogKeeper.writeLog("HybridGrid", "Error opening link: ${e.message}")
-                                        }
+                                        com.example.feature.element.ElementActionDispatcher.execute(context, parsed)
                                     }
                                     is SidebarItem.QuickTile -> {
                                         com.example.core.LogKeeper.writeLog("HybridGrid", "QuickTile action: ${parsed.action}")
@@ -760,18 +749,7 @@ class HybridGridPageView(
                             popupWindow?.dismiss()
                         }
                         is SidebarItem.Link -> {
-                            try {
-                                com.example.core.LogKeeper.writeLog("HybridGrid", "Open folder link: ${parsed.url}")
-                                val intent = if (parsed.url.startsWith("intent:")) {
-                                    Intent.parseUri(parsed.url, Intent.URI_INTENT_SCHEME)
-                                } else {
-                                    Intent(Intent.ACTION_VIEW, android.net.Uri.parse(parsed.url))
-                                }
-                                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                context.startActivity(intent)
-                            } catch (e: Exception) {
-                                com.example.core.LogKeeper.writeLog("HybridGrid", "Error opening folder link: ${e.message}")
-                            }
+                            com.example.feature.element.ElementActionDispatcher.execute(context, parsed)
                             popupWindow?.dismiss()
                         }
                         is SidebarItem.QuickTile -> {

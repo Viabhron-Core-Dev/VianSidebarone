@@ -55,16 +55,8 @@ object ElementActionDispatcher {
                 }
 
                 is SidebarItem.Link -> {
-                    val url = item.url
-                    LogKeeper.log(context, TAG, "Opening link element: $url")
-                    val intent = if (url.startsWith("intent:")) {
-                        Intent.parseUri(url, Intent.URI_INTENT_SCHEME)
-                    } else {
-                        Intent(Intent.ACTION_VIEW, Uri.parse(url))
-                    }
-                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    context.startActivity(intent)
-                    true
+                    LogKeeper.log(context, TAG, "Opening link element via Custom Tab: ${item.url} (browser: ${item.browserPackage})")
+                    CustomTabLauncher.openLink(context, item.url, item.browserPackage)
                 }
 
                 is SidebarItem.QuickTile -> {

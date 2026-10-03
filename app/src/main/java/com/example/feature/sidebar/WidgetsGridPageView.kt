@@ -418,15 +418,7 @@ class WidgetsGridPageView(
                                 } else if (parsed is SidebarItem.FloatingTrigger) {
                                     com.example.feature.sidebar.SidebarManager.getInstance(context).openContainerById(parsed.targetId)
                                 } else if (parsed is SidebarItem.Link) {
-                                    try {
-                                        val intent = if (parsed.url.startsWith("intent:")) {
-                                            Intent.parseUri(parsed.url, Intent.URI_INTENT_SCHEME)
-                                        } else {
-                                            Intent(Intent.ACTION_VIEW, android.net.Uri.parse(parsed.url))
-                                        }
-                                        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                        context.startActivity(intent)
-                                    } catch (e: Exception) {}
+                                    com.example.feature.element.ElementActionDispatcher.execute(context, parsed)
                                 } else if (parsed is SidebarItem.QuickTile) {
                                     QuickTileHandler.handleQuickTileAction(context, parsed.action)
                                 } else if (parsed is SidebarItem.IntentAction) {

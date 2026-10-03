@@ -13,7 +13,9 @@ data class ElementMetadata(
     val type: String,        // "app" or "link"
     val target: String,      // Package name for apps, or URL for links
     val label: String,       // Display label
-    val iconPath: String     // Absolute path to compact WebP icon on disk
+    val iconPath: String,    // Absolute path to compact WebP icon on disk
+    val browserPackage: String? = null, // Custom Tab browser package
+    val account: String? = null         // Optional account configuration (extensible)
 ) {
     fun toJson(): JSONObject {
         return JSONObject().apply {
@@ -22,6 +24,12 @@ data class ElementMetadata(
             put("target", target)
             put("label", label)
             put("iconPath", iconPath)
+            if (!browserPackage.isNullOrEmpty()) {
+                put("browserPackage", browserPackage)
+            }
+            if (!account.isNullOrEmpty()) {
+                put("account", account)
+            }
         }
     }
 
@@ -34,7 +42,9 @@ data class ElementMetadata(
                     type = obj.getString("type"),
                     target = obj.getString("target"),
                     label = obj.getString("label"),
-                    iconPath = obj.optString("iconPath", "")
+                    iconPath = obj.optString("iconPath", ""),
+                    browserPackage = if (obj.has("browserPackage")) obj.optString("browserPackage", null) else null,
+                    account = if (obj.has("account")) obj.optString("account", null) else null
                 )
             } catch (e: Exception) {
                 null
@@ -136,17 +146,81 @@ object ElementMetadataStore {
         return metadata
     }
 
-    fun saveLinkElement(context: Context, uuid: String, url: String, label: String, elementId: String = "link:$uuid"): ElementMetadata {
+    fun saveLinkElement(
+        context: Context,
+        uuid: String,
+        url: String,
+        label: String,
+        elementId: String = "link:$uuid",
+        browserPackage: String? = null,
+        account: String? = null
+    ): ElementMetadata {
         val iconPath = IconCacheManager.captureAndSaveLinkIcon(context, uuid) ?: ""
         val metadata = ElementMetadata(
             id = elementId,
             type = "link",
             target = url,
             label = label,
-            iconPath = iconPath
+            iconPath = iconPath,
+            browserPackage = browserPackage,
+            account = account
         )
         save(context, metadata)
+        addSavedLinkId(context, uuid)
         return metadata
+    }
+
+    fun getSavedLinkIds(context: Context): List<String> {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val raw = prefs.getString("saved_link_uuids", null) ?: return emptyList()
+        return try {
+            val arr = JSONArray(raw)
+            val list = mutableListOf<String>()
+            for (i in 0 until arr.length()) {
+                val u = arr.optString(i)
+                if (!u.isNullOrEmpty() && !list.contains(u)) {
+                    list.add(u)
+                }
+            }
+            list
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    fun addSavedLinkId(context: Context, uuid: String) {
+        if (uuid.isBlank()) return
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val existing = getSavedLinkIds(context).toMutableList()
+        if (!existing.contains(uuid)) {
+            existing.add(0, uuid)
+            val arr = JSONArray()
+            existing.forEach { arr.put(it) }
+            prefs.edit().putString("saved_link_uuids", arr.toString()).apply()
+        }
+    }
+
+    fun removeSavedLinkId(context: Context, uuid: String) {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val existing = getSavedLinkIds(context).toMutableList()
+        if (existing.remove(uuid)) {
+            val arr = JSONArray()
+            existing.forEach { arr.put(it) }
+            prefs.edit().putString("saved_link_uuids", arr.toString()).apply()
+        }
+        remove(context, "link:$uuid")
+    }
+
+    fun getAllSavedLinks(context: Context): List<ElementMetadata> {
+        val ids = getSavedLinkIds(context)
+        val results = mutableListOf<ElementMetadata>()
+        for (uuid in ids) {
+            val meta = get(context, "link:$uuid")
+            if (meta != null) {
+                results.add(meta)
+            }
+        }
+        return results
     }
 
     fun remove(context: Context, id: String) {
@@ -279,6 +353,9 @@ object ElementMetadataStore {
                             iconPath = iconPath
                         )
                         save(context, meta)
+                        if (uuid.isNotEmpty()) {
+                            addSavedLinkId(context, uuid)
+                        }
                     } catch (e: Exception) {}
                 }
             }

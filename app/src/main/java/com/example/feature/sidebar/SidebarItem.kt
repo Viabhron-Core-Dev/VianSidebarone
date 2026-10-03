@@ -145,9 +145,23 @@ sealed class SidebarItem {
         val url: String,
         override val label: String,
         val iconPath: String? = null,
+        val browserPackage: String? = null,
+        val account: String? = null,
         override var id: String = "link:$uuid"
     ) : SidebarItem() {
-        constructor(uuid: String, url: String, label: String, id: String) : this(uuid, url, label, null, id)
+        constructor(uuid: String, url: String, label: String, id: String) : this(uuid, url, label, null, null, null, id)
+        constructor(uuid: String, url: String, label: String, iconPath: String?, id: String) : this(uuid, url, label, iconPath, null, null, id)
+
+        fun toSerializedId(): String {
+            val obj = org.json.JSONObject().apply {
+                put("url", url)
+                put("label", label)
+                if (!iconPath.isNullOrEmpty()) put("iconPath", iconPath)
+                if (!browserPackage.isNullOrEmpty()) put("browserPackage", browserPackage)
+                if (!account.isNullOrEmpty()) put("account", account)
+            }
+            return "link:$uuid:${obj.toString()}"
+        }
     }
 
     data class Spacer(
@@ -286,6 +300,7 @@ val ALL_UTILITIES_ACTIONS = listOf(
     SidebarItem.SystemAction("force_stop_running_apps", "Force Stop Apps", android.R.drawable.ic_menu_close_clear_cancel),
     SidebarItem.SystemAction("auto_scroll", "Auto Scroll", android.R.drawable.ic_menu_sort_by_size),
     SidebarItem.DisplayAction("blue_light_filter", "Blue Light Filter", android.R.drawable.ic_menu_view),
+    SidebarItem.DisplayAction("e_ink_mode", "E-Ink Paper Mode", com.example.R.drawable.ic_library_books),
     SidebarItem.SystemAction("log_keeper", "Log Keeper", android.R.drawable.ic_menu_agenda),
     SidebarItem.SystemAction("cursor", "Cursor", android.R.drawable.ic_menu_directions),
     SidebarItem.DisplayAction("keep_screen_on", "Keep Screen On", android.R.drawable.ic_lock_idle_alarm),

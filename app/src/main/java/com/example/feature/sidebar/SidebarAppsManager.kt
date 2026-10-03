@@ -275,6 +275,8 @@ class SidebarAppsManager(
                 icon.setColorFilter(android.graphics.Color.parseColor("#FF9900"))
             } else if (parsed.action == "privacy_curtain" && com.example.service.PrivacyCurtainManager.isEnabled) {
                 icon.setColorFilter(android.graphics.Color.parseColor("#1DB954"))
+            } else if (parsed.action == "e_ink_mode" && com.example.feature.system_hub.EInkPaperFilterManager.isEnabled) {
+                icon.setColorFilter(android.graphics.Color.parseColor("#E6C280"))
             } else {
                 icon.setColorFilter(android.graphics.Color.WHITE)
             }
@@ -585,6 +587,8 @@ class SidebarAppsManager(
                     url = meta.target,
                     label = meta.label,
                     iconPath = meta.iconPath,
+                    browserPackage = meta.browserPackage,
+                    account = meta.account,
                     id = id
                 )
             }
@@ -596,12 +600,16 @@ class SidebarAppsManager(
                 val url = obj.optString("url", "https://")
                 val label = obj.optString("label", "Link")
                 val iconPath = obj.optString("iconPath", "")
-                val savedMeta = ElementMetadataStore.saveLinkElement(context, uuid, url, label, "link:$uuid")
+                val browserPackage = if (obj.has("browserPackage")) obj.optString("browserPackage", null) else null
+                val account = if (obj.has("account")) obj.optString("account", null) else null
+                val savedMeta = ElementMetadataStore.saveLinkElement(context, uuid, url, label, "link:$uuid", browserPackage, account)
                 return SidebarItem.Link(
                     uuid = uuid,
                     url = url,
                     label = label,
                     iconPath = if (iconPath.isNotEmpty()) iconPath else savedMeta.iconPath,
+                    browserPackage = browserPackage,
+                    account = account,
                     id = id
                 )
             } catch (e: Exception) { 

@@ -11,8 +11,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.Divider
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
@@ -32,6 +32,7 @@ import com.example.core.HandleService
 import com.example.core.LogKeeper
 import com.example.feature.settings.NetSpeedSettingsScreen
 import com.example.feature.settings.PermissionManagerScreen
+import com.example.feature.settings.ScreenCapSettingsScreen
 import com.example.feature.settings.handle.HandleSettingsScreen
 
 /**
@@ -122,11 +123,17 @@ fun SettingsNavigationApp(initialRoute: String, onFinish: () -> Unit) {
                 onBack = { navigateBack() }
             )
         }
+        currentRoute == "screencap" || currentRoute == "record" -> {
+            ScreenCapSettingsScreen(
+                onBack = { navigateBack() }
+            )
+        }
         else -> {
             MainSettingsScreen(
                 onNavigateToHandles = { navigateTo("handles") },
                 onNavigateToNetSpeed = { navigateTo("netspeed") },
                 onNavigateToCallRecorder = { navigateTo("call_recorder") },
+                onNavigateToScreenCap = { navigateTo("screencap") },
                 onNavigateToPermissions = { navigateTo("permissions") },
                 onBack = onFinish
             )
@@ -140,6 +147,7 @@ fun MainSettingsScreen(
     onNavigateToHandles: () -> Unit,
     onNavigateToNetSpeed: () -> Unit,
     onNavigateToCallRecorder: () -> Unit,
+    onNavigateToScreenCap: () -> Unit,
     onNavigateToPermissions: () -> Unit,
     onBack: () -> Unit
 ) {
@@ -170,7 +178,7 @@ fun MainSettingsScreen(
                         .clickable { onNavigateToHandles() }
                         .testTag("settings_item_handles")
                 )
-                Divider()
+                HorizontalDivider()
             }
             item {
                 ListItem(
@@ -180,7 +188,7 @@ fun MainSettingsScreen(
                         .clickable { onNavigateToNetSpeed() }
                         .testTag("settings_item_netspeed")
                 )
-                Divider()
+                HorizontalDivider()
             }
             item {
                 ListItem(
@@ -190,7 +198,17 @@ fun MainSettingsScreen(
                         .clickable { onNavigateToCallRecorder() }
                         .testTag("settings_item_call_recorder")
                 )
-                Divider()
+                HorizontalDivider()
+            }
+            item {
+                ListItem(
+                    headlineContent = { Text("Record") },
+                    supportingContent = { Text("Screenshot and screen recording location") },
+                    modifier = Modifier
+                        .clickable { onNavigateToScreenCap() }
+                        .testTag("settings_item_record")
+                )
+                HorizontalDivider()
             }
 
             item {
@@ -201,7 +219,7 @@ fun MainSettingsScreen(
                         .clickable { onNavigateToPermissions() }
                         .testTag("settings_item_permissions")
                 )
-                Divider()
+                HorizontalDivider()
             }
             item {
                 ListItem(
@@ -214,7 +232,7 @@ fun MainSettingsScreen(
                         }
                         .testTag("settings_item_log_keeper")
                 )
-                Divider()
+                HorizontalDivider()
             }
         }
     }

@@ -489,19 +489,9 @@ class AppsPageView(
                 } else if (item is SidebarItem.Folder) {
                     showFolderPopup(itemView, item)
                 } else if (item is SidebarItem.Link) {
-                    try {
-                        val intent = if (item.url.startsWith("intent:")) {
-                            android.content.Intent.parseUri(item.url, android.content.Intent.URI_INTENT_SCHEME)
-                        } else {
-                            android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(item.url))
-                        }
-                        intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                        context.startActivity(intent)
-                    } catch (e: Exception) {
-                        e.printStackTrace()
-                    }
+                    com.example.feature.element.ElementActionDispatcher.execute(context, item)
                     currentFolderPopup?.dismiss()
-                        onCloseSidebar()
+                    onCloseSidebar()
                 } else if (item is SidebarItem.Widget) {
                     showWidgetPopup(itemView, item.widgetId)
                     // Do not close sidebar, just show popup
@@ -830,6 +820,8 @@ class AppsPageView(
                     icon.setColorFilter(android.graphics.Color.parseColor("#FF9900"))
                 } else if (item.action == "privacy_curtain" && com.example.service.PrivacyCurtainManager.isEnabled) {
                     icon.setColorFilter(android.graphics.Color.parseColor("#1DB954"))
+                } else if (item.action == "e_ink_mode" && com.example.feature.system_hub.EInkPaperFilterManager.isEnabled) {
+                    icon.setColorFilter(android.graphics.Color.parseColor("#E6C280"))
                 } else {
                     icon.setColorFilter(android.graphics.Color.WHITE)
                 }

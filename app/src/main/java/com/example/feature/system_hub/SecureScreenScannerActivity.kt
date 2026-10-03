@@ -30,11 +30,14 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathFillType
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
@@ -122,15 +125,9 @@ fun SecureScreenScannerContent(
     }
 
     var customVertices by remember {
-        mutableStateOf(
-            listOf(
-                NormalizedPoint(0.15f, 0.25f),
-                NormalizedPoint(0.85f, 0.25f),
-                NormalizedPoint(0.85f, 0.65f),
-                NormalizedPoint(0.15f, 0.65f)
-            )
-        )
+        mutableStateOf<List<NormalizedPoint>>(emptyList())
     }
+    var isPolygonClosed by remember { mutableStateOf(false) }
 
     var scanResultDialog by remember { mutableStateOf<ScannerResult?>(null) }
     var lastCroppedDimensions by remember { mutableStateOf("") }
@@ -147,13 +144,12 @@ fun SecureScreenScannerContent(
             },
             actions = {
                 IconButton(onClick = {
-                    cropBounds = NormalizedCropBounds(0.15f, 0.25f, 0.85f, 0.65f)
-                    customVertices = listOf(
-                        NormalizedPoint(0.15f, 0.25f),
-                        NormalizedPoint(0.85f, 0.25f),
-                        NormalizedPoint(0.85f, 0.65f),
-                        NormalizedPoint(0.15f, 0.65f)
-                    )
+                    if (selectedShape == SelectionShape.CUSTOM) {
+                        customVertices = emptyList()
+                        isPolygonClosed = false
+                    } else {
+                        cropBounds = NormalizedCropBounds(0.15f, 0.25f, 0.85f, 0.65f)
+                    }
                 }) {
                     Icon(Icons.Default.Refresh, contentDescription = "Reset Selection", tint = Color.White)
                 }
@@ -163,12 +159,13 @@ fun SecureScreenScannerContent(
                             originalBitmap,
                             cropBounds,
                             selectedShape,
-                            if (selectedShape == SelectionShape.CUSTOM) customVertices else null
+                            if (selectedShape == SelectionShape.CUSTOM && isPolygonClosed && customVertices.size >= 3) customVertices else null
                         )
                         lastCroppedDimensions = "${cropped.width}x${cropped.height} px (${selectedShape.displayName})"
                         val result = ScannerCapabilityBridge.scanBitmap(cropped)
                         scanResultDialog = result
                     },
+                    enabled = if (selectedShape == SelectionShape.CUSTOM) (isPolygonClosed && customVertices.size >= 3) else true,
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
                     modifier = Modifier.padding(end = 8.dp)
                 ) {
@@ -195,13 +192,9 @@ fun SecureScreenScannerContent(
                 Button(
                     onClick = {
                         selectedShape = shape
-                        if (shape == SelectionShape.CUSTOM && customVertices.size != 4) {
-                            customVertices = listOf(
-                                NormalizedPoint(cropBounds.left, cropBounds.top),
-                                NormalizedPoint(cropBounds.right, cropBounds.top),
-                                NormalizedPoint(cropBounds.right, cropBounds.bottom),
-                                NormalizedPoint(cropBounds.left, cropBounds.bottom)
-                            )
+                        if (shape == SelectionShape.CUSTOM) {
+                            customVertices = emptyList()
+                            isPolygonClosed = false
                         } else if (shape == SelectionShape.SQUARE || shape == SelectionShape.CIRCLE) {
                             val w = cropBounds.right - cropBounds.left
                             val h = cropBounds.bottom - cropBounds.top
@@ -216,7 +209,9 @@ fun SecureScreenScannerContent(
                         contentColor = if (isSelected) Color.White else Color.LightGray
                     ),
                     contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                    modifier = Modifier.height(34.dp)
+                    modifier = Modifier
+                        .height(34.dp)
+                        .testTag("scanner_shape_${shape.name.lowercase()}")
                 ) {
                     Text(shape.displayName, style = MaterialTheme.typography.bodySmall)
                 }
@@ -225,7 +220,19 @@ fun SecureScreenScannerContent(
 
         // Instructions
         val instructionText = when (selectedShape) {
-            SelectionShape.CUSTOM -> "Mode: Custom Polygon. Drag corner handles to reshape vertices, drag inside to move."
+            SelectionShape.CUSTOM -> {
+                if (!isPolygonClosed) {
+                    if (customVertices.isEmpty()) {
+                        "Mode: Custom Polygon. Tap screen to place Point 1."
+                    } else if (customVertices.size < 3) {
+                        "Tap to place next point (${customVertices.size} placed)."
+                    } else {
+                        "Tap first point (yellow ring) or 'Join Shape' to close area."
+                    }
+                } else {
+                    "Mode: Custom Polygon. Drag corner handles to reshape, or drag inside to move."
+                }
+            }
             SelectionShape.CIRCLE -> "Mode: Circle. Drag cardinal handles to resize radius, drag inside to move."
             SelectionShape.SQUARE -> "Mode: Square. Drag corner/edge handles to resize, drag inside to move."
             SelectionShape.RECTANGLE -> "Mode: Rectangle. Drag handles to resize, drag inside to move, or drag outside to redraw."
@@ -252,7 +259,7 @@ fun SecureScreenScannerContent(
                     .onSizeChanged {
                         canvasSize = Size(it.width.toFloat(), it.height.toFloat())
                     }
-                    .pointerInput(selectedShape, cropBounds, customVertices) {
+                    .pointerInput(selectedShape, cropBounds, isPolygonClosed) {
                         awaitEachGesture {
                             val down = awaitFirstDown()
                             val downPos = down.position
@@ -260,54 +267,128 @@ fun SecureScreenScannerContent(
                             val cH = size.height.toFloat()
                             if (cW <= 0f || cH <= 0f) return@awaitEachGesture
 
-                            val hitThreshold = 32.dp.toPx()
+                            if (selectedShape == SelectionShape.CUSTOM) {
+                                if (!isPolygonClosed) {
+                                    // Tap detection for vertex creation
+                                    var isDrag = false
+                                    while (true) {
+                                        val event = awaitPointerEvent()
+                                        val change = event.changes.firstOrNull() ?: break
+                                        if (change.pressed) {
+                                            if (kotlin.math.hypot(change.position.x - downPos.x, change.position.y - downPos.y) > 28.dp.toPx()) {
+                                                isDrag = true
+                                            }
+                                            change.consume()
+                                        } else {
+                                            break
+                                        }
+                                    }
 
-                            // Identify if touching any adjustment handle
-                            var activeHandle = -1 // -1: none, 0..3: custom vertices, 10..17: rect/circle handles
+                                    if (!isDrag) {
+                                        // If >= 3 points and tap is close to Point 0 -> close polygon
+                                        if (customVertices.size >= 3) {
+                                            val p0 = Offset(customVertices[0].x * cW, customVertices[0].y * cH)
+                                            if (kotlin.math.hypot(downPos.x - p0.x, downPos.y - p0.y) <= 44.dp.toPx()) {
+                                                isPolygonClosed = true
+                                                return@awaitEachGesture
+                                            }
+                                        }
+                                        customVertices = customVertices + NormalizedPoint(
+                                            (downPos.x / cW).coerceIn(0f, 1f),
+                                            (downPos.y / cH).coerceIn(0f, 1f)
+                                        )
+                                    }
+                                    return@awaitEachGesture
+                                } else {
+                                    // Polygon is closed: drag handles or move polygon
+                                    val hitThreshold = 32.dp.toPx()
+                                    var activeHandle = -1
+                                    for (i in customVertices.indices) {
+                                        val vx = customVertices[i].x * cW
+                                        val vy = customVertices[i].y * cH
+                                        if (kotlin.math.hypot(downPos.x - vx, downPos.y - vy) <= hitThreshold) {
+                                            activeHandle = i
+                                            break
+                                        }
+                                    }
+
+                                    var isMovingEntireSelection = false
+                                    if (activeHandle == -1) {
+                                        val minX = customVertices.minOf { it.x } * cW
+                                        val maxX = customVertices.maxOf { it.x } * cW
+                                        val minY = customVertices.minOf { it.y } * cH
+                                        val maxY = customVertices.maxOf { it.y } * cH
+                                        if (downPos.x in minX..maxX && downPos.y in minY..maxY) {
+                                            isMovingEntireSelection = true
+                                        }
+                                    }
+
+                                    var lastTouchPos = downPos
+                                    while (true) {
+                                        val event = awaitPointerEvent()
+                                        val change = event.changes.firstOrNull() ?: break
+                                        if (change.pressed) {
+                                            change.consume()
+                                            val curPos = change.position
+
+                                            if (activeHandle in customVertices.indices) {
+                                                val updated = customVertices.toMutableList()
+                                                updated[activeHandle] = NormalizedPoint(
+                                                    (curPos.x / cW).coerceIn(0f, 1f),
+                                                    (curPos.y / cH).coerceIn(0f, 1f)
+                                                )
+                                                customVertices = updated
+                                            } else if (isMovingEntireSelection) {
+                                                val deltaX = (curPos.x - lastTouchPos.x) / cW
+                                                val deltaY = (curPos.y - lastTouchPos.y) / cH
+                                                customVertices = customVertices.map {
+                                                    NormalizedPoint(
+                                                        (it.x + deltaX).coerceIn(0f, 1f),
+                                                        (it.y + deltaY).coerceIn(0f, 1f)
+                                                    )
+                                                }
+                                            }
+                                            lastTouchPos = curPos
+                                        } else {
+                                            break
+                                        }
+                                    }
+                                    return@awaitEachGesture
+                                }
+                            }
+
+                            // Standard shapes (Rectangle, Square, Circle)
+                            val hitThreshold = 32.dp.toPx()
+                            var activeHandle = -1
                             var isMovingEntireSelection = false
                             var isNewSelection = false
 
-                            if (selectedShape == SelectionShape.CUSTOM && customVertices.size == 4) {
-                                for (i in 0..3) {
-                                    val vx = customVertices[i].x * cW
-                                    val vy = customVertices[i].y * cH
-                                    if (kotlin.math.hypot(downPos.x - vx, downPos.y - vy) <= hitThreshold) {
-                                        activeHandle = i
-                                        break
-                                    }
-                                }
-                            } else {
-                                val leftPx = cropBounds.left * cW
-                                val topPx = cropBounds.top * cH
-                                val rightPx = cropBounds.right * cW
-                                val bottomPx = cropBounds.bottom * cH
-                                val midX = (leftPx + rightPx) / 2f
-                                val midY = (topPx + bottomPx) / 2f
+                            val leftPx = cropBounds.left * cW
+                            val topPx = cropBounds.top * cH
+                            val rightPx = cropBounds.right * cW
+                            val bottomPx = cropBounds.bottom * cH
+                            val midX = (leftPx + rightPx) / 2f
+                            val midY = (topPx + bottomPx) / 2f
 
-                                val handleMap = listOf(
-                                    10 to Offset(leftPx, topPx), // Top-Left
-                                    11 to Offset(rightPx, topPx), // Top-Right
-                                    12 to Offset(rightPx, bottomPx), // Bottom-Right
-                                    13 to Offset(leftPx, bottomPx), // Bottom-Left
-                                    14 to Offset(midX, topPx), // Top
-                                    15 to Offset(rightPx, midY), // Right
-                                    16 to Offset(midX, bottomPx), // Bottom
-                                    17 to Offset(leftPx, midY) // Left
-                                )
+                            val handleMap = listOf(
+                                10 to Offset(leftPx, topPx), // Top-Left
+                                11 to Offset(rightPx, topPx), // Top-Right
+                                12 to Offset(rightPx, bottomPx), // Bottom-Right
+                                13 to Offset(leftPx, bottomPx), // Bottom-Left
+                                14 to Offset(midX, topPx), // Top
+                                15 to Offset(rightPx, midY), // Right
+                                16 to Offset(midX, bottomPx), // Bottom
+                                17 to Offset(leftPx, midY) // Left
+                            )
 
-                                for ((id, pos) in handleMap) {
-                                    if (kotlin.math.hypot(downPos.x - pos.x, downPos.y - pos.y) <= hitThreshold) {
-                                        activeHandle = id
-                                        break
-                                    }
+                            for ((id, pos) in handleMap) {
+                                if (kotlin.math.hypot(downPos.x - pos.x, downPos.y - pos.y) <= hitThreshold) {
+                                    activeHandle = id
+                                    break
                                 }
                             }
 
                             if (activeHandle == -1) {
-                                val leftPx = cropBounds.left * cW
-                                val topPx = cropBounds.top * cH
-                                val rightPx = cropBounds.right * cW
-                                val bottomPx = cropBounds.bottom * cH
                                 if (downPos.x in leftPx..rightPx && downPos.y in topPx..bottomPx) {
                                     isMovingEntireSelection = true
                                 } else {
@@ -335,39 +416,14 @@ fun SecureScreenScannerContent(
                                             shape = selectedShape
                                         )
                                         cropBounds = newBounds
-                                        if (selectedShape == SelectionShape.CUSTOM) {
-                                            customVertices = listOf(
-                                                NormalizedPoint(newBounds.left, newBounds.top),
-                                                NormalizedPoint(newBounds.right, newBounds.top),
-                                                NormalizedPoint(newBounds.right, newBounds.bottom),
-                                                NormalizedPoint(newBounds.left, newBounds.bottom)
-                                            )
-                                        }
                                     } else if (isMovingEntireSelection) {
                                         val deltaX = (curPos.x - lastTouchPos.x) / cW
                                         val deltaY = (curPos.y - lastTouchPos.y) / cH
-
-                                        if (selectedShape == SelectionShape.CUSTOM) {
-                                            customVertices = customVertices.map {
-                                                NormalizedPoint(
-                                                    (it.x + deltaX).coerceIn(0f, 1f),
-                                                    (it.y + deltaY).coerceIn(0f, 1f)
-                                                )
-                                            }
-                                        } else {
-                                            val bw = cropBounds.right - cropBounds.left
-                                            val bh = cropBounds.bottom - cropBounds.top
-                                            val newL = (cropBounds.left + deltaX).coerceIn(0f, 1f - bw)
-                                            val newT = (cropBounds.top + deltaY).coerceIn(0f, 1f - bh)
-                                            cropBounds = NormalizedCropBounds(newL, newT, newL + bw, newT + bh)
-                                        }
-                                    } else if (activeHandle in 0..3) {
-                                        val updated = customVertices.toMutableList()
-                                        updated[activeHandle] = NormalizedPoint(
-                                            (curPos.x / cW).coerceIn(0f, 1f),
-                                            (curPos.y / cH).coerceIn(0f, 1f)
-                                        )
-                                        customVertices = updated
+                                        val bw = cropBounds.right - cropBounds.left
+                                        val bh = cropBounds.bottom - cropBounds.top
+                                        val newL = (cropBounds.left + deltaX).coerceIn(0f, 1f - bw)
+                                        val newT = (cropBounds.top + deltaY).coerceIn(0f, 1f - bh)
+                                        cropBounds = NormalizedCropBounds(newL, newT, newL + bw, newT + bh)
                                     } else if (activeHandle >= 10) {
                                         var l = cropBounds.left
                                         var t = cropBounds.top
@@ -424,32 +480,67 @@ fun SecureScreenScannerContent(
                     drawCircle(color = Color(0xFF00E676), radius = 6.5.dp.toPx(), center = pos)
                 }
 
-                if (selectedShape == SelectionShape.CUSTOM && customVertices.size == 4) {
-                    val p0 = Offset(customVertices[0].x * size.width, customVertices[0].y * size.height)
-                    val p1 = Offset(customVertices[1].x * size.width, customVertices[1].y * size.height)
-                    val p2 = Offset(customVertices[2].x * size.width, customVertices[2].y * size.height)
-                    val p3 = Offset(customVertices[3].x * size.width, customVertices[3].y * size.height)
+                if (selectedShape == SelectionShape.CUSTOM) {
+                    if (!isPolygonClosed) {
+                        // Draw unclosed path connecting points
+                        if (customVertices.size >= 2) {
+                            val unclosedPath = Path().apply {
+                                val p0 = Offset(customVertices[0].x * size.width, customVertices[0].y * size.height)
+                                moveTo(p0.x, p0.y)
+                                for (i in 1 until customVertices.size) {
+                                    val pi = Offset(customVertices[i].x * size.width, customVertices[i].y * size.height)
+                                    lineTo(pi.x, pi.y)
+                                }
+                            }
+                            drawPath(
+                                path = unclosedPath,
+                                color = Color(0xFF00E676),
+                                style = Stroke(width = 2.5.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
+                            )
+                        }
 
-                    val polyPath = Path().apply {
-                        moveTo(p0.x, p0.y)
-                        lineTo(p1.x, p1.y)
-                        lineTo(p2.x, p2.y)
-                        lineTo(p3.x, p3.y)
-                        close()
+                        // Draw vertex dots
+                        for (i in customVertices.indices) {
+                            val pos = Offset(customVertices[i].x * size.width, customVertices[i].y * size.height)
+                            if (i == 0) {
+                                drawCircle(color = Color(0xFF00E676), radius = 10.dp.toPx(), center = pos)
+                                drawCircle(color = Color.White, radius = 6.dp.toPx(), center = pos)
+                                if (customVertices.size >= 3) {
+                                    drawCircle(
+                                        color = Color(0xFFFFCC00),
+                                        radius = 16.dp.toPx(),
+                                        center = pos,
+                                        style = Stroke(width = 2.dp.toPx())
+                                    )
+                                }
+                            } else {
+                                drawCircle(color = Color.White, radius = 6.dp.toPx(), center = pos)
+                                drawCircle(color = Color(0xFF00E676), radius = 4.dp.toPx(), center = pos)
+                            }
+                        }
+                    } else if (customVertices.size >= 3) {
+                        val polyPath = Path().apply {
+                            val p0 = Offset(customVertices[0].x * size.width, customVertices[0].y * size.height)
+                            moveTo(p0.x, p0.y)
+                            for (i in 1 until customVertices.size) {
+                                val pi = Offset(customVertices[i].x * size.width, customVertices[i].y * size.height)
+                                lineTo(pi.x, pi.y)
+                            }
+                            close()
+                        }
+
+                        val cutout = Path().apply {
+                            fillType = PathFillType.EvenOdd
+                            addRect(androidx.compose.ui.geometry.Rect(0f, 0f, size.width, size.height))
+                            addPath(polyPath)
+                        }
+                        drawPath(cutout, color = Color(0x88000000))
+                        drawPath(polyPath, color = Color(0xFF00E676), style = Stroke(width = 2.dp.toPx()))
+
+                        for (v in customVertices) {
+                            drawAnchorHandle(Offset(v.x * size.width, v.y * size.height))
+                        }
                     }
-
-                    val cutout = Path().apply {
-                        fillType = PathFillType.EvenOdd
-                        addRect(androidx.compose.ui.geometry.Rect(0f, 0f, size.width, size.height))
-                        addPath(polyPath)
-                    }
-                    drawPath(cutout, color = Color(0x88000000))
-                    drawPath(polyPath, color = Color(0xFF00E676), style = Stroke(width = 2.dp.toPx()))
-
-                    drawAnchorHandle(p0)
-                    drawAnchorHandle(p1)
-                    drawAnchorHandle(p2)
-                    drawAnchorHandle(p3)
                 } else if (selectedShape == SelectionShape.CIRCLE) {
                     val radius = kotlin.math.min(cW, cH) / 2f
                     val centerX = cX + radius
@@ -502,6 +593,73 @@ fun SecureScreenScannerContent(
                     drawAnchorHandle(Offset(cX, cY + cH / 2f))
                 }
             }
+
+            // Custom polygon action buttons pill overlaid on canvas
+            if (selectedShape == SelectionShape.CUSTOM) {
+                Row(
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(top = 10.dp)
+                        .background(Color(0xDD1E1E1E), androidx.compose.foundation.shape.RoundedCornerShape(16.dp))
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (!isPolygonClosed) {
+                        Text(
+                            text = if (customVertices.isEmpty()) "Tap screen to mark area" else "${customVertices.size} points placed",
+                            color = Color.White,
+                            style = MaterialTheme.typography.labelSmall
+                        )
+                        if (customVertices.size >= 3) {
+                            Button(
+                                onClick = { isPolygonClosed = true },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E676), contentColor = Color.Black),
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                                modifier = Modifier
+                                    .height(28.dp)
+                                    .testTag("scanner_custom_join_button")
+                            ) {
+                                Text("Join & Close", style = MaterialTheme.typography.labelSmall)
+                            }
+                        }
+                        if (customVertices.isNotEmpty()) {
+                            Button(
+                                onClick = {
+                                    customVertices = emptyList()
+                                    isPolygonClosed = false
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF444444), contentColor = Color.White),
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                modifier = Modifier
+                                    .height(28.dp)
+                                    .testTag("scanner_custom_reset_button")
+                            ) {
+                                Text("Reset", style = MaterialTheme.typography.labelSmall)
+                            }
+                        }
+                    } else {
+                        Text(
+                            text = "Area Marked (${customVertices.size} corners)",
+                            color = Color(0xFF00E676),
+                            style = MaterialTheme.typography.labelSmall
+                        )
+                        Button(
+                            onClick = {
+                                customVertices = emptyList()
+                                isPolygonClosed = false
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF444444), contentColor = Color.White),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                            modifier = Modifier
+                                .height(28.dp)
+                                .testTag("scanner_custom_redraw_button")
+                        ) {
+                            Text("Redraw", style = MaterialTheme.typography.labelSmall)
+                        }
+                    }
+                }
+            }
         }
 
         // Dedicated Post-Selection Action Bar (Share, QR Code, OCR)
@@ -522,10 +680,11 @@ fun SecureScreenScannerContent(
                             originalBitmap,
                             cropBounds,
                             selectedShape,
-                            if (selectedShape == SelectionShape.CUSTOM) customVertices else null
+                            if (selectedShape == SelectionShape.CUSTOM && isPolygonClosed && customVertices.size >= 3) customVertices else null
                         )
                         ScannerSelectionHelper.shareBitmap(context, cropped)
                     },
+                    enabled = if (selectedShape == SelectionShape.CUSTOM) (isPolygonClosed && customVertices.size >= 3) else true,
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF333333))
                 ) {
                     Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(18.dp))

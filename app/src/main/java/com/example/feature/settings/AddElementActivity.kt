@@ -181,35 +181,7 @@ class AddElementActivity : ComponentActivity() {
                 .show()
         }
         addItem(android.R.drawable.ic_menu_set_as, "Link") {
-            val layout = LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL
-            }
-            val titleInput = android.widget.EditText(this).apply {
-                hint = "Title (e.g. Google)"
-            }
-            val urlInput = android.widget.EditText(this).apply {
-                hint = "URL (e.g. https://google.com)"
-            }
-            layout.addView(titleInput)
-            layout.addView(urlInput)
-            
-            android.app.AlertDialog.Builder(this)
-                .setTitle("Add Link")
-                .setView(layout)
-                .setPositiveButton("OK") { _, _ ->
-                    val titleStr = titleInput.text.toString().takeIf { it.isNotEmpty() } ?: "Link"
-                    val urlStr = urlInput.text.toString().takeIf { it.isNotEmpty() } ?: "https://"
-                    val uuid = java.util.UUID.randomUUID().toString()
-                    val meta = com.example.feature.sidebar.ElementMetadataStore.saveLinkElement(this, uuid, urlStr, titleStr)
-                    val linkJson = JSONObject().apply {
-                        put("url", urlStr)
-                        put("label", titleStr)
-                        put("iconPath", meta.iconPath)
-                    }
-                    finishWithId("link:$uuid:${linkJson.toString()}")
-                }
-                .setNegativeButton("Cancel", null)
-                .show()
+            startActivityForResult(Intent(this, LinkPickerActivity::class.java), 302)
         }
         addItem(android.R.drawable.ic_menu_close_clear_cancel, "Empty item") {
             val uuid = java.util.UUID.randomUUID().toString()

@@ -44,6 +44,9 @@
         <intent>
             <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
         </intent>
+        <intent>
+            <action android:name="android.support.customtabs.action.CustomTabsService" />
+        </intent>
     </queries>
 
     <application
@@ -97,6 +100,7 @@
         <activity android:name=".feature.settings.ShortcutPickerActivity" android:exported="false" />
         <activity android:name=".feature.settings.IntentPickerActivity" android:exported="false" />
         <activity android:name=".feature.settings.ActionPickerActivity" android:exported="false" />
+        <activity android:name=".feature.settings.LinkPickerActivity" android:exported="false" />
         <activity android:name=".feature.settings.TagManagementActivity" android:exported="false" />
         <activity android:name=".feature.sidebar.ScreenRecordActivity" android:exported="false" />
         <activity
