@@ -30,6 +30,9 @@ class AppPickerActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
+        val pageId = intent.getStringExtra("PAGE_ID")
+        val isHybridGrid = intent.getBooleanExtra("IS_HYBRID_GRID", false)
+
         val layout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
@@ -37,15 +40,33 @@ class AppPickerActivity : ComponentActivity() {
             setPadding(16, 16, 16, 16)
         }
         
+        val toolbar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, 0, 0, 16)
+        }
+
+        val backIcon = ImageView(this).apply {
+            setImageResource(android.R.drawable.ic_menu_revert)
+            setColorFilter(Color.WHITE)
+            layoutParams = LinearLayout.LayoutParams(72, 72).apply { marginEnd = 24 }
+            isClickable = true
+            isFocusable = true
+            setOnClickListener { finish() }
+        }
+
         val title = TextView(this).apply {
             text = "Select App"
             setTextColor(Color.WHITE)
             textSize = 20f
-            gravity = Gravity.CENTER
-            setPadding(0, 0, 0, 16)
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
         }
 
-        layout.addView(title)
+        toolbar.addView(backIcon)
+        toolbar.addView(title)
+        layout.addView(toolbar)
         
         val list = ListView(this).apply {
             setBackgroundColor(Color.parseColor("#222222"))
@@ -152,9 +173,19 @@ class AppPickerActivity : ComponentActivity() {
                         app.packageName,
                         app.label
                     )
-                    val resultIntent = Intent().apply { putExtra("ELEMENT_ID", "app:${app.packageName}") }
-                    setResult(Activity.RESULT_OK, resultIntent)
-                    finish()
+                    val elementId = "app:${app.packageName}"
+                    if (isHybridGrid && !pageId.isNullOrEmpty()) {
+                        com.example.feature.element.ElementPlacementHelper.addElementToHybridGrid(
+                            this@AppPickerActivity,
+                            pageId,
+                            elementId
+                        )
+                        android.widget.Toast.makeText(this@AppPickerActivity, "Added: ${app.label}", android.widget.Toast.LENGTH_SHORT).show()
+                    } else {
+                        val resultIntent = Intent().apply { putExtra("ELEMENT_ID", elementId) }
+                        setResult(Activity.RESULT_OK, resultIntent)
+                        finish()
+                    }
                 }
             }
         }

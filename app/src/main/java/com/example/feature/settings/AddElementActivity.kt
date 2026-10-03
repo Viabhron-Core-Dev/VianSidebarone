@@ -125,9 +125,18 @@ class AddElementActivity : ComponentActivity() {
             contentLayout.addView(divider)
         }
         
+        val pageId = intent.getStringExtra("PAGE_ID")
+        val isHybridGrid = intent.getBooleanExtra("IS_HYBRID_GRID", false)
+        val pageType = intent.getStringExtra("PAGE_TYPE")
+
         addHeader("Default actions")
         addItem(android.R.drawable.ic_menu_agenda, "App") {
-            startActivityForResult(Intent(this, AppPickerActivity::class.java), 200)
+            val appIntent = Intent(this, AppPickerActivity::class.java).apply {
+                putExtra("PAGE_ID", pageId)
+                putExtra("IS_HYBRID_GRID", isHybridGrid)
+                putExtra("PAGE_TYPE", pageType)
+            }
+            startActivityForResult(appIntent, 200)
         }
         addItem(android.R.drawable.ic_menu_share, "Shortcut") {
             startActivityForResult(Intent(this, ShortcutPickerActivity::class.java), 300)
@@ -173,22 +182,29 @@ class AddElementActivity : ComponentActivity() {
                                 put("popupColumns", 3)
                                 put("popupRows", 3)
                             }
-                            finishWithId("folder:$uuid:${folderJson.toString()}")
+                            val folderId = "folder:$uuid:${folderJson.toString()}"
+                            handleElementSelected(folderId, folderName)
                         }
                         .setNegativeButton("Cancel", null)
                         .show()
                 }
                 .show()
         }
-        addItem(android.R.drawable.ic_menu_set_as, "Link") {
-            startActivityForResult(Intent(this, LinkPickerActivity::class.java), 302)
+        addItem(com.example.R.drawable.ic_language, "Link") {
+            val linkIntent = Intent(this, LinkPickerActivity::class.java).apply {
+                putExtra("PAGE_ID", pageId)
+                putExtra("IS_HYBRID_GRID", isHybridGrid)
+                putExtra("PAGE_TYPE", pageType)
+            }
+            startActivityForResult(linkIntent, 302)
         }
         addItem(android.R.drawable.ic_menu_close_clear_cancel, "Empty item") {
             val uuid = java.util.UUID.randomUUID().toString()
             val spacerJson = JSONObject().apply {
                 put("heightDp", 56)
             }
-            finishWithId("spacer:$uuid:${spacerJson.toString()}")
+            val spacerId = "spacer:$uuid:${spacerJson.toString()}"
+            handleElementSelected(spacerId, "Spacer")
         }
         
         addHeader("Android actions")
@@ -196,6 +212,9 @@ class AddElementActivity : ComponentActivity() {
             val intent = Intent(this, ActionPickerActivity::class.java).apply {
                 putExtra("CATEGORY", category)
                 putExtra("TITLE", title)
+                putExtra("PAGE_ID", pageId)
+                putExtra("IS_HYBRID_GRID", isHybridGrid)
+                putExtra("PAGE_TYPE", pageType)
             }
             startActivityForResult(intent, 500)
         }
@@ -219,20 +238,20 @@ class AddElementActivity : ComponentActivity() {
             }
         }
         addItem(android.R.drawable.ic_menu_gallery, "Hybrid Grid") {
-            finishWithId("system:hybrid_grid_floating")
+            handleElementSelected("system:hybrid_grid_floating", "Hybrid Grid")
         }
 
         addItem(com.example.R.drawable.ic_library_books, "eBook Reader") {
-            finishWithId("system:ebook_reader")
+            handleElementSelected("system:ebook_reader", "eBook Reader")
         }
         addItem(android.R.drawable.ic_menu_sort_alphabetically, "Dictionary") {
-            finishWithId("system:dictionary_floating")
+            handleElementSelected("system:dictionary_floating", "Dictionary")
         }
         addItem(android.R.drawable.ic_menu_compass, "Cursor Trackpad") {
-            finishWithId("system:cursor")
+            handleElementSelected("system:cursor", "Cursor Trackpad")
         }
         addItem(android.R.drawable.ic_menu_edit, "Work Notes") {
-            finishWithId("system:work_notes")
+            handleElementSelected("system:work_notes", "Work Notes")
         }
         addItem(android.R.drawable.ic_menu_add, "PWA Loader") {
 //             startActivityForResult(Intent(this, PwaPickerActivity::class.java), 800)
@@ -245,6 +264,35 @@ class AddElementActivity : ComponentActivity() {
         mainLayout.addView(scrollView)
         
         setContentView(mainLayout)
+    }
+
+    private fun handleElementSelected(id: String, displayName: String? = null) {
+        val pageId = intent.getStringExtra("PAGE_ID")
+        val isHybridGrid = intent.getBooleanExtra("IS_HYBRID_GRID", false)
+        if (isHybridGrid && !pageId.isNullOrEmpty()) {
+            val cols = if (id.startsWith("widget:") || id.startsWith("popup_widget:")) 2 else 1
+            val rows = if (id.startsWith("widget:") || id.startsWith("popup_widget:")) 2 else 1
+            com.example.feature.element.ElementPlacementHelper.addElementToHybridGrid(
+                this,
+                pageId,
+                id,
+                cols = cols,
+                rows = rows
+            )
+            val name = displayName ?: when {
+                id.startsWith("app:") -> id.removePrefix("app:")
+                id.startsWith("link:") -> "Link"
+                id.startsWith("system:") -> id.removePrefix("system:").replace("_", " ").replaceFirstChar { it.uppercase() }
+                id.startsWith("widget:") -> "Widget"
+                id.startsWith("popup_widget:") -> "Popup Widget"
+                id.startsWith("folder:") -> "Folder"
+                id.startsWith("spacer:") -> "Spacer"
+                else -> "Element"
+            }
+            android.widget.Toast.makeText(this, "Added: $name", android.widget.Toast.LENGTH_SHORT).show()
+        } else {
+            finishWithId(id)
+        }
     }
     
     private fun finishWithId(id: String) {
@@ -272,13 +320,14 @@ class AddElementActivity : ComponentActivity() {
         if (resultCode == Activity.RESULT_OK && data != null) {
             val id = data.getStringExtra("ELEMENT_ID")
             if (id != null) {
-                if (requestCode == 500 && id.startsWith("widget:")) {
-                    finishWithId("popup_widget:" + id.removePrefix("widget:"))
+                val finalId = if (requestCode == 500 && id.startsWith("widget:")) {
+                    "popup_widget:" + id.removePrefix("widget:")
                 } else if (requestCode == 700) {
-                    finishWithId("floating_trigger:$id")
+                    "floating_trigger:$id"
                 } else {
-                    finishWithId(id)
+                    id
                 }
+                handleElementSelected(finalId)
             } else {
                 com.example.core.LogKeeper.writeLog("AddElementActivity", "ELEMENT_ID was null in data!")
             }

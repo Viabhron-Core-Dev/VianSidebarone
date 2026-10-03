@@ -173,18 +173,56 @@ object ScannerSelectionHelper {
      */
     fun shareBitmap(context: Context, bitmap: Bitmap) {
         try {
-            val shareFile = File(context.cacheDir, "scan_share_${System.currentTimeMillis()}.png")
+            if (bitmap.isRecycled || bitmap.width <= 0 || bitmap.height <= 0) {
+                com.example.core.LogKeeper.writeLog("ScannerSelectionHelper", "Share error: invalid bitmap")
+                Toast.makeText(context, "No valid selection to share", Toast.LENGTH_SHORT).show()
+                return
+            }
+
+            val sharesDir = File(context.cacheDir, "scanner_shares")
+            if (!sharesDir.exists()) {
+                sharesDir.mkdirs()
+            }
+            val shareFile = File(sharesDir, "scan_share_${System.currentTimeMillis()}.png")
             FileOutputStream(shareFile).use { out ->
                 bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
             }
-            val uri = FileProvider.getUriForFile(context, "${context.packageName}.provider", shareFile)
+
+            val authority = "${context.packageName}.provider"
+            val uri = FileProvider.getUriForFile(context, authority, shareFile)
+
             val shareIntent = Intent(Intent.ACTION_SEND).apply {
                 type = "image/png"
                 putExtra(Intent.EXTRA_STREAM, uri)
+                clipData = android.content.ClipData.newRawUri("Scanned Selection", uri)
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
-            context.startActivity(Intent.createChooser(shareIntent, "Share Scanned Selection"))
+
+            val chooser = Intent.createChooser(shareIntent, "Share Scanned Selection").apply {
+                clipData = android.content.ClipData.newRawUri("Scanned Selection", uri)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                if (context !is android.app.Activity) {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+            }
+
+            try {
+                val resInfoList = context.packageManager.queryIntentActivities(
+                    shareIntent,
+                    android.content.pm.PackageManager.MATCH_DEFAULT_ONLY
+                )
+                for (resolveInfo in resInfoList) {
+                    val pkg = resolveInfo.activityInfo.packageName
+                    context.grantUriPermission(pkg, uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+            } catch (e: Exception) {
+                com.example.core.LogKeeper.writeLog("ScannerSelectionHelper", "Warning granting uri permissions: ${e.message}")
+            }
+
+            context.startActivity(chooser)
+            com.example.core.LogKeeper.writeLog("ScannerSelectionHelper", "Shared selection URI: $uri (${bitmap.width}x${bitmap.height})")
         } catch (e: Exception) {
+            com.example.core.LogKeeper.writeLog("ScannerSelectionHelper", "Share error: ${e.message}")
             Toast.makeText(context, "Failed to share: ${e.message}", Toast.LENGTH_SHORT).show()
         }
     }

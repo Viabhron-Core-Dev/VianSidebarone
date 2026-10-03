@@ -7,12 +7,16 @@ import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.graphics.asImageBitmap
+import android.graphics.BitmapFactory
+import java.io.File
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
@@ -55,6 +59,9 @@ class LinkPickerActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        val pageId = intent.getStringExtra("PAGE_ID")
+        val isHybridGrid = intent.getBooleanExtra("IS_HYBRID_GRID", false)
+
         setContent {
             MaterialTheme(colorScheme = darkColorScheme()) {
                 Surface(
@@ -63,11 +70,21 @@ class LinkPickerActivity : ComponentActivity() {
                 ) {
                     LinkPickerScreen(
                         onLinkSelected = { elementId ->
-                            val resultIntent = Intent().apply {
-                                putExtra("ELEMENT_ID", elementId)
+                            if (isHybridGrid && !pageId.isNullOrEmpty()) {
+                                com.example.feature.element.ElementPlacementHelper.addElementToHybridGrid(
+                                    this@LinkPickerActivity,
+                                    pageId,
+                                    elementId
+                                )
+                                val meta = ElementMetadataStore.get(this@LinkPickerActivity, elementId)
+                                Toast.makeText(this@LinkPickerActivity, "Added: ${meta?.label ?: "Link"}", Toast.LENGTH_SHORT).show()
+                            } else {
+                                val resultIntent = Intent().apply {
+                                    putExtra("ELEMENT_ID", elementId)
+                                }
+                                setResult(Activity.RESULT_OK, resultIntent)
+                                finish()
                             }
-                            setResult(Activity.RESULT_OK, resultIntent)
-                            finish()
                         },
                         onCancel = {
                             setResult(Activity.RESULT_CANCELED)
@@ -100,6 +117,25 @@ fun LinkPickerScreen(
 
     fun refreshLinks() {
         linksList = ElementMetadataStore.getAllSavedLinks(context)
+    }
+
+    val lifecycleOwner = androidx.compose.ui.platform.LocalLifecycleOwner.current
+    DisposableEffect(context, lifecycleOwner) {
+        val receiver = object : android.content.BroadcastReceiver() {
+            override fun onReceive(c: Context?, intent: Intent?) {
+                refreshLinks()
+            }
+        }
+        val filter = android.content.IntentFilter("com.example.UPDATE_SIDEBAR_ICONS")
+        androidx.core.content.ContextCompat.registerReceiver(
+            context,
+            receiver,
+            filter,
+            androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED
+        )
+        onDispose {
+            try { context.unregisterReceiver(receiver) } catch (_: Exception) {}
+        }
     }
 
     Scaffold(
@@ -146,7 +182,7 @@ fun LinkPickerScreen(
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Icon(
-                        painter = painterResource(android.R.drawable.ic_menu_set_as),
+                        painter = painterResource(com.example.R.drawable.ic_language),
                         contentDescription = null,
                         modifier = Modifier.size(56.dp),
                         tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)
@@ -180,8 +216,8 @@ fun LinkPickerScreen(
                             item = item,
                             providers = providers,
                             onTap = {
-                                // Tap = Open link via Custom Tab
-                                CustomTabLauncher.openLink(context, item.target, item.browserPackage)
+                                // Tap = Select and add to sidebar grid
+                                onLinkSelected(item.id)
                             },
                             onOpenActions = {
                                 selectedForActions = item
@@ -359,12 +395,33 @@ private fun LinkGridItem(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Icon(
-                    painter = painterResource(android.R.drawable.ic_menu_set_as),
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(28.dp)
-                )
+                val siteBitmap = remember(item.iconPath) {
+                    if (item.iconPath.isNotEmpty()) {
+                        val f = File(item.iconPath)
+                        if (f.exists() && f.length() > 0) {
+                            try {
+                                BitmapFactory.decodeFile(f.absolutePath)
+                            } catch (_: Exception) { null }
+                        } else null
+                    } else null
+                }
+
+                if (siteBitmap != null) {
+                    Image(
+                        bitmap = siteBitmap.asImageBitmap(),
+                        contentDescription = item.label,
+                        modifier = Modifier
+                            .size(28.dp)
+                            .padding(2.dp)
+                    )
+                } else {
+                    Icon(
+                        painter = painterResource(com.example.R.drawable.ic_language),
+                        contentDescription = item.label,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(28.dp)
+                    )
+                }
 
                 Row {
                     IconButton(

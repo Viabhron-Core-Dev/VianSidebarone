@@ -685,7 +685,8 @@ fun SecureScreenScannerContent(
                         ScannerSelectionHelper.shareBitmap(context, cropped)
                     },
                     enabled = if (selectedShape == SelectionShape.CUSTOM) (isPolygonClosed && customVertices.size >= 3) else true,
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF333333))
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF333333)),
+                    modifier = Modifier.testTag("scanner_share_button")
                 ) {
                     Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(6.dp))

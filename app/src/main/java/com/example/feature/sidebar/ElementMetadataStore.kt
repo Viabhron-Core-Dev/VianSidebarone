@@ -7,6 +7,10 @@ import com.example.core.LogKeeper
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 
 data class ElementMetadata(
     val id: String,          // Unique element ID (e.g. "app:com.android.chrome" or "link:uuid")
@@ -58,6 +62,7 @@ object ElementMetadataStore {
     private const val PREFS_NAME = "FloatingReaderPrefs"
     private const val PREF_KEY_PREFIX = "elem_meta_"
     private const val MIGRATION_KEY = "element_metadata_migrated_v1"
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     fun get(context: Context, id: String): ElementMetadata? {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -155,18 +160,36 @@ object ElementMetadataStore {
         browserPackage: String? = null,
         account: String? = null
     ): ElementMetadata {
-        val iconPath = IconCacheManager.captureAndSaveLinkIcon(context, uuid) ?: ""
+        val initialIconPath = IconCacheManager.captureAndSaveLinkIcon(context, uuid) ?: ""
         val metadata = ElementMetadata(
             id = elementId,
             type = "link",
             target = url,
             label = label,
-            iconPath = iconPath,
+            iconPath = initialIconPath,
             browserPackage = browserPackage,
             account = account
         )
         save(context, metadata)
         addSavedLinkId(context, uuid)
+
+        scope.launch {
+            try {
+                val siteIconPath = com.example.core.FaviconFetcher.fetchAndCacheSiteIcon(context, uuid, url)
+                if (!siteIconPath.isNullOrEmpty()) {
+                    val updated = metadata.copy(iconPath = siteIconPath)
+                    save(context, updated)
+                    val updateIntent = android.content.Intent("com.example.UPDATE_SIDEBAR_ICONS").apply {
+                        putExtra("item_id", elementId)
+                        setPackage(context.packageName)
+                    }
+                    context.sendBroadcast(updateIntent)
+                }
+            } catch (e: Exception) {
+                LogKeeper.writeLog(TAG, "Favicon fetch failed for $url: ${e.message}")
+            }
+        }
+
         return metadata
     }
 

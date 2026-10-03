@@ -234,6 +234,26 @@ fun HybridGridEditor(
         }
     }
 
+    DisposableEffect(context, pageId) {
+        val updateReceiver = object : android.content.BroadcastReceiver() {
+            override fun onReceive(c: Context?, intent: Intent?) {
+                items = loadHybridLocalItems(prefs, pageId)
+            }
+        }
+        val filter = android.content.IntentFilter("ELEMENT_ADDED_TO_HYBRID").apply {
+            addAction("UPDATE_GRID")
+        }
+        androidx.core.content.ContextCompat.registerReceiver(
+            context,
+            updateReceiver,
+            filter,
+            androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED
+        )
+        onDispose {
+            try { context.unregisterReceiver(updateReceiver) } catch (_: Exception) {}
+        }
+    }
+
     val scrollState = rememberScrollState()
 
     // Auto-save when cols change

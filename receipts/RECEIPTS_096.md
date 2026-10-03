@@ -204,6 +204,40 @@
 * Any deviation from what was requested, and why: None.
 * Any known issue or follow-up needed: None.
 
+### Entry: 2026-10-03T21:55:00Z
+* Timestamp: 2026-10-03T21:55:00Z
+* One-line summary: Resolved scanner cropped area selection sharing failure, added high-res brand favicon fetching engine with immediate UI refresh and un-tinted rendering, and implemented continuous fast-adding across AddElementActivity and all subpages without kicking back to edit grid.
+* Exact files touched:
+  - `app/src/main/java/com/example/feature/system_hub/ScannerSelectionHelper.kt`
+  - `app/src/main/java/com/example/feature/system_hub/SecureScreenScannerActivity.kt`
+  - `app/src/main/java/com/example/core/FaviconFetcher.kt`
+  - `app/src/main/java/com/example/feature/sidebar/SidebarAppsManager.kt`
+  - `app/src/main/java/com/example/feature/settings/LinkPickerActivity.kt`
+  - `app/src/main/java/com/example/feature/settings/AddElementActivity.kt`
+  - `app/src/test/java/com/example/feature/system_hub/ScannerSelectionHelperTest.kt`
+  - `receipts/RECEIPTS_096.md`
+* What was actually done:
+  - Scanner Selection Sharing (`ScannerSelectionHelper.kt`, `SecureScreenScannerActivity.kt`):
+    * Resolved sharing failure when sharing cropped scanner selection: added `clipData = ClipData.newRawUri("Scanned Selection", uri)` to both `shareIntent` and chooser intent, ensuring cross-app `FLAG_GRANT_READ_URI_PERMISSION` propagation on Android 10+.
+    * Added explicit `context.grantUriPermission` for all queried target activities to guarantee immediate read access without security exceptions.
+    * Added validation checking for empty, recycled, or invalid bitmaps before initiating intent dispatch.
+    * Ensured `scanner_shares/` cache subdirectory is verified/created.
+    * Added `testTag("scanner_share_button")` to Share button in `SecureScreenScannerActivity.kt`.
+    * Added unit test `testInvalidBitmapShareGraceful` in `ScannerSelectionHelperTest.kt`.
+  - Brand Favicon Engine & Icon Rendering (`FaviconFetcher.kt`, `SidebarAppsManager.kt`, `LinkPickerActivity.kt`):
+    * Expanded `FaviconFetcher` candidate URLs with high-resolution Google s2 PNG favicon service (`https://www.google.com/s2/favicons?domain=$host&sz=128`) and Apple touch icons (`apple-touch-icon.png`, `apple-touch-icon-precomposed.png`) for authentic site brand icons (e.g., Duolingo owl).
+    * Fixed link icon rendering in `SidebarAppsManager.kt`: cleared color filter (`icon.clearColorFilter()`) when applying cached site bitmap to prevent solid white tinting, and added asynchronous loader to fetch and cache site icon if missing upon first display.
+    * Added `invalidateIcon(id: String)` to `SidebarAppsManager.kt` for clean cache eviction.
+    * Added `com.example.UPDATE_SIDEBAR_ICONS` broadcast receiver in `LinkPickerActivity.kt` (`LinkPickerScreen`) to immediately reload link cards with downloaded brand favicons.
+  - Continuous Fast-Add Subpage Architecture (`AddElementActivity.kt`):
+    * Implemented `handleElementSelected(id, displayName)` in `AddElementActivity.kt`: when adding elements for a Hybrid Grid page (`isHybridGrid && !pageId.isNullOrEmpty()`), items are placed directly into grid storage via `ElementPlacementHelper.addElementToHybridGrid` with visual Toast confirmation ("Added: <name>") without dismissing the activity or kicking the user back to the edit grid.
+    * Applied to all direct items (Folder, Empty spacer, Hybrid Grid, eBook Reader, Dictionary, Cursor Trackpad, Work Notes).
+    * Applied to subpage result returns in `onActivityResult` (Widget picker, popup widget, floating trigger, shortcut, intent), allowing consecutive additions while staying on `AddElementActivity`.
+    * Maintained backwards-compatible `finishWithId` behavior when adding for handles or non-hybrid pages.
+* How it was verified: local build only (running `compile_applet` and Gradle unit test verification).
+* Any deviation from what was requested, and why: None.
+* Any known issue or follow-up needed: None.
+
 
 
 

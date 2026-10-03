@@ -31,22 +31,43 @@ class ActionPickerActivity : ComponentActivity() {
         
         val category = intent.getStringExtra("CATEGORY") ?: ""
         val titleStr = intent.getStringExtra("TITLE") ?: "Select Action"
+        val pageId = intent.getStringExtra("PAGE_ID")
+        val isHybridGrid = intent.getBooleanExtra("IS_HYBRID_GRID", false)
         
         val mainLayout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
             setBackgroundColor(Color.BLACK)
-            setPadding(32, 32, 32, 32)
+            setPadding(24, 24, 24, 24)
         }
         
+        val toolbar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, 0, 0, 24)
+        }
+
+        val backIcon = ImageView(this).apply {
+            setImageResource(android.R.drawable.ic_menu_revert)
+            setColorFilter(Color.WHITE)
+            layoutParams = LinearLayout.LayoutParams(72, 72).apply { marginEnd = 24 }
+            isClickable = true
+            isFocusable = true
+            setOnClickListener { finish() }
+        }
+
         val titleView = TextView(this).apply {
             text = titleStr
             setTextColor(Color.WHITE)
-            textSize = 24f
-            gravity = Gravity.CENTER
-            setPadding(0, 0, 0, 32)
+            textSize = 22f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
         }
-        mainLayout.addView(titleView)
+
+        toolbar.addView(backIcon)
+        toolbar.addView(titleView)
+        mainLayout.addView(toolbar)
         
         val items: List<SidebarItem> = when (category) {
             "quick_tiles" -> ALL_QUICK_TILES
@@ -74,9 +95,18 @@ class ActionPickerActivity : ComponentActivity() {
                     else -> ""
                 }
                 if (id.isNotEmpty()) {
-                    val resultIntent = Intent().apply { putExtra("ELEMENT_ID", id) }
-                    setResult(Activity.RESULT_OK, resultIntent)
-                    finish()
+                    if (isHybridGrid && !pageId.isNullOrEmpty()) {
+                        com.example.feature.element.ElementPlacementHelper.addElementToHybridGrid(
+                            this@ActionPickerActivity,
+                            pageId,
+                            id
+                        )
+                        android.widget.Toast.makeText(this@ActionPickerActivity, "Added: ${item.label}", android.widget.Toast.LENGTH_SHORT).show()
+                    } else {
+                        val resultIntent = Intent().apply { putExtra("ELEMENT_ID", id) }
+                        setResult(Activity.RESULT_OK, resultIntent)
+                        finish()
+                    }
                 }
             }
         }

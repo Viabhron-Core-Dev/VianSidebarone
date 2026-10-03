@@ -280,13 +280,57 @@ class SidebarAppsManager(
             } else {
                 icon.setColorFilter(android.graphics.Color.WHITE)
             }
-        } else if (parsed is SidebarItem.VolumeAction || parsed is SidebarItem.MediaAction || parsed is SidebarItem.SettingsShortcut || parsed is SidebarItem.Link) {
+        } else if (parsed is SidebarItem.VolumeAction || parsed is SidebarItem.MediaAction || parsed is SidebarItem.SettingsShortcut) {
             val cached = getIconBitmap(id)
             if (cached != null) {
                 icon.setBackgroundColor(android.graphics.Color.TRANSPARENT)
                 icon.setImageBitmap(cached)
             } else {
                 icon.setImageResource(android.R.drawable.ic_menu_gallery)
+            }
+        } else if (parsed is SidebarItem.Link) {
+            val cached = getIconBitmap(id)
+            if (cached != null) {
+                icon.setBackgroundColor(android.graphics.Color.TRANSPARENT)
+                icon.clearColorFilter()
+                icon.setImageBitmap(cached)
+            } else {
+                icon.setBackgroundColor(android.graphics.Color.TRANSPARENT)
+                icon.setImageResource(com.example.R.drawable.ic_language)
+                icon.setColorFilter(android.graphics.Color.WHITE)
+                coroutineScope.launch {
+                    val meta = ElementMetadataStore.get(context, id)
+                    val iconPath = meta?.iconPath
+                    var bitmap: Bitmap? = null
+                    if (!iconPath.isNullOrEmpty()) {
+                        val f = java.io.File(iconPath)
+                        if (f.exists() && f.length() > 0) {
+                            try {
+                                bitmap = BitmapFactory.decodeFile(f.absolutePath)
+                            } catch (_: Exception) {}
+                        }
+                    }
+                    if (bitmap == null && meta != null && meta.target.isNotEmpty()) {
+                        val uuid = id.substringAfter("link:").substringBefore(":")
+                        val downloaded = com.example.core.FaviconFetcher.fetchAndCacheSiteIcon(context, uuid, meta.target)
+                        if (downloaded != null) {
+                            val f = java.io.File(downloaded)
+                            if (f.exists()) {
+                                try {
+                                    bitmap = BitmapFactory.decodeFile(f.absolutePath)
+                                    ElementMetadataStore.save(context, meta.copy(iconPath = downloaded))
+                                } catch (_: Exception) {}
+                            }
+                        }
+                    }
+                    if (bitmap != null) {
+                        iconCache.put(id, bitmap)
+                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                            icon.clearColorFilter()
+                            icon.setImageBitmap(bitmap)
+                        }
+                    }
+                }
             }
         } else if (parsed is SidebarItem.Folder) {
             icon.setImageDrawable(null)
@@ -329,6 +373,15 @@ class SidebarAppsManager(
             icon.setImageDrawable(BubbleDrawable(innerBmp))
             icon.clearColorFilter()
             icon.setBackgroundColor(android.graphics.Color.TRANSPARENT)
+        }
+    }
+
+    fun invalidateIcon(id: String) {
+        iconCache.remove(id)
+        iconCache.remove("custom_$id")
+        if (id.startsWith("app:")) {
+            val pkg = id.substringAfter("app:").substringBefore(":")
+            iconCache.remove(pkg)
         }
     }
 

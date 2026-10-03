@@ -95,7 +95,7 @@ object IconCacheManager {
         return if (bmp != null) file.absolutePath else null
     }
 
-    fun captureAndSaveLinkIcon(context: Context, uuid: String, iconResId: Int = android.R.drawable.ic_menu_set_as): String? {
+    fun captureAndSaveLinkIcon(context: Context, uuid: String, iconResId: Int = com.example.R.drawable.ic_language): String? {
         try {
             val safeName = "link_${uuid.replace(Regex("[^a-zA-Z0-9._-]"), "_")}"
             val file = File(getCacheDir(context), "$safeName.webp")
@@ -108,6 +108,27 @@ object IconCacheManager {
                 downsampled.compress(Bitmap.CompressFormat.WEBP, 85, out)
             }
             memoryCache.put("link:$uuid", downsampled)
+            return file.absolutePath
+        } catch (e: Exception) {
+            return null
+        }
+    }
+
+    fun saveLinkIconBitmap(context: Context, uuid: String, bitmap: Bitmap): String? {
+        try {
+            val safeName = "link_${uuid.replace(Regex("[^a-zA-Z0-9._-]"), "_")}.webp"
+            val file = File(getCacheDir(context), safeName)
+            val density = context.resources.displayMetrics.density
+            val targetPx = Math.round(TARGET_ICON_SIZE_DP * density).coerceIn(48, 144)
+            val scaled = if (bitmap.width != targetPx || bitmap.height != targetPx) {
+                Bitmap.createScaledBitmap(bitmap, targetPx, targetPx, true)
+            } else {
+                bitmap
+            }
+            FileOutputStream(file).use { out ->
+                scaled.compress(Bitmap.CompressFormat.WEBP, 90, out)
+            }
+            memoryCache.put("link:$uuid", scaled)
             return file.absolutePath
         } catch (e: Exception) {
             return null
