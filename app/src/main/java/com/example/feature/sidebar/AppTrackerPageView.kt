@@ -34,6 +34,7 @@ import java.util.concurrent.TimeUnit
 
 class AppTrackerPageView(
     context: Context,
+    val containerId: String = "sidebar",
     private val onCloseSidebar: () -> Unit,
     private val onAppSelected: (String) -> Unit,
     private val onHeightChanged: ((Int) -> Unit)? = null
@@ -167,7 +168,7 @@ class AppTrackerPageView(
     private fun loadData() {
         scope.launch {
             if (hasUsageStatsPermission) {
-                val apps = withContext(Dispatchers.IO) { AppTrackerHelper.getRecentApps(context) }
+                val apps = withContext(Dispatchers.IO) { AppTrackerHelper.getRecentApps(context, containerId) }
                 recentApps = apps
             } else {
                 recentApps = emptyList()
@@ -328,5 +329,6 @@ data class TrackedAppInfo(
     val packageName: String,
     val appName: String,
     val lastUsedTime: Long = 0,
-    val cacheSize: Long = 0
+    val cacheSize: Long = 0,
+    val isSystem: Boolean = false
 )

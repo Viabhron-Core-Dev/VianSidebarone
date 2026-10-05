@@ -251,14 +251,8 @@ class SidebarAppsManager(
                 icon.alpha = 1.0f
             } else if (parsed.action == "force_stop_running_apps") {
                 icon.setImageResource(parsed.iconResId)
-                val isPresent = com.example.utils.AppTrackerHelper.isAppTrackerConfigured(context)
-                if (isPresent) {
-                    icon.setColorFilter(android.graphics.Color.parseColor("#00E676"))
-                    icon.alpha = 1.0f
-                } else {
-                    icon.setColorFilter(android.graphics.Color.parseColor("#888888"))
-                    icon.alpha = 0.38f
-                }
+                icon.setColorFilter(android.graphics.Color.parseColor("#00E676"))
+                icon.alpha = 1.0f
             } else {
                 icon.setImageResource(parsed.iconResId)
                 icon.setColorFilter(android.graphics.Color.WHITE)

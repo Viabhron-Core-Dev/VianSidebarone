@@ -43,9 +43,16 @@ import kotlinx.coroutines.withContext
 class AppTrackerSettingsActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        val mode = intent.getStringExtra("MODE") ?: ""
+        val isForceStopOnly = mode == "force_stop_only"
+        val containerId = intent.getStringExtra("CONTAINER_ID") ?: "sidebar"
         setContent {
             MaterialTheme(colorScheme = darkColorScheme()) {
-                AppTrackerSettingsScreen(onBack = { finish() })
+                AppTrackerSettingsScreen(
+                    onBack = { finish() },
+                    isForceStopOnly = isForceStopOnly,
+                    containerId = containerId
+                )
             }
         }
     }
@@ -53,18 +60,26 @@ class AppTrackerSettingsActivity : ComponentActivity() {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AppTrackerSettingsScreen(onBack: () -> Unit) {
+fun AppTrackerSettingsScreen(
+    onBack: () -> Unit,
+    isForceStopOnly: Boolean = false,
+    containerId: String = "sidebar"
+) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val prefs = context.getSharedPreferences("FloatingReaderPrefs", Context.MODE_PRIVATE)
     
     var selectedTab by remember { mutableStateOf(0) }
-    val tabs = listOf("Running", "Cache", "Execute", "All Apps")
+    val tabs = if (isForceStopOnly) {
+        listOf("Running", "Permissions")
+    } else {
+        listOf("Running", "Cache", "Execute", "All Apps")
+    }
     
     Scaffold(
         topBar = {
             Column {
                 TopAppBar(
-                    title = { Text("App Tracker Edit") },
+                    title = { Text(if (isForceStopOnly) "Force Stop Apps Setup" else "App Tracker Edit") },
                     navigationIcon = {
                         IconButton(onClick = onBack) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
@@ -93,29 +108,55 @@ fun AppTrackerSettingsScreen(onBack: () -> Unit) {
         }
     ) { padding ->
         Box(modifier = Modifier.padding(padding).fillMaxSize()) {
-            when (selectedTab) {
-                0 -> WhitelistTab(context, prefs, "running")
-                1 -> WhitelistTab(context, prefs, "cache")
-                2 -> ExecutePermsTab(context, prefs)
-                3 -> AllAppsTab(context)
+            if (isForceStopOnly) {
+                when (selectedTab) {
+                    0 -> WhitelistTab(context, prefs, "running", containerId = containerId, isForceStopOnly = true)
+                    1 -> ExecutePermsTab(context, prefs, isForceStopOnly = true, containerId = containerId)
+                }
+            } else {
+                when (selectedTab) {
+                    0 -> WhitelistTab(context, prefs, "running", containerId = containerId, isForceStopOnly = false)
+                    1 -> WhitelistTab(context, prefs, "cache", containerId = containerId, isForceStopOnly = false)
+                    2 -> ExecutePermsTab(context, prefs, isForceStopOnly = false, containerId = containerId)
+                    3 -> AllAppsTab(context)
+                }
             }
         }
     }
 }
 
 @Composable
-fun WhitelistTab(context: Context, prefs: android.content.SharedPreferences, type: String) {
+fun WhitelistTab(
+    context: Context,
+    prefs: android.content.SharedPreferences,
+    type: String,
+    containerId: String = "sidebar",
+    isForceStopOnly: Boolean = false
+) {
     var showSystemApps by remember { mutableStateOf(prefs.getBoolean("app_tracker_show_system_$type", false)) }
-    val prefKey = if (type == "running") "app_tracker_whitelist_current" else "app_tracker_whitelist_cache"
-    var whitelist by remember { mutableStateOf(prefs.getStringSet(prefKey, emptySet()) ?: emptySet()) }
+    val prefKey = if (type == "running") com.example.utils.AppTrackerHelper.getContainerWhitelistKey(containerId) else "app_tracker_whitelist_cache"
+    val initialWhitelist = if (isForceStopOnly) {
+        com.example.utils.AppTrackerHelper.getForceStopWhitelist(context, containerId)
+    } else if (type == "running") {
+        com.example.utils.AppTrackerHelper.getWhitelist(context, containerId)
+    } else {
+        prefs.getStringSet(prefKey, emptySet()) ?: emptySet()
+    }
+    var whitelist by remember { mutableStateOf(initialWhitelist) }
     
     var apps by remember { mutableStateOf<List<com.example.feature.sidebar.TrackedAppInfo>>(emptyList()) }
     var isLoading by remember { mutableStateOf(true) }
     
     fun saveWhitelist(set: Set<String>) {
         whitelist = set
-        prefs.edit().putStringSet(prefKey, set).commit()
-        com.example.core.OverlaySyncManager.syncStringSet(context, prefKey, set)
+        if (isForceStopOnly) {
+            com.example.utils.AppTrackerHelper.saveForceStopWhitelist(context, containerId, set)
+        } else if (type == "running") {
+            com.example.utils.AppTrackerHelper.saveWhitelist(context, containerId, set)
+        } else {
+            prefs.edit().putStringSet(prefKey, set).commit()
+            com.example.core.OverlaySyncManager.syncStringSet(context, prefKey, set)
+        }
     }
     
     LaunchedEffect(type) {
@@ -142,9 +183,8 @@ fun WhitelistTab(context: Context, prefs: android.content.SharedPreferences, typ
                             val appInfo = pm.getApplicationInfo(pkgName, 0)
                             if ((appInfo.flags and ApplicationInfo.FLAG_STOPPED) != 0) continue
                             val label = appInfo.loadLabel(pm).toString()
-                            val icon = try { appInfo.loadIcon(pm) } catch (e: Exception) { null }
                             val isSystem = (appInfo.flags and ApplicationInfo.FLAG_SYSTEM) != 0
-                            list.add(com.example.feature.sidebar.TrackedAppInfo(pkgName, label))
+                            list.add(com.example.feature.sidebar.TrackedAppInfo(pkgName, label, isSystem = isSystem))
                         } catch (e: Exception) {}
                     }
                 }
@@ -153,9 +193,8 @@ fun WhitelistTab(context: Context, prefs: android.content.SharedPreferences, typ
                 for (pkg in packages) {
                     val appInfo = pkg.applicationInfo ?: continue
                     val label = appInfo.loadLabel(pm).toString()
-                    val icon = try { appInfo.loadIcon(pm) } catch (e: Exception) { null }
                     val isSystem = (appInfo.flags and ApplicationInfo.FLAG_SYSTEM) != 0
-                    list.add(com.example.feature.sidebar.TrackedAppInfo(pkg.packageName, label))
+                    list.add(com.example.feature.sidebar.TrackedAppInfo(pkg.packageName, label, isSystem = isSystem))
                 }
             }
             list.sortBy { it.appName.lowercase() }
@@ -165,7 +204,7 @@ fun WhitelistTab(context: Context, prefs: android.content.SharedPreferences, typ
     }
     
     val filteredApps = remember(apps, showSystemApps) {
-        apps
+        if (showSystemApps) apps.filter { it.isSystem } else apps.filter { !it.isSystem }
     }
     
     Column(modifier = Modifier.fillMaxSize()) {
@@ -291,33 +330,65 @@ fun WhitelistTab(context: Context, prefs: android.content.SharedPreferences, typ
 }
 
 @Composable
-fun ExecutePermsTab(context: Context, prefs: android.content.SharedPreferences) {
+fun ExecutePermsTab(
+    context: Context,
+    prefs: android.content.SharedPreferences,
+    isForceStopOnly: Boolean = false,
+    containerId: String = "sidebar"
+) {
     var autoForceStop by remember { mutableStateOf(prefs.getBoolean("app_tracker_auto_force_stop", false)) }
+    val hasUsageAccess = remember { com.example.utils.AppTrackerHelper.checkUsageStatsPermission(context) }
     
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-        Text("Execute / Automation", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
-        Spacer(modifier = Modifier.height(16.dp))
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text("Auto Force Stop")
-                Text("Uses Accessibility Service to click 'Force stop' and 'OK'.", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
-            }
-            Switch(
-                checked = autoForceStop,
-                onCheckedChange = { 
-                    autoForceStop = it
-                    prefs.edit().putBoolean("app_tracker_auto_force_stop", it).commit()
-                    com.example.core.OverlaySyncManager.syncBoolean(context, "app_tracker_auto_force_stop", it)
-                }
+        if (isForceStopOnly) {
+            Text("Sequential Force Stop Loop", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                "When triggered, Force Stop Apps sequentially opens each active app's settings. You tap 'Force stop' and return to continue to the next app. Whitelisted apps are automatically preserved.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = Color.LightGray
             )
+            Spacer(modifier = Modifier.height(16.dp))
+            Button(
+                onClick = {
+                    com.example.utils.AppTrackerHelper.startForceStopSequence(context, containerId)
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("Test Force Stop Sequence")
+            }
+            HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp))
+        } else {
+            Text("Execute / Automation", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
+            Spacer(modifier = Modifier.height(16.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Auto Force Stop")
+                    Text("Uses Accessibility Service to click 'Force stop' and 'OK'.", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+                }
+                Switch(
+                    checked = autoForceStop,
+                    onCheckedChange = { 
+                        autoForceStop = it
+                        prefs.edit().putBoolean("app_tracker_auto_force_stop", it).commit()
+                        com.example.core.OverlaySyncManager.syncBoolean(context, "app_tracker_auto_force_stop", it)
+                    }
+                )
+            }
+            HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp))
         }
-        HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp))
         Text("Permissions", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            if (hasUsageAccess) "Usage Access: Granted ✓" else "Usage Access: Required to detect active running apps",
+            style = MaterialTheme.typography.bodySmall,
+            color = if (hasUsageAccess) Color(0xFF00E676) else Color(0xFFFFB74D)
+        )
+        Spacer(modifier = Modifier.height(12.dp))
         Button(
             onClick = {
                 try {
@@ -327,19 +398,21 @@ fun ExecutePermsTab(context: Context, prefs: android.content.SharedPreferences) 
             },
             modifier = Modifier.fillMaxWidth()
         ) {
-            Text("Usage Access Settings")
+            Text(if (hasUsageAccess) "Manage Usage Access Settings" else "Grant Usage Access")
         }
-        Spacer(modifier = Modifier.height(8.dp))
-        Button(
-            onClick = {
-                try {
-                    val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
-                    context.startActivity(intent)
-                } catch (e: Exception) {}
-            },
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Text("Accessibility Settings")
+        if (!isForceStopOnly) {
+            Spacer(modifier = Modifier.height(8.dp))
+            Button(
+                onClick = {
+                    try {
+                        val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
+                        context.startActivity(intent)
+                    } catch (e: Exception) {}
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("Accessibility Settings")
+            }
         }
     }
 }

@@ -19,9 +19,23 @@ object AppTrackerHelper {
 
     fun isAppTrackerConfigured(context: Context): Boolean {
         val prefs = context.getSharedPreferences("FloatingReaderPrefs", Context.MODE_PRIVATE)
-        if (PageManager.isPageTypePresent(prefs, "app_tracker")) return true
+        if (com.example.core.PageManager.isPageTypePresentInPrefs(prefs, "app_tracker")) return true
         val appPrefs = context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
-        return PageManager.isPageTypePresent(appPrefs, "app_tracker")
+        return com.example.core.PageManager.isPageTypePresentInPrefs(appPrefs, "app_tracker")
+    }
+
+    /**
+     * Checks if the specific container currently hosts an App Tracker page.
+     * Container isolation: only sync within the same container.
+     */
+    fun hasAppTrackerInContainer(context: Context, containerId: String): Boolean {
+        return try {
+            val pageManager = com.example.core.PageManager.getInstance(context)
+            val pages = pageManager.getPageStack(containerId)
+            pages.any { it.pageType == "app_tracker" }
+        } catch (e: Exception) {
+            false
+        }
     }
 
     fun checkUsageStatsPermission(context: Context): Boolean {
@@ -35,7 +49,7 @@ object AppTrackerHelper {
         return mode == AppOpsManager.MODE_ALLOWED
     }
 
-    fun getRecentApps(context: Context): List<TrackedAppInfo> {
+    fun getRecentApps(context: Context, containerId: String = "sidebar"): List<TrackedAppInfo> {
         if (!checkUsageStatsPermission(context)) return emptyList()
 
         val usageStatsManager = context.getSystemService(Context.USAGE_STATS_SERVICE) as? UsageStatsManager ?: return emptyList()
@@ -73,8 +87,7 @@ object AppTrackerHelper {
             }
         } catch (e: Exception) {}
 
-        val prefs = context.getSharedPreferences("FloatingReaderPrefs", Context.MODE_PRIVATE)
-        val whitelist = prefs.getStringSet("app_tracker_whitelist_current", emptySet()) ?: emptySet()
+        val whitelist = getForceStopWhitelist(context, containerId)
 
         val pm = context.packageManager
         val trackedApps = mutableListOf<TrackedAppInfo>()
@@ -87,18 +100,132 @@ object AppTrackerHelper {
             try {
                 val appInfo = pm.getApplicationInfo(packageName, 0)
                 val appName = pm.getApplicationLabel(appInfo).toString()
-                trackedApps.add(TrackedAppInfo(packageName = packageName, appName = appName, lastUsedTime = lastUsed))
+                val isSystem = (appInfo.flags and ApplicationInfo.FLAG_SYSTEM) != 0
+                trackedApps.add(TrackedAppInfo(packageName = packageName, appName = appName, lastUsedTime = lastUsed, isSystem = isSystem))
             } catch (e: Exception) {}
         }
 
         return trackedApps.sortedByDescending { it.lastUsedTime }.take(28)
     }
 
-    fun getRunningPackagesToStop(context: Context): List<String> {
-        return getRecentApps(context).map { it.packageName }
+    fun getContainerWhitelistKey(containerId: String): String =
+        if (containerId.isNotBlank() && containerId != "sidebar") "handle_${containerId}_app_tracker_whitelist" else "app_tracker_whitelist_current"
+
+    fun getForceStopWhitelistKey(containerId: String): String =
+        if (containerId.isNotBlank() && containerId != "sidebar") "handle_${containerId}_force_stop_whitelist" else "force_stop_whitelist_current"
+
+    /**
+     * On-demand sync between Force Stop and App Tracker whitelist strictly within the same container.
+     * Zero background activity. Executed only when invoked.
+     */
+    fun syncOnDemand(context: Context, containerId: String) {
+        if (!hasAppTrackerInContainer(context, containerId)) return
+        val prefs = context.getSharedPreferences("FloatingReaderPrefs", Context.MODE_PRIVATE)
+        val forceStopKey = getForceStopWhitelistKey(containerId)
+        val trackerKey = getContainerWhitelistKey(containerId)
+
+        val forceStopSet = prefs.getStringSet(forceStopKey, null)
+        val trackerSet = prefs.getStringSet(trackerKey, null)
+
+        if (forceStopSet != null && trackerSet == null) {
+            prefs.edit().putStringSet(trackerKey, forceStopSet).commit()
+            com.example.core.OverlaySyncManager.syncStringSet(context, trackerKey, forceStopSet)
+        } else if (trackerSet != null && forceStopSet == null) {
+            prefs.edit().putStringSet(forceStopKey, trackerSet).commit()
+            com.example.core.OverlaySyncManager.syncStringSet(context, forceStopKey, trackerSet)
+        } else if (forceStopSet != null && trackerSet != null && forceStopSet != trackerSet) {
+            val merged = forceStopSet.toMutableSet().apply { addAll(trackerSet) }
+            prefs.edit().putStringSet(forceStopKey, merged).putStringSet(trackerKey, merged).commit()
+            com.example.core.OverlaySyncManager.syncStringSet(context, forceStopKey, merged)
+            com.example.core.OverlaySyncManager.syncStringSet(context, trackerKey, merged)
+        }
     }
 
-    fun startForceStopSequence(context: Context) {
+    /**
+     * Standalone whitelist retrieval for the Force Stop Apps button.
+     * If an App Tracker page is configured in the same container, on-demand sync is performed.
+     */
+    fun getForceStopWhitelist(context: Context, containerId: String = "sidebar"): Set<String> {
+        val prefs = context.getSharedPreferences("FloatingReaderPrefs", Context.MODE_PRIVATE)
+        if (hasAppTrackerInContainer(context, containerId)) {
+            syncOnDemand(context, containerId)
+        }
+        val key = getForceStopWhitelistKey(containerId)
+        val set = prefs.getStringSet(key, null)
+        if (set != null) return set
+
+        // Fallback: check if container tracker whitelist exists
+        val trackerKey = getContainerWhitelistKey(containerId)
+        val trackerSet = prefs.getStringSet(trackerKey, null)
+        if (trackerSet != null) return trackerSet
+
+        return prefs.getStringSet("force_stop_whitelist_current", emptySet()) ?: emptySet()
+    }
+
+    /**
+     * Saves standalone whitelist for Force Stop Apps element.
+     * On-demand syncs to App Tracker page whitelist only if present in the same container.
+     */
+    fun saveForceStopWhitelist(context: Context, containerId: String = "sidebar", whitelist: Set<String>) {
+        val prefs = context.getSharedPreferences("FloatingReaderPrefs", Context.MODE_PRIVATE)
+        val key = getForceStopWhitelistKey(containerId)
+        prefs.edit().putStringSet(key, whitelist).commit()
+        if (key != "force_stop_whitelist_current") {
+            prefs.edit().putStringSet("force_stop_whitelist_current", whitelist).commit()
+        }
+        com.example.core.OverlaySyncManager.syncStringSet(context, key, whitelist)
+
+        if (hasAppTrackerInContainer(context, containerId)) {
+            val trackerKey = getContainerWhitelistKey(containerId)
+            prefs.edit().putStringSet(trackerKey, whitelist).commit()
+            if (trackerKey != "app_tracker_whitelist_current") {
+                prefs.edit().putStringSet("app_tracker_whitelist_current", whitelist).commit()
+            }
+            com.example.core.OverlaySyncManager.syncStringSet(context, trackerKey, whitelist)
+        }
+    }
+
+    fun getWhitelist(context: Context, containerId: String = "sidebar"): Set<String> {
+        val prefs = context.getSharedPreferences("FloatingReaderPrefs", Context.MODE_PRIVATE)
+        if (hasAppTrackerInContainer(context, containerId)) {
+            syncOnDemand(context, containerId)
+        }
+        val containerKey = getContainerWhitelistKey(containerId)
+        val containerSet = prefs.getStringSet(containerKey, null)
+        if (containerSet != null) return containerSet
+
+        val forceStopKey = getForceStopWhitelistKey(containerId)
+        val forceStopSet = prefs.getStringSet(forceStopKey, null)
+        if (forceStopSet != null) return forceStopSet
+
+        return prefs.getStringSet("app_tracker_whitelist_current", emptySet()) ?: emptySet()
+    }
+
+    fun saveWhitelist(context: Context, containerId: String = "sidebar", whitelist: Set<String>) {
+        val prefs = context.getSharedPreferences("FloatingReaderPrefs", Context.MODE_PRIVATE)
+        val containerKey = getContainerWhitelistKey(containerId)
+        prefs.edit().putStringSet(containerKey, whitelist).commit()
+        if (containerKey != "app_tracker_whitelist_current") {
+            prefs.edit().putStringSet("app_tracker_whitelist_current", whitelist).commit()
+        }
+        com.example.core.OverlaySyncManager.syncStringSet(context, containerKey, whitelist)
+
+        // Sync with Force Stop element within the same container
+        if (hasAppTrackerInContainer(context, containerId)) {
+            val forceStopKey = getForceStopWhitelistKey(containerId)
+            prefs.edit().putStringSet(forceStopKey, whitelist).commit()
+            if (forceStopKey != "force_stop_whitelist_current") {
+                prefs.edit().putStringSet("force_stop_whitelist_current", whitelist).commit()
+            }
+            com.example.core.OverlaySyncManager.syncStringSet(context, forceStopKey, whitelist)
+        }
+    }
+
+    fun getRunningPackagesToStop(context: Context, containerId: String = "sidebar"): List<String> {
+        return getRecentApps(context, containerId).map { it.packageName }
+    }
+
+    fun startForceStopSequence(context: Context, containerId: String = "sidebar") {
         if (!checkUsageStatsPermission(context)) {
             Toast.makeText(context, "Grant Usage Access to track active apps", Toast.LENGTH_LONG).show()
             val intent = Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS).apply {
@@ -110,7 +237,7 @@ object AppTrackerHelper {
             return
         }
 
-        val packagesToStop = getRunningPackagesToStop(context)
+        val packagesToStop = getRunningPackagesToStop(context, containerId)
         if (packagesToStop.isEmpty()) {
             Toast.makeText(context, "No running apps to stop", Toast.LENGTH_SHORT).show()
             return

@@ -438,8 +438,7 @@ class HybridGridPageView(
                             label.text = parsed.label
                             
                             val isForceStop = (parsed is SidebarItem.SystemAction && parsed.action == "force_stop_running_apps")
-                            val isConfigured = !isForceStop || com.example.utils.AppTrackerHelper.isAppTrackerConfigured(context)
-                            label.alpha = if (isConfigured) 1.0f else 0.38f
+                            label.alpha = 1.0f
 
                             appsManager.bindIcon(item.id, icon, prefs, scope) {
                                 appsManager.bindIcon(item.id, icon, prefs, scope) {}
@@ -490,7 +489,7 @@ class HybridGridPageView(
                                         }
                                     }
                                     is SidebarItem.SystemAction -> {
-                                        com.example.feature.element.ElementActionDispatcher.handleSystemAction(context, parsed.action)
+                                        com.example.feature.element.ElementActionDispatcher.handleSystemAction(context, parsed.action, containerId)
                                     }
                                     is SidebarItem.VolumeAction -> {
                                         try {
@@ -549,6 +548,10 @@ class HybridGridPageView(
                                 if (parsed is SidebarItem.App) {
                                     actionList.add("App Info")
                                 }
+                                val isForceStop = (parsed is SidebarItem.SystemAction && parsed.action == "force_stop_running_apps")
+                                if (isForceStop) {
+                                    actionList.add("Edit")
+                                }
                                 actionList.add("Change Icon")
                                 val customIconFile = java.io.File(context.filesDir, "custom_icons/${item.id.replace(Regex("[^a-zA-Z0-9.-]"), "_")}.webp")
                                 if (customIconFile.exists()) {
@@ -586,6 +589,17 @@ class HybridGridPageView(
                                         setOnClickListener {
                                             popupWindow?.dismiss()
                                             when (action) {
+                                                "Edit" -> {
+                                                    if (isForceStop) {
+                                                        val intent = Intent(context, com.example.AppTrackerSettingsActivity::class.java).apply {
+                                                            putExtra("MODE", "force_stop_only")
+                                                            putExtra("CONTAINER_ID", containerId)
+                                                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                                        }
+                                                        context.startActivity(intent)
+                                                        onClose?.invoke() ?: com.example.feature.sidebar.SidebarManager.getInstance(context).closeSidebar()
+                                                    }
+                                                }
                                                 "Remove" -> {
                                                     // Need to remove from items and save
                                                     val newItems = items.toMutableList()
@@ -830,6 +844,10 @@ class HybridGridPageView(
                     if (parsed is SidebarItem.App) {
                         actionList.add("App Info")
                     }
+                    val isForceStop = (parsed is SidebarItem.SystemAction && parsed.action == "force_stop_running_apps")
+                    if (isForceStop) {
+                        actionList.add("Edit")
+                    }
                     actionList.add("Change Icon")
                     val customIconFile = java.io.File(context.filesDir, "custom_icons/${itemId.replace(Regex("[^a-zA-Z0-9.-]"), "_")}.webp")
                     if (customIconFile.exists()) {
@@ -870,6 +888,18 @@ class HybridGridPageView(
                             setOnClickListener {
                                 actionMenuPopup?.dismiss()
                                 when (action) {
+                                    "Edit" -> {
+                                        if (isForceStop) {
+                                            val intent = Intent(context, com.example.AppTrackerSettingsActivity::class.java).apply {
+                                                putExtra("MODE", "force_stop_only")
+                                                putExtra("CONTAINER_ID", containerId)
+                                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                            }
+                                            context.startActivity(intent)
+                                            popupWindow?.dismiss()
+                                            onClose?.invoke() ?: com.example.feature.sidebar.SidebarManager.getInstance(context).closeSidebar()
+                                        }
+                                    }
                                     "Remove" -> {
                                         appsManager.removeItem(itemId)
                                         popupWindow?.dismiss()

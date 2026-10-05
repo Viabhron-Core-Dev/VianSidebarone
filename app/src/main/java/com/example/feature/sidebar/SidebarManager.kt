@@ -235,6 +235,9 @@ class SidebarManager private constructor(private val context: Context) : Sidebar
         val current = _activeState.value ?: return false
         if (index in current.pages.indices) {
             val selectedPage = current.pages[index]
+            if (current.currentPageIndex == index && current.currentPage?.pageId == selectedPage.pageId) {
+                return true
+            }
 
             // Persist selected page for this container
             pageManager.saveSelectedPageId(current.containerId, selectedPage.pageId)

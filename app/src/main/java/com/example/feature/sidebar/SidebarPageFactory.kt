@@ -8,7 +8,7 @@ import android.view.Gravity
 import android.view.View
 import android.widget.FrameLayout
 import android.widget.TextView
-import com.example.utils.SidebarPage
+import com.example.core.SidebarPage
 import kotlinx.coroutines.CoroutineScope
 
 /**
@@ -92,6 +92,7 @@ class DefaultSidebarPageFactory(
             "app_tracker" -> {
                 AppTrackerPageView(
                     context,
+                    containerId = containerId,
                     onCloseSidebar = { onClose() },
                     onAppSelected = { pkgName ->
                         try {

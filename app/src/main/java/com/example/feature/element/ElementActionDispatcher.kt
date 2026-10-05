@@ -132,11 +132,11 @@ object ElementActionDispatcher {
         }
     }
 
-    internal fun handleSystemAction(context: Context, action: String): Boolean {
-        LogKeeper.log(context, TAG, "Handling system action: $action")
+    internal fun handleSystemAction(context: Context, action: String, containerId: String = "sidebar"): Boolean {
+        LogKeeper.log(context, TAG, "Handling system action: $action (container=$containerId)")
         return when (action) {
             "force_stop_running_apps" -> {
-                AppTrackerHelper.startForceStopSequence(context)
+                AppTrackerHelper.startForceStopSequence(context, containerId)
                 true
             }
             "log_keeper" -> {

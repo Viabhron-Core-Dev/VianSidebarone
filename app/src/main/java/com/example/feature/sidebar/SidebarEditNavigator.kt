@@ -2,7 +2,7 @@ package com.example.feature.sidebar
 
 import android.content.Context
 import android.content.Intent
-import com.example.utils.SidebarPage
+import com.example.core.SidebarPage
 
 /**
  * SidebarEditNavigator: Dedicated navigation coordinator for launching page-specific edit and

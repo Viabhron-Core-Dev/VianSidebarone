@@ -1,33 +1,30 @@
 package com.example
 
 import android.app.Activity
-import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.provider.Settings
-import com.example.feature.system_hub.VianSideAccessibilityService
 
+/**
+ * AppTrackerOpenerActivity: Lightweight, on-demand sequential loop presenter for force-stopping apps.
+ *
+ * Strictly adheres to user directive:
+ * "No clicking. Only loop. User will click."
+ *
+ * Sequentially brings up each app's App Info settings page. When the user finishes and returns,
+ * onResume() advances to the next app in the queue until the list is exhausted.
+ */
 class AppTrackerOpenerActivity : Activity() {
     private var packageNames = arrayListOf<String>()
     private var currentIndex = 0
-    private var isAutoForceStop = false
-    private var hasStarted = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        
-        val prefs = getSharedPreferences("FloatingReaderPrefs", Context.MODE_PRIVATE)
-        isAutoForceStop = prefs.getBoolean("app_tracker_auto_force_stop", false)
-        
         packageNames = intent.getStringArrayListExtra("packages") ?: arrayListOf()
         if (packageNames.isEmpty()) {
             finish()
             return
-        }
-        
-        if (isAutoForceStop) {
-            VianSideAccessibilityService.isForceStopping = true
         }
     }
 
@@ -54,17 +51,7 @@ class AppTrackerOpenerActivity : Activity() {
                 openNext()
             }
         } else {
-            if (isAutoForceStop) {
-                VianSideAccessibilityService.isForceStopping = false
-            }
             finish()
-        }
-    }
-    
-    override fun onDestroy() {
-        super.onDestroy()
-        if (isAutoForceStop) {
-            VianSideAccessibilityService.isForceStopping = false
         }
     }
 }

@@ -181,6 +181,9 @@ class HandleManager(private val context: Context) {
         fun getContainerSelectedPageKey(containerId: String): String =
             "handle_${containerId}_selected_page"
 
+        fun getCleanHandleId(handleOrContainerId: String): String =
+            PageManager.getCleanHandleId(handleOrContainerId)
+
         /**
          * Resolves whether a gesture action targets an independent Sidebar Container or an Element/action.
          */
@@ -199,6 +202,11 @@ class HandleManager(private val context: Context) {
             return instance ?: synchronized(this) {
                 instance ?: HandleManager(context.applicationContext).also { instance = it }
             }
+        }
+
+        @androidx.annotation.VisibleForTesting
+        fun resetForTesting() {
+            instance = null
         }
     }
 
@@ -756,6 +764,7 @@ class HandleManager(private val context: Context) {
         val isolatedKey = getContainerSelectedPageKey(containerId)
         if (pageId != null) {
             prefs.edit().putString(isolatedKey, pageId).apply()
+            OverlaySyncManager.syncString(context, isolatedKey, pageId)
         } else {
             prefs.edit().remove(isolatedKey).apply()
         }
@@ -769,10 +778,14 @@ class HandleManager(private val context: Context) {
     }
 
     /**
-     * Parses a raw stored string (comma-separated or bracket-enclosed) into a list of page IDs.
+     * Parses a raw stored string (JSON array, comma-separated or bracket-enclosed) into a list of page IDs.
      */
     fun parsePages(raw: String): List<String> {
         if (raw.isBlank()) return emptyList()
+        val parsedPages = PageManager.parseRawPagesString(raw)
+        if (parsedPages.isNotEmpty()) {
+            return parsedPages.map { it.pageId }
+        }
         val trimmed = raw.trim()
         val clean = if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
             trimmed.substring(1, trimmed.length - 1)

@@ -27,7 +27,7 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.recyclerview.widget.RecyclerView
 import androidx.viewpager2.widget.ViewPager2
-import com.example.utils.SidebarPage
+import com.example.core.SidebarPage
 import com.example.util.AppLogger
 import com.example.core.AppWidgetHelper
 import kotlin.math.max
@@ -412,6 +412,11 @@ class SidebarView(
                     }
                     
                     AppWidgetHelper.startListening(context)
+
+                    // Synchronize active page selection with SidebarManager and persistence
+                    pageConfig?.let {
+                        SidebarManager.getInstance(context).selectPage(actualPosition)
+                    }
                 }
                 
                 // Notify lifecycle and ensure current page is loaded on demand

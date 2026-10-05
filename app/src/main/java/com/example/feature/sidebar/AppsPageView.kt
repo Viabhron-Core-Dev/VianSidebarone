@@ -26,7 +26,7 @@ import kotlinx.coroutines.withContext
 class AppsPageView(
     context: Context,
     private val handleId: String,
-    val pageConfig: com.example.utils.SidebarPage?,
+    val pageConfig: com.example.core.SidebarPage?,
     private val manager: SidebarAppsManager,
     private val serviceScope: CoroutineScope,
     private val onCloseSidebar: () -> Unit,
@@ -511,9 +511,9 @@ class AppsPageView(
                     currentFolderPopup?.dismiss()
                     onCloseSidebar()
                 } else if (item is SidebarItem.SystemAction) {
-                    com.example.feature.element.ElementActionDispatcher.handleSystemAction(context, item.action)
+                    com.example.feature.element.ElementActionDispatcher.handleSystemAction(context, item.action, handleId)
                     currentFolderPopup?.dismiss()
-                        onCloseSidebar()
+                    onCloseSidebar()
                 } else if (item is SidebarItem.PageWindow) {
                     com.example.feature.miniapps.MiniAppManager.toggleApp(context, item.pageType)
                     currentFolderPopup?.dismiss()
@@ -580,6 +580,10 @@ class AppsPageView(
                 if (item is SidebarItem.App) {
                     actionList.add("App Info")
                 }
+                val isForceStop = (item is SidebarItem.SystemAction && item.action == "force_stop_running_apps")
+                if (isForceStop) {
+                    actionList.add("Edit")
+                }
                 actionList.add("Change Icon")
                 val customIconFile = java.io.File(context.filesDir, "custom_icons/${item.id.replace(Regex("[^a-zA-Z0-9.-]"), "_")}.webp")
                 if (customIconFile.exists()) {
@@ -620,6 +624,18 @@ class AppsPageView(
                         setOnClickListener {
                             popupWindow?.dismiss()
                             when (action) {
+                                "Edit" -> {
+                                    if (isForceStop) {
+                                        val intent = android.content.Intent(context, com.example.AppTrackerSettingsActivity::class.java).apply {
+                                            putExtra("MODE", "force_stop_only")
+                                            putExtra("CONTAINER_ID", handleId)
+                                            addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                                        }
+                                        context.startActivity(intent)
+                                        currentFolderPopup?.dismiss()
+                                        onCloseSidebar()
+                                    }
+                                }
                                 "Remove" -> manager.removeItem(item.id)
                                 "Change Icon" -> {
                                     val intent = android.content.Intent(context, com.example.IconPickerActivity::class.java).apply {
@@ -785,16 +801,9 @@ class AppsPageView(
                     label.alpha = 1.0f
                 } else if (item.action == "force_stop_running_apps") {
                     icon.setImageResource(item.iconResId)
-                    val isPresent = com.example.utils.AppTrackerHelper.isAppTrackerConfigured(context)
-                    if (isPresent) {
-                        icon.setColorFilter(android.graphics.Color.parseColor("#00E676"))
-                        icon.alpha = 1.0f
-                        label.alpha = 1.0f
-                    } else {
-                        icon.setColorFilter(android.graphics.Color.parseColor("#888888"))
-                        icon.alpha = 0.38f
-                        label.alpha = 0.38f
-                    }
+                    icon.setColorFilter(android.graphics.Color.parseColor("#00E676"))
+                    icon.alpha = 1.0f
+                    label.alpha = 1.0f
                 } else {
                     icon.setImageResource(item.iconResId)
                     icon.setColorFilter(android.graphics.Color.WHITE)

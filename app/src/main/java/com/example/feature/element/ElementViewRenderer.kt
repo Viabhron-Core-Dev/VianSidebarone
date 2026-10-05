@@ -73,9 +73,7 @@ class ElementViewRenderer(
 
         label.text = parsed.label
 
-        val isForceStop = (parsed is SidebarItem.SystemAction && parsed.action == "force_stop_running_apps")
-        val isConfigured = !isForceStop || AppTrackerHelper.isAppTrackerConfigured(context)
-        label.alpha = if (isConfigured) 1.0f else 0.38f
+        label.alpha = 1.0f
 
         appsManager.bindIcon(item.id, icon, prefs, scope) {
             appsManager.bindIcon(item.id, icon, prefs, scope) {}
@@ -116,6 +114,10 @@ class ElementViewRenderer(
         if (parsed is SidebarItem.App) {
             actionList.add("App Info")
         }
+        val isForceStop = (parsed is SidebarItem.SystemAction && parsed.action == "force_stop_running_apps")
+        if (isForceStop) {
+            actionList.add("Edit")
+        }
         actionList.add("Change Icon")
         val customIconFile = File(context.filesDir, "custom_icons/${item.id.replace(Regex("[^a-zA-Z0-9.-]"), "_")}.webp")
         if (customIconFile.exists()) {
@@ -154,6 +156,17 @@ class ElementViewRenderer(
                 setOnClickListener {
                     popupWindow?.dismiss()
                     when (action) {
+                        "Edit" -> {
+                            if (isForceStop) {
+                                val intent = Intent(context, com.example.AppTrackerSettingsActivity::class.java).apply {
+                                    putExtra("MODE", "force_stop_only")
+                                    putExtra("CONTAINER_ID", containerId)
+                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                }
+                                context.startActivity(intent)
+                                onClose?.invoke() ?: com.example.feature.sidebar.SidebarManager.getInstance(context).closeSidebar()
+                            }
+                        }
                         "Remove" -> {
                             onItemRemoved?.invoke(item.id)
                         }

@@ -238,7 +238,68 @@
 * Any deviation from what was requested, and why: None.
 * Any known issue or follow-up needed: None.
 
-
-
-
-
+### Entry: 2026-10-04T10:10:00Z
+* Timestamp: 2026-10-04T10:10:00Z
+* One-line summary: Unified the existing Page system with a single authoritative SidebarPage model in com.example.core, dual-format persistence auto-migration under isolated keys, and backward-compatible utils adapter.
+* Exact files touched:
+  - `app/src/main/java/com/example/core/PageManager.kt`
+  - `app/src/main/java/com/example/core/HandleManager.kt`
+  - `app/src/main/java/com/example/feature/sidebar/AppsPageView.kt`
+  - `app/src/test/java/com/example/core/UnifiedPageSystemTest.kt`
+  - `receipts/RECEIPTS_096.md`
+* What was actually done:
+  - Authoritative Page System & Model Consolidation:
+    * Established `com.example.core.SidebarPage` and `com.example.core.PageManager` as the single authoritative source of truth for container page decks and page models.
+    * Maintained `com.example.utils.PageManager` as a pure, lightweight backward-compatibility facade delegating 100% of calls to `com.example.core.PageManager`, with `typealias SidebarPage = CoreSidebarPage`.
+    * Migrated `AppsPageView` constructor to directly use `com.example.core.SidebarPage`.
+  - Persistence & Automated Migration:
+    * Enforced primary page deck persistence strictly under `handle_${containerId}_pages` as standard JSON arrays.
+    * In `PageManager.getPageStack`, implemented automated migration writeback: reading from fallback keys (`handle_${cleanContainerId}_pages`, `sidebar_pages`) or legacy comma-separated IDs automatically serializes and persists the normalized deck into `handle_${containerId}_pages`.
+    * Enforced selected page persistence strictly under `handle_${containerId}_selected_page`.
+    * In `PageManager.getSelectedPageId`, implemented automated migration writeback: reading from fallback keys or legacy `default_page_index` resolves the `pageId` and persists it directly to `handle_${containerId}_selected_page`.
+    * Extracted `isPageTypePresentInPrefs` into `PageManager.Companion` for shared SharedPreferences checks without context dependencies.
+  - Hierarchy & Scope Preservation:
+    * Preserved exact `Handle -> Gesture -> Container -> Page -> Element` hierarchy.
+    * Retained element placements strictly scoped to `containerId + pageId` under `handle_${containerId}_page_${pageId}_elements`.
+    * Preserved all existing page types (Hybrid Grid, Apps, Widgets Grid, Calculator, Compass, Media Player, App Tracker, Resources Tracker, Scheduler, Notifications, Widget) without alterations.
+    * Two-process architecture (`:core` / `:heavy`) and Internet Speed Monitor remained completely untouched.
+  - Verification & Test Coverage:
+    * Added `resetForTesting()` to `PageManager` and `HandleManager` companion objects to ensure clean test isolation.
+    * Added unit tests in `UnifiedPageSystemTest.kt` validating JSON serialization, dual-format parsing, fallback key auto-migration writeback, legacy selected-index migration writeback, container isolation, and `utils.PageManager` bridge.
+* How it was verified: local build only (`compile_applet` passed cleanly; `gradle :app:testDebugUnitTest` executed and passed all 149 test suites with 0 failures).
+* Any deviation from what was requested, and why: None.
+### Entry: 2026-10-05T00:43:00Z
+* Timestamp: 2026-10-05T00:43:00Z
+* One-line summary: Decoupled the Force Stop Apps element into a standalone button with container-scoped whitelist configuration, long-press Edit menu across hybrid grid/element/apps views, sequential loop execution without automated clicking, and strictly on-demand same-container synchronization.
+* Exact files touched:
+  - `app/src/main/java/com/example/utils/AppTrackerHelper.kt`
+  - `app/src/main/java/com/example/AppTrackerSettingsActivity.kt`
+  - `app/src/main/java/com/example/feature/sidebar/AppTrackerPageView.kt`
+  - `app/src/main/java/com/example/feature/sidebar/SidebarPageFactory.kt`
+  - `app/src/main/java/com/example/feature/sidebar/HybridGridPageView.kt`
+  - `app/src/main/java/com/example/feature/element/ElementViewRenderer.kt`
+  - `app/src/main/java/com/example/feature/sidebar/AppsPageView.kt`
+  - `app/src/test/java/com/example/feature/sidebar/ForceStopAppsStandaloneTest.kt`
+  - `receipts/RECEIPTS_096.md`
+* What was actually done:
+  - Decoupled Force Stop Apps to Standalone Architecture:
+    * Implemented standalone whitelist persistence in `AppTrackerHelper` using isolated container key `handle_${containerId}_force_stop_whitelist`.
+    * Decoupled Force Stop execution from the existence of the App Tracker sidebar page: `startForceStopSequence` inspects usage access and launches the sequential loop via `AppTrackerOpenerActivity` independently.
+    * Enforced user directive: "No clicking. Only loop. User will click." The loop sequentially brings up the system App Info settings screen for each running app and advances upon return without accessibility automated clicking.
+  - On-Demand Same-Container Synchronization:
+    * Added `AppTrackerHelper.hasAppTrackerInContainer(context, containerId)` to inspect whether the host container contains an `app_tracker` page via `PageManager`.
+    * Added `AppTrackerHelper.syncOnDemand(context, containerId)`: strictly triggers on-demand when reading/saving whitelists or launching force stop, with zero background services or workers.
+    * Enforced container isolation: on-demand sync only bridges settings within the exact same container ID.
+  - Long-Press "Edit" Context Menu Action:
+    * In `HybridGridPageView` (tile & folder popups), `ElementViewRenderer`, and `AppsPageView`, added targeted "Edit" action specifically for `force_stop_running_apps` alongside "Remove", "Change Icon", and "App Info".
+    * Tapping "Edit" launches `AppTrackerSettingsActivity` with `MODE = "force_stop_only"` and the active `containerId`, immediately closing the sidebar overlay.
+  - Contextual Setup Screen (`AppTrackerSettingsActivity`):
+    * Filtered tabs in `force_stop_only` mode to "Running" and "Permissions" (omitting Cache and All Apps as requested in Alternative 2).
+    * Enhanced `WhitelistTab` to read and save via `getForceStopWhitelist` and `saveForceStopWhitelist`, with an informative banner clarifying that highlighted apps are whitelisted and preserved.
+    * Added `isSystem` tracking to `TrackedAppInfo` and enabled active system/user app filtering.
+    * Updated `ExecutePermsTab` with an explanation of the sequential loop, a test trigger button, and Usage Access permission state indicator.
+  - Test Suite & Verification:
+    * Created `ForceStopAppsStandaloneTest.kt` verifying standalone persistence, container isolation, on-demand synchronization when an App Tracker page is added to the container, non-syncing when absent, and system action identification.
+* How it was verified: local build only (`compile_applet` passed cleanly; `gradle :app:testDebugUnitTest` passed all test suites including `ForceStopAppsStandaloneTest` with 0 failures).
+* Any deviation from what was requested, and why: None.
+* Any known issue or follow-up needed: None.

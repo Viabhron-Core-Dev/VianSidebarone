@@ -142,18 +142,9 @@ class ActionPickerActivity : ComponentActivity() {
         }
         override fun onBindViewHolder(holder: ViewHolder, position: Int) {
             val item = items[position]
-            val isForceStop = (item is SidebarItem.SystemAction && item.action == "force_stop_running_apps")
-            val isConfigured = if (isForceStop) com.example.utils.AppTrackerHelper.isAppTrackerConfigured(this@ActionPickerActivity) else true
-
-            if (isForceStop && !isConfigured) {
-                holder.nameView.text = "${item.label} (Requires App Tracker Page)"
-                holder.nameView.alpha = 0.5f
-                holder.iconView.alpha = 0.5f
-            } else {
-                holder.nameView.text = item.label
-                holder.nameView.alpha = 1.0f
-                holder.iconView.alpha = 1.0f
-            }
+            holder.nameView.text = item.label
+            holder.nameView.alpha = 1.0f
+            holder.iconView.alpha = 1.0f
             
             val iconResId = when (item) {
                 is SidebarItem.QuickTile -> item.iconResId
