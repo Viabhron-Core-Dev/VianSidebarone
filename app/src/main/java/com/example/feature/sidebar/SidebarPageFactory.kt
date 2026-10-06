@@ -60,7 +60,15 @@ class DefaultSidebarPageFactory(
                 onHeightChanged(newHeight)
             }
             "apps" -> {
-                val prefKey = "sidebar_apps_${physicalHandleId}_${config.id}"
+                val prefKey = "sidebar_apps_${containerId}_${config.id}"
+                if (!prefs.contains(prefKey)) {
+                    val legacyHandleKey = "sidebar_apps_${physicalHandleId}_${config.id}"
+                    val legacyVal = prefs.getString(legacyHandleKey, null)
+                        ?: if (containerId == "sidebar" || containerId == "handle_1_swipe_left") prefs.getString("sidebar_apps_${config.id}", null) else null
+                    if (legacyVal != null) {
+                        prefs.edit().putString(prefKey, legacyVal).apply()
+                    }
+                }
                 val manager = appsManagers.getOrPut(prefKey) {
                     SidebarAppsManager(context, prefs, viewScope, prefKey) {}
                 }
@@ -69,7 +77,8 @@ class DefaultSidebarPageFactory(
                     context, physicalHandleId, config, manager, viewScope,
                     onCloseSidebar = { onClose() },
                     onDimSidebar = { dimmed -> setDimmed(dimmed) },
-                    onHeightChanged = { newHeight -> onHeightChanged(newHeight) }
+                    onHeightChanged = { newHeight -> onHeightChanged(newHeight) },
+                    containerId = containerId
                 )
                 p.updateData(manager.activeItems)
                 p
@@ -85,7 +94,7 @@ class DefaultSidebarPageFactory(
                 }
             }
             "widgets_grid" -> {
-                WidgetsGridPageView(context, config.id, viewScope) { newHeight ->
+                WidgetsGridPageView(context, config.id, viewScope, containerId) { newHeight ->
                     onHeightChanged(newHeight)
                 }
             }

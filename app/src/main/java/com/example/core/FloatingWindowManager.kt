@@ -427,7 +427,8 @@ class FloatingWindowManager private constructor(context: Context) {
         if (level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW ||
             level >= ComponentCallbacks2.TRIM_MEMORY_MODERATE
         ) {
-            log("TrimMemory level=$level: folding dormant overlay windows")
+            log("TrimMemory level=$level: folding dormant overlay windows and releasing element runtime instances")
+            com.example.feature.element.ElementRuntimeResolver.getInstance(appContext).releaseAll()
             foldAllExceptActive()
         }
     }

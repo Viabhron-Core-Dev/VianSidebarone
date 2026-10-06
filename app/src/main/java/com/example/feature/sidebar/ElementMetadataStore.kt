@@ -102,12 +102,16 @@ object ElementMetadataStore {
                     val url = obj.optString("url", "https://")
                     val label = obj.optString("label", "Link")
                     val iconPath = obj.optString("iconPath", "")
+                    val browserPackage = if (obj.has("browserPackage") && !obj.isNull("browserPackage")) obj.getString("browserPackage") else null
+                    val account = if (obj.has("account") && !obj.isNull("account")) obj.getString("account") else null
                     val meta = ElementMetadata(
                         id = if (uuid.isNotEmpty()) "link:$uuid" else id,
                         type = "link",
                         target = url,
                         label = label,
-                        iconPath = iconPath
+                        iconPath = iconPath,
+                        browserPackage = browserPackage,
+                        account = account
                     )
                     save(context, meta)
                     return meta

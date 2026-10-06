@@ -230,7 +230,10 @@ class PageManager internal constructor(private val context: Context) {
                 ?: if (cleanContainerId == "sidebar") prefs.getString("sidebar_pages", null) else null
         }
 
-        val defaultPageId = if (containerId == "sidebar" || containerId.endsWith("_swipe_left")) {
+        val isFirstHandlePrimary = (containerId == "sidebar" || containerId == "handle_1" ||
+            containerId == "handle_1_swipe_left" || containerId == handleManager.getFirstHandlePrimaryContainerId())
+
+        val defaultPageId = if (isFirstHandlePrimary) {
             "default_hybrid"
         } else {
             "default_hybrid_$containerId"

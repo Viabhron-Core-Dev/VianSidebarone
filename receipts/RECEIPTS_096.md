@@ -303,3 +303,75 @@
 * How it was verified: local build only (`compile_applet` passed cleanly; `gradle :app:testDebugUnitTest` passed all test suites including `ForceStopAppsStandaloneTest` with 0 failures).
 * Any deviation from what was requested, and why: None.
 * Any known issue or follow-up needed: None.
+
+### Entry: 2026-10-05T15:20:00Z
+* Timestamp: 2026-10-05T15:20:00Z
+* One-line summary: Enforced strict container isolation across handles and gestures, safeguarded first-handle invariant and gesture coexistence, eliminated keystore build artifacts, and validated on-demand element parsing.
+* Exact files touched:
+  - `app/src/main/java/com/example/core/FloatingWindowManager.kt`
+  - `app/src/main/java/com/example/core/HandleManager.kt`
+  - `app/src/main/java/com/example/feature/sidebar/AppsPageView.kt`
+  - `app/src/main/java/com/example/SidebarEditActivity.kt`
+  - `app/src/main/java/com/example/feature/element/ElementIdParser.kt`
+  - `app/src/main/java/com/example/feature/sidebar/ElementMetadataStore.kt`
+  - `app/src/test/java/com/example/core/UnifiedPageSystemTest.kt`
+  - `app/src/test/java/com/example/feature/element/ElementIdParserTest.kt`
+  - `receipts/RECEIPTS_096.md`
+* What was actually done:
+  - Security Scan & Credential Immunity:
+    * Executed mandatory security audit and purged ephemeral keystore artifacts (`debug.keystore`, `debug.keystore.base64`) from the workspace root per non-negotiable credential immunity protocol.
+    * Verified `.gitignore` excludes `*.keystore`, `*.jks`, `*.p12`, `.env`, and `local.properties`.
+  - Container Isolation & First-Handle Invariant:
+    * In `HandleManager.kt`, enforced that `handle_1` can never be deleted (`deleteHandle` rejects `handle_1`), and cannot disable its only sidebar gesture without an alternative.
+    * Allowed multiple gestures on `handle_1` to coexist with independent containers; refined migration so that switching primary sidebar gesture migrates existing customized container state while preserving multiple gesture configuration.
+    * Added missing `TAG` constant and `defaultSwipeLeft` resolution in `HandleManager`.
+    * Enforced container-scoped preference persistence in `AppsPageView.kt` and `SidebarEditActivity.kt` for `handle_${containerId}_page_${pageId}_columns` and `handle_${containerId}_page_${pageId}_rows`, preventing cross-container layout bleed.
+  - On-Demand Element Infrastructure & Parser:
+    * Verified `ElementIdParser` and `ElementActionRegistry` provide lightweight, on-demand resolution and execution without resident runtime overhead in Main.
+    * Fixed `parseLink` and inline metadata deserialization in `ElementMetadataStore.kt` to preserve `browserPackage` and `account` attributes.
+    * Standardized `parseSpacer` to generate canonical `"spacer:$uuid"` IDs.
+    * Fixed `FloatingWindowManager.onTrimMemory` to reference `appContext` when invoking `ElementRuntimeResolver.releaseAll()`.
+  - Comprehensive Test Suite Verification:
+    * Updated `UnifiedPageSystemTest.kt` to validate default hybrid page CRUD operations under primary container `handle_1_swipe_left`.
+    * Fixed expected quicktile label ("Torch") and floating trigger substring in `ElementIdParserTest.kt`.
+    * Executed full unit test suite: all 177 tests passed with zero failures (`BUILD SUCCESSFUL in 8s`).
+* How it was verified: local build only (`gradle :app:testDebugUnitTest` executed and passed all 177 tests across 16 test suites; `compile_applet` passed cleanly).
+* Any deviation from what was requested, and why: None.
+* Any known issue or follow-up needed: None.
+
+### Entry: 2026-10-06T00:48:00Z
+* Timestamp: 2026-10-06T00:48:00Z
+* One-line summary: Implemented Apps-page Heavy data-provider split with handcrafted Binder IPC, on-demand disposable lifecycle, zero-scan search in Main, and WebP icon pre-caching.
+* Exact files touched:
+  - `/.gitignore`
+  - `/app/src/main/java/com/example/core/ipc/IpcModels.kt`
+  - `/app/src/main/java/com/example/core/ipc/HeavyProcessHost.kt`
+  - `/app/src/main/java/com/example/core/ipc/HeavyProcessConnectionManager.kt`
+  - `/app/src/main/java/com/example/feature/heavy/HeavyAppsDataProvider.kt`
+  - `/app/src/main/java/com/example/feature/sidebar/SidebarAppsManager.kt`
+  - `/app/src/main/java/com/example/feature/sidebar/AppsPageView.kt`
+  - `/app/src/test/java/com/example/feature/sidebar/AppsHeavyDataProviderTest.kt`
+  - `/receipts/RECEIPTS_096.md`
+* What was actually done:
+  - Keystore Artifacts & Security Cleanup:
+    * Removed generated `debug.keystore` and `debug.keystore.base64` artifacts from workspace root.
+    * Ensured `debug.keystore` is explicitly tracked in `.gitignore`.
+  - Heavy Process Data Provider (`:heavy`):
+    * Added `GET_APPS_DATA` to `HeavyCommandType` in `IpcModels.kt`.
+    * Implemented `HeavyAppsDataProvider` running strictly in `:heavy` to execute expensive package scanning via `LauncherApps` and `PackageManager.queryIntentActivities`, retrieve labels, sort alphabetically, and pre-cache downsampled WebP icons (48dp) to disk cache (`IconCacheManager`).
+    * Formatted compact JSON payload with container and page scoping and dispatched via `HeavyProcessHost`.
+  - Main Process Connection & Lifecycle Management:
+    * In `HeavyProcessConnectionManager`, introduced active consumer ref-counting (`acquireConsumer` / `releaseConsumer`) and `sendCommandSuspending` with connection timeout handling.
+    * Guaranteed Heavy starts on demand only when Apps is viewed and disconnects when unneeded, ensuring 0 MB resident idle in Heavy when away from Apps.
+    * Guaranteed Main survives Heavy process death (`IBinder.DeathRecipient`) without crashing and seamlessly reconnects on subsequent requests.
+  - Apps Page & Manager Integration:
+    * In `SidebarAppsManager`, added `allInstalledApps`, `loadAppsFromHeavy`, `filterApps`, and `releaseHeavyConnection`.
+    * In `AppsPageView`, on window attach requests data from Heavy asynchronously; on detach releases Heavy consumer.
+    * Search and filtering operate strictly in Main memory against compact `allInstalledApps` or active items without triggering any PackageManager scans or Binder transactions.
+  - Unit Test & Compilation Verification:
+    * Created `AppsHeavyDataProviderTest.kt` with 7 test suites validating request/response, container identity, empty results, process death resilience, reconnect/retry, zero-scan search/filter, and container isolation.
+    * Executed full unit test suite: 184 tests passed with 0 failures (`BUILD SUCCESSFUL in 10s`).
+    * Compiled debug applet cleanly via `compile_applet`.
+* How it was verified: local build only (`gradle :app:testDebugUnitTest` executed and passed 184/184 tests; `compile_applet` passed cleanly).
+* Any deviation from what was requested, and why: None.
+* Any known issue or follow-up needed: None.

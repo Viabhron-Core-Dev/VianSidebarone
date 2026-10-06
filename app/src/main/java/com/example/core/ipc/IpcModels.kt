@@ -13,6 +13,7 @@ enum class HeavyCommandType {
     CALL_STATE_CHANGED,
     REQUEST_CALL_RECORDER,
     SHOW_WELCOME,
+    GET_APPS_DATA,
     CUSTOM
 }
 

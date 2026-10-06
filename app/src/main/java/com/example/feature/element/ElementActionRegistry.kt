@@ -139,15 +139,7 @@ class ElementActionRegistry private constructor(private val context: Context) {
             return object : CommonElementRuntimeContract {
                 override val descriptor: ElementDescriptor = descriptor
                 override fun execute(executionContext: ElementExecutionContext): Boolean {
-                    val sharedPrefs = executionContext.context.getSharedPreferences("FloatingReaderPrefs", Context.MODE_PRIVATE)
-                    val dummyScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main)
-                    val appsManager = com.example.feature.sidebar.SidebarAppsManager(
-                        executionContext.context,
-                        sharedPrefs,
-                        dummyScope,
-                        "action_registry_dispatch"
-                    ) {}
-                    val item = appsManager.parseId(actionKey) ?: return false
+                    val item = ElementIdParser.parse(executionContext.context, actionKey) ?: return false
                     return ElementActionDispatcher.execute(executionContext.context, item)
                 }
             }

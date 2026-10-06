@@ -132,7 +132,7 @@ class UnifiedPageSystemTest {
     @Test
     fun testPageStackCrudOperations() {
         val pageManager = PageManager.getInstance(fakeContext)
-        val containerId = "handle_3_swipe_left"
+        val containerId = "handle_1_swipe_left"
 
         // Initial default stack
         val initial = pageManager.getPageStack(containerId)

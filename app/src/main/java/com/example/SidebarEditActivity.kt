@@ -51,8 +51,15 @@ class SidebarEditActivity : ComponentActivity() {
         prefs = getSharedPreferences("FloatingReaderPrefs", Context.MODE_PRIVATE)
         folderUuid = intent.getStringExtra("FOLDER_UUID")
         pageId = intent.getStringExtra("PAGE_ID") ?: "default_apps"
-        val handleId = intent.getStringExtra("HANDLE_ID") ?: intent.getStringExtra("CONTAINER_ID") ?: "sidebar"
-        myPrefKey = "sidebar_apps_" + handleId + "_" + pageId
+        val containerId = intent.getStringExtra("CONTAINER_ID") ?: intent.getStringExtra("HANDLE_ID") ?: "sidebar"
+        val handleId = intent.getStringExtra("HANDLE_ID") ?: "sidebar"
+        myPrefKey = "sidebar_apps_" + containerId + "_" + pageId
+        if (!prefs.contains(myPrefKey) && prefs.contains("sidebar_apps_" + handleId + "_" + pageId)) {
+            val legacyVal = prefs.getString("sidebar_apps_" + handleId + "_" + pageId, null)
+            if (legacyVal != null) {
+                prefs.edit().putString(myPrefKey, legacyVal).apply()
+            }
+        }
         
         manager = SidebarAppsManager(this, prefs, serviceScope, myPrefKey) {
             runOnUiThread {
@@ -71,14 +78,15 @@ class SidebarEditActivity : ComponentActivity() {
         })
 
         if (folderUuid == null) {
+            val containerId = intent.getStringExtra("CONTAINER_ID") ?: intent.getStringExtra("HANDLE_ID") ?: "sidebar"
             val handleId = intent.getStringExtra("HANDLE_ID") ?: "sidebar"
-            val c = prefs.getInt("handle_${handleId}_page_${pageId}_columns", -1)
+            val c = prefs.getInt("handle_${containerId}_page_${pageId}_columns", prefs.getInt("handle_${handleId}_page_${pageId}_columns", -1))
             if (c == -1) {
-                totalCols = prefs.getInt("handle_${handleId}_columns", prefs.getInt("sidebar_columns", 3))
-                totalRows = prefs.getInt("handle_${handleId}_rows", prefs.getInt("sidebar_rows", 3))
+                totalCols = prefs.getInt("handle_${containerId}_columns", prefs.getInt("handle_${handleId}_columns", prefs.getInt("sidebar_columns", 3)))
+                totalRows = prefs.getInt("handle_${containerId}_rows", prefs.getInt("handle_${handleId}_rows", prefs.getInt("sidebar_rows", 3)))
             } else {
                 totalCols = c
-                totalRows = prefs.getInt("handle_${handleId}_page_${pageId}_rows", 3)
+                totalRows = prefs.getInt("handle_${containerId}_page_${pageId}_rows", prefs.getInt("handle_${handleId}_page_${pageId}_rows", 3))
             }
         }
 
@@ -351,18 +359,27 @@ class SidebarEditActivity : ComponentActivity() {
             setResult(RESULT_OK, resultIntent)
             com.example.core.LogKeeper.writeLog("FolderElement", "final saved child count: ${arr.length()}")
         } else {
-            val handleId = intent.getStringExtra("HANDLE_ID") ?: intent.getStringExtra("CONTAINER_ID") ?: "sidebar"
+            val containerId = intent.getStringExtra("CONTAINER_ID") ?: intent.getStringExtra("HANDLE_ID") ?: "sidebar"
+            val handleId = intent.getStringExtra("HANDLE_ID") ?: "sidebar"
             val appsJson = arr.toString()
-            prefs.edit()
+            val editor = prefs.edit()
                 .putString(myPrefKey, appsJson)
                 .putString("sidebar_apps_$pageId", appsJson)
-                .putInt("handle_${handleId}_page_${pageId}_columns", totalCols)
-                .putInt("handle_${handleId}_page_${pageId}_rows", totalRows)
-                .commit()
+                .putInt("handle_${containerId}_page_${pageId}_columns", totalCols)
+                .putInt("handle_${containerId}_page_${pageId}_rows", totalRows)
+            if (containerId != handleId) {
+                editor.putInt("handle_${handleId}_page_${pageId}_columns", totalCols)
+                editor.putInt("handle_${handleId}_page_${pageId}_rows", totalRows)
+            }
+            editor.commit()
             com.example.core.OverlaySyncManager.syncString(this, myPrefKey, appsJson)
             com.example.core.OverlaySyncManager.syncString(this, "sidebar_apps_$pageId", appsJson)
-            com.example.core.OverlaySyncManager.syncInt(this, "handle_${handleId}_page_${pageId}_columns", totalCols)
-            com.example.core.OverlaySyncManager.syncInt(this, "handle_${handleId}_page_${pageId}_rows", totalRows)
+            com.example.core.OverlaySyncManager.syncInt(this, "handle_${containerId}_page_${pageId}_columns", totalCols)
+            com.example.core.OverlaySyncManager.syncInt(this, "handle_${containerId}_page_${pageId}_rows", totalRows)
+            if (containerId != handleId) {
+                com.example.core.OverlaySyncManager.syncInt(this, "handle_${handleId}_page_${pageId}_columns", totalCols)
+                com.example.core.OverlaySyncManager.syncInt(this, "handle_${handleId}_page_${pageId}_rows", totalRows)
+            }
             com.example.util.AppLogger.d("SidebarEdit", "Saved ${localIds.size} items to apps grid.")
         }
         

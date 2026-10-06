@@ -32,7 +32,8 @@ class AppsPageView(
     private val onCloseSidebar: () -> Unit,
     private val onDimSidebar: ((Boolean) -> Unit)? = null,
     private val onHeightChanged: ((Int) -> Unit)? = null,
-    private val onEditModeClicked: (() -> Unit)? = null
+    private val onEditModeClicked: (() -> Unit)? = null,
+    private val containerId: String = handleId
 ) : FrameLayout(context), SidebarPageControllable {
 
     private val prefs = context.getSharedPreferences("FloatingReaderPrefs", Context.MODE_PRIVATE)
@@ -58,8 +59,9 @@ class AppsPageView(
 
     init {
         val density = context.resources.displayMetrics.density
-        val c = prefs.getInt("handle_${handleId}_page_${pageConfig?.id}_columns", -1)
-        val defaultCols = prefs.getInt("handle_${handleId}_columns", prefs.getInt("sidebar_columns", 3))
+        val containerCols = prefs.getInt("handle_${containerId}_page_${pageConfig?.id}_columns", -1)
+        val c = if (containerCols != -1) containerCols else prefs.getInt("handle_${handleId}_page_${pageConfig?.id}_columns", -1)
+        val defaultCols = prefs.getInt("handle_${containerId}_columns", prefs.getInt("handle_${handleId}_columns", prefs.getInt("sidebar_columns", 3)))
         columns = if (pageConfig?.useCustomSettings == true) pageConfig.gridColumns else (if (c != -1) c else defaultCols)
 
         adapter = AppsAdapter(displayedItems)
@@ -107,8 +109,9 @@ class AppsPageView(
 
     private val onManagerUpdatedListener: () -> Unit = {
         post {
-            val c = prefs.getInt("handle_${handleId}_page_${pageConfig?.id}_columns", -1)
-            val defaultCols = prefs.getInt("handle_${handleId}_columns", prefs.getInt("sidebar_columns", 3))
+            val containerCols = prefs.getInt("handle_${containerId}_page_${pageConfig?.id}_columns", -1)
+            val c = if (containerCols != -1) containerCols else prefs.getInt("handle_${handleId}_page_${pageConfig?.id}_columns", -1)
+            val defaultCols = prefs.getInt("handle_${containerId}_columns", prefs.getInt("handle_${handleId}_columns", prefs.getInt("sidebar_columns", 3)))
             val updatedCols = if (pageConfig?.useCustomSettings == true) pageConfig.gridColumns else (if (c != -1) c else defaultCols)
             if (updatedCols != columns && updatedCols > 0) {
                 columns = updatedCols
@@ -119,6 +122,25 @@ class AppsPageView(
     }
 
     private var sourceApps = listOf<SidebarItem>()
+    private var searchQuery: String = ""
+
+    fun setSearchQuery(query: String) {
+        searchQuery = query.trim()
+        refreshList()
+    }
+
+    fun getSearchQuery(): String = searchQuery
+
+    fun filterApps(query: String): List<SidebarItem> {
+        val q = query.trim()
+        if (q.isEmpty()) return displayedItems
+        return displayedItems.filter { item ->
+            when (item) {
+                is SidebarItem.App -> item.label.contains(q, ignoreCase = true) || item.packageName.contains(q, ignoreCase = true)
+                else -> item.label.contains(q, ignoreCase = true)
+            }
+        }
+    }
 
     fun updateData(apps: List<SidebarItem>) {
         sourceApps = apps
@@ -127,7 +149,15 @@ class AppsPageView(
 
     private fun refreshList() {
         val flatList = mutableListOf<SidebarItem>()
-        for (item in sourceApps) {
+        val baseItems = if (sourceApps.isNotEmpty()) {
+            sourceApps
+        } else if (manager.allInstalledApps.isNotEmpty()) {
+            manager.allInstalledApps.map { SidebarItem.App(it.packageName, it.label) }
+        } else {
+            emptyList()
+        }
+
+        for (item in baseItems) {
             flatList.add(item)
             if (item is SidebarItem.Folder && expandedFolders.contains(item.id)) {
                 for (itemId in item.items) {
@@ -138,10 +168,21 @@ class AppsPageView(
                 }
             }
         }
-        displayedItems = flatList
-        adapter.updateItems(flatList)
+
+        displayedItems = if (searchQuery.isNotEmpty()) {
+            flatList.filter { item ->
+                when (item) {
+                    is SidebarItem.App -> item.label.contains(searchQuery, ignoreCase = true) || item.packageName.contains(searchQuery, ignoreCase = true)
+                    else -> item.label.contains(searchQuery, ignoreCase = true)
+                }
+            }
+        } else {
+            flatList
+        }
+
+        adapter.updateItems(displayedItems)
         
-        if (flatList.isEmpty()) {
+        if (displayedItems.isEmpty()) {
             emptyView.visibility = android.view.View.VISIBLE
             recyclerView.visibility = android.view.View.GONE
         } else {
@@ -304,7 +345,8 @@ class AppsPageView(
             }
         }
         
-        val maxCols = if (folder.popupColumns > 0) folder.popupColumns else (if (pageConfig?.useCustomSettings == true) pageConfig.gridColumns else prefs.getInt("handle_${handleId}_columns", prefs.getInt("sidebar_columns", 3)))
+        val defaultCols = prefs.getInt("handle_${containerId}_columns", prefs.getInt("handle_${handleId}_columns", prefs.getInt("sidebar_columns", 3)))
+        val maxCols = if (folder.popupColumns > 0) folder.popupColumns else (if (pageConfig?.useCustomSettings == true) pageConfig.gridColumns else defaultCols)
         val columns = if (folderItems.size <= maxCols && folderItems.isNotEmpty()) folderItems.size else maxCols
         val validCols = if (columns > 0) columns else 1
         
@@ -398,6 +440,10 @@ class AppsPageView(
         super.onAttachedToWindow()
         manager.addUpdateListener(onManagerUpdatedListener)
         manager.ensureLoaded()
+        // Request fresh apps data on-demand from Heavy process without blocking UI
+        manager.loadAppsFromHeavy(containerId, pageConfig?.id) {
+            refreshList()
+        }
         updateData(manager.activeItems)
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
             context.registerReceiver(iconUpdateReceiver, android.content.IntentFilter("com.example.UPDATE_SIDEBAR_ICONS"), Context.RECEIVER_NOT_EXPORTED)
@@ -409,6 +455,7 @@ class AppsPageView(
     override fun onDetachedFromWindow() {
         super.onDetachedFromWindow()
         manager.removeUpdateListener(onManagerUpdatedListener)
+        manager.releaseHeavyConnection()
         try {
             context.unregisterReceiver(iconUpdateReceiver)
         } catch(e: Exception) {}
@@ -887,7 +934,7 @@ class AppsPageView(
         val intent = android.content.Intent(context, com.example.SidebarEditActivity::class.java).apply {
             putExtra("PAGE_ID", pageConfig?.id ?: "")
             putExtra("HANDLE_ID", handleId)
-            putExtra("CONTAINER_ID", handleId)
+            putExtra("CONTAINER_ID", containerId)
             addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
         }
         context.startActivity(intent)

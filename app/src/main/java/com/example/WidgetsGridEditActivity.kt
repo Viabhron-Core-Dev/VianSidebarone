@@ -39,6 +39,7 @@ import kotlin.math.roundToInt
 class WidgetsGridEditActivity : ComponentActivity() {
     private lateinit var prefs: android.content.SharedPreferences
     private lateinit var pageId: String
+    private lateinit var containerId: String
     private lateinit var appWidgetManager: AppWidgetManager
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -47,7 +48,8 @@ class WidgetsGridEditActivity : ComponentActivity() {
             finish()
             return
         }
-        LogKeeper.writeLog("WidgetsGridEdit", "Opened editor for page: $pageId")
+        containerId = intent.getStringExtra("CONTAINER_ID") ?: "sidebar"
+        LogKeeper.writeLog("WidgetsGridEdit", "Opened editor for page: $pageId in container: $containerId")
         prefs = getSharedPreferences("FloatingReaderPrefs", Context.MODE_PRIVATE)
         appWidgetManager = AppWidgetManager.getInstance(this)
 
@@ -58,6 +60,7 @@ class WidgetsGridEditActivity : ComponentActivity() {
                         pageId = pageId,
                         prefs = prefs,
                         appWidgetManager = appWidgetManager,
+                        containerId = containerId,
                         onClose = { finish() },
                         onAddWidget = {
                             val intent = Intent(this@WidgetsGridEditActivity, WidgetPickerActivity::class.java).apply {
@@ -164,20 +167,22 @@ fun WidgetGridEditor(
     pageId: String,
     prefs: android.content.SharedPreferences,
     appWidgetManager: AppWidgetManager,
+    containerId: String = "sidebar",
     onClose: () -> Unit,
     onAddWidget: () -> Unit
 ) {
     val context = LocalContext.current
-    var cols by remember { mutableIntStateOf(prefs.getInt("widgets_grid_cols_$pageId", 4)) }
-    var items by remember { mutableStateOf(loadLocalItems(prefs, pageId)) }
+    val widgetsColsKey = if (containerId != "sidebar" || prefs.contains("handle_${containerId}_widgets_grid_cols_$pageId")) "handle_${containerId}_widgets_grid_cols_$pageId" else "widgets_grid_cols_$pageId"
+    var cols by remember { mutableIntStateOf(prefs.getInt(widgetsColsKey, prefs.getInt("widgets_grid_cols_$pageId", 4))) }
+    var items by remember { mutableStateOf(loadLocalItems(prefs, pageId, containerId)) }
     var isUserInteracting by remember { mutableStateOf(false) }
     val scrollState = rememberScrollState()
     
     // Auto-save when cols change
     LaunchedEffect(cols) {
-        prefs.edit().putInt("widgets_grid_cols_$pageId", cols).commit()
-        com.example.core.OverlaySyncManager.syncInt(context, "widgets_grid_cols_$pageId", cols)
-        saveItems(prefs, pageId, items, context)
+        prefs.edit().putInt(widgetsColsKey, cols).commit()
+        com.example.core.OverlaySyncManager.syncInt(context, widgetsColsKey, cols)
+        saveItems(prefs, pageId, items, context, containerId)
     }
 
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
@@ -433,8 +438,13 @@ fun getWidgetName(context: Context, id: String, appWidgetManager: AppWidgetManag
     }
 }
 
-fun loadLocalItems(prefs: android.content.SharedPreferences, pageId: String): List<GridWidgetItem> {
-    val jsonStr = prefs.getString("widgets_grid_$pageId", "[]") ?: "[]"
+fun loadLocalItems(prefs: android.content.SharedPreferences, pageId: String, containerId: String = "sidebar"): List<GridWidgetItem> {
+    val isolatedKey = "handle_${containerId}_widgets_grid_$pageId"
+    val legacyKey = "widgets_grid_$pageId"
+    val key = if (prefs.contains(isolatedKey)) isolatedKey
+        else if (prefs.contains(legacyKey) && (containerId == "sidebar" || containerId == "handle_1_swipe_left" || containerId == "handle_1")) legacyKey
+        else isolatedKey
+    val jsonStr = prefs.getString(key, "[]") ?: "[]"
     val arr = JSONArray(jsonStr)
     val list = mutableListOf<GridWidgetItem>()
     for (i in 0 until arr.length()) {
@@ -464,7 +474,7 @@ fun loadLocalItems(prefs: android.content.SharedPreferences, pageId: String): Li
     return list
 }
 
-fun saveItems(prefs: android.content.SharedPreferences, pageId: String, items: List<GridWidgetItem>, context: Context? = null) {
+fun saveItems(prefs: android.content.SharedPreferences, pageId: String, items: List<GridWidgetItem>, context: Context? = null, containerId: String = "sidebar") {
     val arr = JSONArray()
     items.forEach { 
         val obj = JSONObject()
@@ -476,9 +486,10 @@ fun saveItems(prefs: android.content.SharedPreferences, pageId: String, items: L
         arr.put(obj)
     }
     val jsonStr = arr.toString()
-    prefs.edit().putString("widgets_grid_$pageId", jsonStr).commit()
+    val key = if (containerId != "sidebar" || prefs.contains("handle_${containerId}_widgets_grid_$pageId")) "handle_${containerId}_widgets_grid_$pageId" else "widgets_grid_$pageId"
+    prefs.edit().putString(key, jsonStr).commit()
     if (context != null) {
-        com.example.core.OverlaySyncManager.syncString(context, "widgets_grid_$pageId", jsonStr)
+        com.example.core.OverlaySyncManager.syncString(context, key, jsonStr)
     }
-    LogKeeper.writeLog("WidgetsGridEdit", "Saved ${items.size} items to prefs for page: $pageId")
+    LogKeeper.writeLog("WidgetsGridEdit", "Saved ${items.size} items to prefs for page: $pageId in container: $containerId")
 }

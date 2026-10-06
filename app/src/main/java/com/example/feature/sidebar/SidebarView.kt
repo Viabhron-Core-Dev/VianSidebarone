@@ -114,7 +114,7 @@ class SidebarView(
                 "scheduler", "notifications", "notification", "app_tracker" -> 330
                 "media_player" -> 300
                 "widgets_grid", "widget" -> {
-                    val cols = prefs.getInt("widgets_grid_cols_${initialPage?.id}", 4)
+                    val cols = prefs.getInt("handle_${containerId}_widgets_grid_cols_${initialPage?.id}", prefs.getInt("widgets_grid_cols_${initialPage?.id}", 4))
                     if (cols == 3) prefs.getInt("handle_${containerId}_sidebar_width", prefs.getInt("sidebar_width", 220))
                     else if (cols <= 2) prefs.getInt("handle_${containerId}_sidebar_width", prefs.getInt("sidebar_width", 155))
                     else prefs.getInt("handle_${containerId}_sidebar_width", prefs.getInt("sidebar_width", 265))
@@ -126,8 +126,8 @@ class SidebarView(
                     else prefs.getInt("handle_${containerId}_sidebar_width", prefs.getInt("sidebar_width", 265))
                 }
                 "apps" -> {
-                    val c = prefs.getInt("handle_${physicalHandleId}_page_${initialPage?.id}_columns", -1)
-                    val defaultCols = prefs.getInt("handle_${physicalHandleId}_columns", prefs.getInt("sidebar_columns", 3))
+                    val c = prefs.getInt("handle_${containerId}_page_${initialPage?.id}_columns", prefs.getInt("handle_${physicalHandleId}_page_${initialPage?.id}_columns", -1))
+                    val defaultCols = prefs.getInt("handle_${containerId}_columns", prefs.getInt("handle_${physicalHandleId}_columns", prefs.getInt("sidebar_columns", 3)))
                     val cols = if (initialPage?.useCustomSettings == true) initialPage.gridColumns else (if (c != -1) c else defaultCols)
                     if (cols == 3) prefs.getInt("handle_${containerId}_sidebar_width", prefs.getInt("sidebar_width", 220))
                     else if (cols <= 2) prefs.getInt("handle_${containerId}_sidebar_width", prefs.getInt("sidebar_width", 155))
@@ -499,7 +499,7 @@ class SidebarView(
                 "scheduler", "notifications", "notification", "app_tracker" -> 330
                 "media_player" -> 300
                 "widgets_grid", "widget" -> {
-                    val cols = prefs.getInt("widgets_grid_cols_${page.id}", 4)
+                    val cols = prefs.getInt("handle_${containerId}_widgets_grid_cols_${page.id}", prefs.getInt("widgets_grid_cols_${page.id}", 4))
                     if (cols == 3) prefs.getInt("handle_${containerId}_sidebar_width", prefs.getInt("sidebar_width", 220))
                     else if (cols <= 2) prefs.getInt("handle_${containerId}_sidebar_width", prefs.getInt("sidebar_width", 155))
                     else prefs.getInt("handle_${containerId}_sidebar_width", prefs.getInt("sidebar_width", 265))
@@ -511,8 +511,8 @@ class SidebarView(
                     else prefs.getInt("handle_${containerId}_sidebar_width", prefs.getInt("sidebar_width", 265))
                 }
                 "apps" -> {
-                    val c = prefs.getInt("handle_${physicalHandleId}_page_${page.id}_columns", -1)
-                    val defaultCols = prefs.getInt("handle_${physicalHandleId}_columns", prefs.getInt("sidebar_columns", 3))
+                    val c = prefs.getInt("handle_${containerId}_page_${page.id}_columns", prefs.getInt("handle_${physicalHandleId}_page_${page.id}_columns", -1))
+                    val defaultCols = prefs.getInt("handle_${containerId}_columns", prefs.getInt("handle_${physicalHandleId}_columns", prefs.getInt("sidebar_columns", 3)))
                     val cols = if (page.useCustomSettings) page.gridColumns else (if (c != -1) c else defaultCols)
                     if (cols == 3) prefs.getInt("handle_${containerId}_sidebar_width", prefs.getInt("sidebar_width", 220))
                     else if (cols <= 2) prefs.getInt("handle_${containerId}_sidebar_width", prefs.getInt("sidebar_width", 155))

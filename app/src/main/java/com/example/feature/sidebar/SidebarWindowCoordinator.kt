@@ -120,6 +120,7 @@ class SidebarWindowCoordinator private constructor(context: Context) {
             val window = activeSidebarWindow
             if (window != null) {
                 try {
+                    com.example.feature.element.ElementRuntimeResolver.getInstance(appContext).releaseAll()
                     floatingWindowManager.unregisterWindow(window.windowId)
                     LogKeeper.log(appContext, TAG, "SidebarWindow unregistered from FloatingWindowManager.")
                 } catch (e: Exception) {

@@ -286,6 +286,104 @@ class HandleGestureContainerTest {
         val rightPages = manager.getPagesForContainer("handle_1_swipe_right")
         assertEquals(listOf(HandleManager.DEFAULT_PAGE_HYBRID), rightPages)
     }
+
+    // 9. First-handle invariant: handle_1 cannot be deleted
+    @Test
+    fun testHandle1CannotBeDeleted() {
+        val manager = HandleManager(fakeContext)
+        val initialHandles = manager.getAllHandles()
+        assertTrue(initialHandles.any { it.id == "handle_1" })
+
+        val deleted = manager.deleteHandle("handle_1")
+        assertFalse("handle_1 must not be deletable", deleted)
+
+        assertNotNull("handle_1 must still exist", manager.getHandle("handle_1"))
+        assertTrue("handle_ids must retain handle_1", manager.getHandleIds().contains("handle_1"))
+    }
+
+    // 10. First-handle invariant: handle_1 cannot remove its only sidebar gesture
+    @Test
+    fun testHandle1CannotRemoveOnlySidebarGesture() {
+        val manager = HandleManager(fakeContext)
+        manager.configureGesture("handle_1", HandleGestures.SWIPE_LEFT, HandleManager.ACTION_OPEN_SIDEBAR)
+
+        // Attempt to remove the only sidebar gesture on handle_1
+        manager.removeGesture("handle_1", HandleGestures.SWIPE_LEFT, cleanContainerData = false)
+
+        val handle = manager.getHandle("handle_1")
+        assertEquals(
+            "handle_1 must keep at least one gesture opening sidebar",
+            HandleManager.ACTION_OPEN_SIDEBAR,
+            handle?.getActionForGesture(HandleGestures.SWIPE_LEFT)
+        )
+    }
+
+    // 11. First-handle invariant: gesture migration preserves existing state
+    @Test
+    fun testHandle1GestureMigrationPreservesExistingState() {
+        val manager = HandleManager(fakeContext)
+        val oldContainer = "handle_1_swipe_left"
+        val newContainer = "handle_1_swipe_right"
+
+        // Set up initial container state under swipe_left
+        manager.configureGesture("handle_1", HandleGestures.SWIPE_LEFT, HandleManager.ACTION_OPEN_SIDEBAR)
+        manager.savePagesForContainer(oldContainer, listOf("home_page", "calc_page", "apps_page"))
+        manager.saveSelectedPageForContainer(oldContainer, "calc_page")
+        fakePrefs.edit().putString("handle_${oldContainer}_page_calc_page_elements", "elem_1,elem_2").apply()
+        fakePrefs.edit().putInt("handle_${oldContainer}_sidebar_width", 280).apply()
+        fakePrefs.edit().putString("sidebar_apps_${oldContainer}_apps_page", "[app1,app2]").apply()
+
+        // Change handle_1's sidebar gesture from SWIPE_LEFT to SWIPE_RIGHT
+        manager.configureGesture("handle_1", HandleGestures.SWIPE_RIGHT, HandleManager.ACTION_OPEN_SIDEBAR)
+
+        // Verify old gesture is retired
+        val handle = manager.getHandle("handle_1")
+        assertEquals(HandleManager.ACTION_NONE, handle?.getActionForGesture(HandleGestures.SWIPE_LEFT))
+        assertEquals(HandleManager.ACTION_OPEN_SIDEBAR, handle?.getActionForGesture(HandleGestures.SWIPE_RIGHT))
+
+        // Verify complete state is migrated to newContainer
+        val migratedPages = manager.getPagesForContainer(newContainer)
+        assertEquals(listOf("home_page", "calc_page", "apps_page"), migratedPages)
+        assertEquals("calc_page", manager.getSelectedPageForContainer(newContainer))
+        assertEquals("elem_1,elem_2", fakePrefs.getString("handle_${newContainer}_page_calc_page_elements", null))
+        assertEquals(280, fakePrefs.getInt("handle_${newContainer}_sidebar_width", -1))
+        assertEquals("[app1,app2]", fakePrefs.getString("sidebar_apps_${newContainer}_apps_page", null))
+
+        // Verify old container was cleaned
+        assertFalse(fakePrefs.contains(HandleManager.getContainerPagesKey(oldContainer)))
+        assertFalse(fakePrefs.contains("handle_${oldContainer}_sidebar_width"))
+    }
+
+    // 12. Verify container-isolated persistence between handle 1 and handle 2
+    @Test
+    fun testContainerIsolatedPersistence() {
+        val manager = HandleManager(fakeContext)
+        val pageManager = PageManager(fakeContext)
+
+        val handle2 = manager.createHandle(name = "Handle 2", edge = HandleEdge.LEFT)
+        manager.configureGesture(handle2.id, HandleGestures.SWIPE_LEFT, HandleManager.ACTION_OPEN_SIDEBAR)
+
+        val container1 = "handle_1_swipe_left"
+        val container2 = "handle_2_swipe_left"
+
+        // Handle 1 primary container uses default_hybrid
+        val pages1 = pageManager.getPageStack(container1)
+        assertEquals("default_hybrid", pages1.first().pageId)
+
+        // Handle 2 container uses default_hybrid_handle_2_swipe_left to avoid collision
+        val pages2 = pageManager.getPageStack(container2)
+        assertEquals("default_hybrid_$container2", pages2.first().pageId)
+
+        // Verify saving apps in container 1 does not bleed to container 2
+        fakePrefs.edit().putString("sidebar_apps_${container1}_apps", "[app_a,app_b]").apply()
+        assertNull(fakePrefs.getString("sidebar_apps_${container2}_apps", null))
+
+        // Verify saving whitelist in container 2 does not overwrite global or container 1
+        com.example.utils.AppTrackerHelper.saveForceStopWhitelist(fakeContext, container2, setOf("com.pkg.c"))
+        val whitelist2 = com.example.utils.AppTrackerHelper.getForceStopWhitelist(fakeContext, container2)
+        assertEquals(setOf("com.pkg.c"), whitelist2)
+        assertFalse(fakePrefs.getStringSet("force_stop_whitelist_current", emptySet())?.contains("com.pkg.c") == true)
+    }
 }
 
 /**

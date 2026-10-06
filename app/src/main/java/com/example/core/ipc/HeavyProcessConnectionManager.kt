@@ -60,6 +60,7 @@ class HeavyProcessConnectionManager internal constructor(
     private var isServiceBound = false
 
     private val pendingCommands = java.util.concurrent.ConcurrentLinkedQueue<HeavyCommand>()
+    private val activeConsumers = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
 
     private var latestSnapshot: MainStateSnapshot? = null
 
@@ -258,6 +259,33 @@ class HeavyProcessConnectionManager internal constructor(
     }
 
     /**
+     * Registers an active consumer demanding the Heavy process.
+     * Triggers connect() on demand when the first consumer is acquired.
+     */
+    fun acquireConsumer(consumerTag: String) {
+        synchronized(lock) {
+            activeConsumers.add(consumerTag)
+        }
+        connect(autoCreate = true)
+    }
+
+    /**
+     * Unregisters an active consumer.
+     * When no active consumers remain, automatically unbinds and disconnects.
+     */
+    fun releaseConsumer(consumerTag: String) {
+        val remaining = synchronized(lock) {
+            activeConsumers.remove(consumerTag)
+            activeConsumers.size
+        }
+        if (remaining == 0) {
+            disconnect()
+        }
+    }
+
+    fun getActiveConsumerCount(): Int = synchronized(lock) { activeConsumers.size }
+
+    /**
      * Forces a clean disconnect and reconnect sequence.
      */
     fun reconnect(): Boolean {
@@ -302,6 +330,31 @@ class HeavyProcessConnectionManager internal constructor(
             safeLogCrash("HeavyProcessConnectionManager", e)
             IpcResult.error(IpcErrorCode.UNKNOWN_ERROR, e.message ?: "sendCommand failed")
         }
+    }
+
+    /**
+     * Suspending command execution that connects to Heavy if not already connected,
+     * awaiting connection for up to maxWaitMs before transmitting command.
+     */
+    suspend fun sendCommandSuspending(command: HeavyCommand, maxWaitMs: Long = 3000L): IpcResult {
+        if (state == ConnectionState.CONNECTED && remoteProxy != null) {
+            return sendCommand(command, autoConnect = false)
+        }
+
+        connect(autoCreate = true)
+
+        val start = System.currentTimeMillis()
+        while (System.currentTimeMillis() - start < maxWaitMs) {
+            if (state == ConnectionState.CONNECTED && remoteProxy != null) {
+                return sendCommand(command, autoConnect = false)
+            }
+            if (state == ConnectionState.DEAD) {
+                return IpcResult.error(IpcErrorCode.DEAD_BINDER, "Heavy process died while awaiting connection")
+            }
+            kotlinx.coroutines.delay(50L)
+        }
+
+        return IpcResult.error(IpcErrorCode.TIMEOUT, "Timed out awaiting Heavy connection for command ${command.commandId}")
     }
 
     /**

@@ -68,6 +68,15 @@ open class HeavyProcessHost internal constructor(private val context: Context? =
             safeLog("HeavyProcessHost", "Routing SHOW_WELCOME to WelcomeHostExtension")
             welcomeHostExtension.onShowWelcome(cmd)
         }
+        registerCommandHandler(HeavyCommandType.GET_APPS_DATA) { cmd ->
+            safeLog("HeavyProcessHost", "Routing GET_APPS_DATA to HeavyAppsDataProvider")
+            val custom = appsDataProvider
+            if (custom != null) {
+                custom.invoke(context, cmd)
+            } else {
+                com.example.feature.heavy.HeavyAppsDataProvider.handleGetAppsData(context, cmd)
+            }
+        }
     }
 
     fun getModuleManager(): com.example.feature.heavy.module.HeavyModuleManager {
@@ -93,6 +102,13 @@ open class HeavyProcessHost internal constructor(private val context: Context? =
     }
 
     fun getWelcomeHostExtension(): com.example.feature.welcome.HeavyWelcomeHostExtension = welcomeHostExtension
+
+    @Volatile
+    private var appsDataProvider: ((Context?, HeavyCommand) -> IpcResult)? = null
+
+    fun setAppsDataProvider(provider: ((Context?, HeavyCommand) -> IpcResult)?) {
+        this.appsDataProvider = provider
+    }
 
     fun handleCommand(command: HeavyCommand): IpcResult {
         val resJson = onSendCommand(command.toJson())

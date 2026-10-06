@@ -39,12 +39,13 @@ class WidgetsGridPageView(
     context: Context,
     private val pageId: String,
     private val scope: CoroutineScope,
+    private val containerId: String = "sidebar",
     private val onHeightChanged: (Int) -> Unit
 ) : FrameLayout(context), SidebarPageControllable {
 
     private val prefs = context.getSharedPreferences("FloatingReaderPrefs", Context.MODE_PRIVATE)
 
-    private val appsManager = SidebarAppsManager(context, prefs, scope, "wg_${pageId}") {
+    private val appsManager = SidebarAppsManager(context, prefs, scope, "wg_${containerId}_${pageId}") {
         post { loadWidgets() }
     }
 
@@ -110,8 +111,34 @@ class WidgetsGridPageView(
         } catch (e: Exception) {}
     }
 
+    private fun getWidgetsPrefKey(): String {
+        val isolatedKey = "handle_${containerId}_widgets_grid_$pageId"
+        if (prefs.contains(isolatedKey)) return isolatedKey
+        val legacyKey = "widgets_grid_$pageId"
+        if (prefs.contains(legacyKey) && (containerId == "sidebar" || containerId == "handle_1_swipe_left" || containerId == "handle_1")) {
+            val legacyVal = prefs.getString(legacyKey, null)
+            if (legacyVal != null) {
+                prefs.edit().putString(isolatedKey, legacyVal).apply()
+            }
+            return isolatedKey
+        }
+        return isolatedKey
+    }
+
+    private fun getWidgetsColsPrefKey(): String {
+        val isolatedKey = "handle_${containerId}_widgets_grid_cols_$pageId"
+        if (prefs.contains(isolatedKey)) return isolatedKey
+        val legacyKey = "widgets_grid_cols_$pageId"
+        if (prefs.contains(legacyKey) && (containerId == "sidebar" || containerId == "handle_1_swipe_left" || containerId == "handle_1")) {
+            val legacyCols = prefs.getInt(legacyKey, 4)
+            prefs.edit().putInt(isolatedKey, legacyCols).apply()
+            return isolatedKey
+        }
+        return isolatedKey
+    }
+
     private fun getWidgetItems(): List<GridWidgetItem> {
-        val jsonStr = prefs.getString("widgets_grid_$pageId", "[]") ?: "[]"
+        val jsonStr = prefs.getString(getWidgetsPrefKey(), "[]") ?: "[]"
         val arr = JSONArray(jsonStr)
         val list = mutableListOf<GridWidgetItem>()
         for (i in 0 until arr.length()) {
@@ -151,7 +178,7 @@ class WidgetsGridPageView(
             obj.put("y", it.y)
             arr.put(obj)
         }
-        prefs.edit().putString("widgets_grid_$pageId", arr.toString()).apply()
+        prefs.edit().putString(getWidgetsPrefKey(), arr.toString()).apply()
     }
 
     private fun addWidgetIdToPrefs(widgetId: Int) {
@@ -159,7 +186,7 @@ class WidgetsGridPageView(
         if (items.none { it.id == "widget:$widgetId" || it.id.startsWith("widget:$widgetId:") }) {
             val appWidgetManager = AppWidgetManager.getInstance(context)
             val info = appWidgetManager.getAppWidgetInfo(widgetId)
-            val totalCols = prefs.getInt("widgets_grid_cols_$pageId", 4)
+            val totalCols = prefs.getInt(getWidgetsColsPrefKey(), 4)
             val density = context.resources.displayMetrics.density
             val cellW = if (width > 0) width / totalCols else (60 * density).toInt()
             val (cols, rows) = com.example.calculateWidgetSpan(info, totalCols, cellW, density)
@@ -452,6 +479,7 @@ class WidgetsGridPageView(
     override fun onEditClicked() {
         val intent = android.content.Intent(context, com.example.WidgetsGridEditActivity::class.java).apply {
             putExtra("PAGE_ID", pageId)
+            putExtra("CONTAINER_ID", containerId)
             addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
         }
         context.startActivity(intent)

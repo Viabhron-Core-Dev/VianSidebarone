@@ -127,6 +127,7 @@ class HandleManager(private val context: Context) {
     }
 
     companion object {
+        private const val TAG = "HandleManager"
         const val PREFS_NAME = "FloatingReaderPrefs"
         const val KEY_HANDLES_COUNT = "handles_count"
         const val KEY_HANDLE_IDS = "handle_ids"
@@ -318,15 +319,23 @@ class HandleManager(private val context: Context) {
         val alpha = try { prefs.getInt("handle_alpha_$index", 14) } catch (_: Exception) { 14 }
 
         val isFirstHandle = (handleId == "handle_1")
+        val defaultSwipeLeft = if (isFirstHandle) ACTION_OPEN_SIDEBAR else ACTION_NONE
         val tap = prefs.getString("handle_tap_$index", ACTION_NONE) ?: ACTION_NONE
         val doubleTap = prefs.getString("handle_double_tap_$index", ACTION_NONE) ?: ACTION_NONE
         val rawLongPress = prefs.getString("handle_long_press_$index", ACTION_NONE) ?: ACTION_NONE
         val longPress = if (rawLongPress == ACTION_MOVE_HANDLE) ACTION_NONE else rawLongPress
-        val defaultSwipeLeft = if (isFirstHandle) ACTION_OPEN_SIDEBAR else ACTION_NONE
-        val swipeLeft = prefs.getString("handle_swipe_left_$index", defaultSwipeLeft) ?: defaultSwipeLeft
+        var swipeLeft = prefs.getString("handle_swipe_left_$index", defaultSwipeLeft) ?: defaultSwipeLeft
         val swipeRight = prefs.getString("handle_swipe_right_$index", ACTION_NONE) ?: ACTION_NONE
         val swipeUp = prefs.getString("handle_swipe_up_$index", ACTION_NONE) ?: ACTION_NONE
         val swipeDown = prefs.getString("handle_swipe_down_$index", ACTION_NONE) ?: ACTION_NONE
+
+        if (isFirstHandle) {
+            val allActions = listOf(tap, doubleTap, longPress, swipeLeft, swipeRight, swipeUp, swipeDown)
+            if (allActions.none { it == ACTION_OPEN_SIDEBAR }) {
+                swipeLeft = ACTION_OPEN_SIDEBAR
+                prefs.edit().putString("handle_swipe_left_1", ACTION_OPEN_SIDEBAR).apply()
+            }
+        }
 
         return HandleConfig(
             id = handleId,
@@ -441,8 +450,14 @@ class HandleManager(private val context: Context) {
     /**
      * Safely deletes a handle and cleans up only its associated container data.
      * Guarantees other handles and containers remain unaffected.
+     * Enforces First-Handle Invariant: handle_1 must never be deletable.
      */
     fun deleteHandle(handleId: String): Boolean {
+        if (handleId == "handle_1") {
+            LogKeeper.log(context, TAG, "Cannot delete handle_1: First-handle invariant enforced.")
+            return false
+        }
+
         val currentIds = getHandleIds().toMutableList()
         if (!currentIds.contains(handleId)) return false
 
@@ -507,10 +522,130 @@ class HandleManager(private val context: Context) {
     }
 
     /**
+     * Migrates all container-specific data from [oldContainerId] to [newContainerId].
+     * Preserves:
+     * - Home Grid / complete page deck
+     * - selected page
+     * - element placements for every page
+     * - page-specific layout/configurations (width, height, wrap_content, columns, color)
+     * - Whitelist and feature configs
+     * Retires the old container only after migration is complete.
+     */
+    fun migrateContainerData(oldContainerId: String, newContainerId: String) {
+        if (oldContainerId == newContainerId) return
+
+        val editor = prefs.edit()
+
+        // 1. Migrate Page deck
+        val oldPagesKey = getContainerPagesKey(oldContainerId)
+        val pagesJson = prefs.getString(oldPagesKey, null)
+        if (pagesJson != null) {
+            editor.putString(getContainerPagesKey(newContainerId), pagesJson)
+        }
+
+        // 2. Migrate Selected page
+        val oldSelectedKey = getContainerSelectedPageKey(oldContainerId)
+        val selectedPage = prefs.getString(oldSelectedKey, null)
+        if (selectedPage != null) {
+            editor.putString(getContainerSelectedPageKey(newContainerId), selectedPage)
+        }
+
+        // 3. Migrate all container-prefixed keys ("handle_${oldContainerId}_*")
+        val oldPrefix = "handle_${oldContainerId}_"
+        val newPrefix = "handle_${newContainerId}_"
+        val allKeys = prefs.all
+        for ((key, value) in allKeys) {
+            if (key.startsWith(oldPrefix)) {
+                val newKey = key.replaceFirst(oldPrefix, newPrefix)
+                when (value) {
+                    is String -> editor.putString(newKey, value)
+                    is Int -> editor.putInt(newKey, value)
+                    is Boolean -> editor.putBoolean(newKey, value)
+                    is Float -> editor.putFloat(newKey, value)
+                    is Long -> editor.putLong(newKey, value)
+                    is Set<*> -> @Suppress("UNCHECKED_CAST") editor.putStringSet(newKey, value as Set<String>)
+                }
+            } else if (key.startsWith("sidebar_apps_${oldContainerId}_")) {
+                val newKey = key.replaceFirst("sidebar_apps_${oldContainerId}_", "sidebar_apps_${newContainerId}_")
+                if (value is String) editor.putString(newKey, value)
+            }
+        }
+
+        // 4. Migrate custom hybrid grid for this container if keyed with oldContainerId
+        val oldGridKey = "hybrid_grid_default_hybrid_$oldContainerId"
+        if (prefs.contains(oldGridKey)) {
+            val gridVal = prefs.getString(oldGridKey, null)
+            if (gridVal != null) {
+                editor.putString("hybrid_grid_default_hybrid_$newContainerId", gridVal)
+            }
+            val cols = prefs.getInt("hybrid_grid_cols_default_hybrid_$oldContainerId", -1)
+            if (cols != -1) {
+                editor.putInt("hybrid_grid_cols_default_hybrid_$newContainerId", cols)
+            }
+        }
+
+        editor.commit()
+
+        // Clean up old container data only after migration commit succeeds
+        cleanContainerData(oldContainerId)
+        LogKeeper.log(context, TAG, "Migrated container data from '$oldContainerId' to '$newContainerId'")
+    }
+
+    /**
+     * Resolves the primary container ID for handle_1 currently opening the sidebar.
+     */
+    fun getFirstHandlePrimaryContainerId(): String {
+        val handle1 = getHandle("handle_1")
+        if (handle1 != null) {
+            for (gesture in listOf(HandleGestures.SWIPE_LEFT, HandleGestures.SWIPE_RIGHT, HandleGestures.TAP, HandleGestures.DOUBLE_TAP, HandleGestures.LONG_PRESS, HandleGestures.SWIPE_UP, HandleGestures.SWIPE_DOWN)) {
+                if (handle1.getActionForGesture(gesture) == ACTION_OPEN_SIDEBAR) {
+                    return getContainerId("handle_1", gesture)
+                }
+            }
+        }
+        return "handle_1_swipe_left"
+    }
+
+    /**
      * Configures the action for a specific gesture on a handle.
+     * When handle_1 changes its sidebar opening gesture, seamlessly migrates existing container data.
      */
     fun configureGesture(handleId: String, gesture: String, action: String) {
         val index = handleId.substringAfter("handle_").toIntOrNull() ?: return
+
+        if (handleId == "handle_1") {
+            val handle1 = getHandle("handle_1")
+            val currentGestureAction = handle1?.getActionForGesture(gesture) ?: ACTION_NONE
+
+            if (action == ACTION_NONE && currentGestureAction == ACTION_OPEN_SIDEBAR) {
+                val otherSidebarGestures = HandleGestures.ALL.filter { it != gesture && handle1?.getActionForGesture(it) == ACTION_OPEN_SIDEBAR }
+                if (otherSidebarGestures.isEmpty()) {
+                    LogKeeper.log(context, TAG, "Cannot disable the only sidebar gesture on handle_1: First-handle invariant enforced.")
+                    return
+                }
+            }
+
+            if (action == ACTION_OPEN_SIDEBAR) {
+                val sidebarGestures = HandleGestures.ALL.filter { it != gesture && handle1?.getActionForGesture(it) == ACTION_OPEN_SIDEBAR }
+                if (sidebarGestures.size == 1) {
+                    val oldGesture = sidebarGestures.first()
+                    val oldContainerId = getContainerId("handle_1", oldGesture)
+                    val oldPagesKey = getContainerPagesKey(oldContainerId)
+                    val oldPages = prefs.getString(oldPagesKey, null)
+                    val hasCustomPages = oldPages != null && oldPages != DEFAULT_PAGE_HYBRID &&
+                        !oldPages.startsWith("[{\"id\":\"default_hybrid")
+                    val hasCustomData = hasCustomPages ||
+                        prefs.contains("handle_${oldContainerId}_sidebar_width") ||
+                        prefs.contains(getContainerSelectedPageKey(oldContainerId))
+                    if (hasCustomData) {
+                        val newContainerId = getContainerId("handle_1", gesture)
+                        migrateContainerData(oldContainerId, newContainerId)
+                        prefs.edit().putString(getGesturePrefKey(1, oldGesture), ACTION_NONE).apply()
+                    }
+                }
+            }
+        }
+
         val key = getGesturePrefKey(index, gesture)
         prefs.edit().putString(key, action).apply()
 
@@ -518,7 +653,8 @@ class HandleManager(private val context: Context) {
             val containerId = getContainerId(handleId, gesture)
             val pagesKey = getContainerPagesKey(containerId)
             if (!prefs.contains(pagesKey)) {
-                prefs.edit().putString(pagesKey, DEFAULT_PAGE_HYBRID).apply()
+                val defaultPage = if (handleId == "handle_1") DEFAULT_PAGE_HYBRID else "default_hybrid_$containerId"
+                prefs.edit().putString(pagesKey, defaultPage).apply()
             }
         }
         notifyMainReload(context, getHandle(handleId))
@@ -526,9 +662,21 @@ class HandleManager(private val context: Context) {
 
     /**
      * Safely resets/removes a gesture action and optionally cleans its container data.
+     * Enforces First-Handle Invariant: handle_1's required sidebar gesture must not be removed.
      */
     fun removeGesture(handleId: String, gesture: String, cleanContainerData: Boolean = false) {
         val index = handleId.substringAfter("handle_").toIntOrNull() ?: return
+        if (handleId == "handle_1") {
+            val handle1 = getHandle("handle_1")
+            if (handle1?.getActionForGesture(gesture) == ACTION_OPEN_SIDEBAR) {
+                val otherSidebarGestures = HandleGestures.ALL.filter { it != gesture && handle1?.getActionForGesture(it) == ACTION_OPEN_SIDEBAR }
+                if (otherSidebarGestures.isEmpty()) {
+                    LogKeeper.log(context, TAG, "Cannot remove the only sidebar gesture on handle_1: First-handle invariant enforced.")
+                    return
+                }
+            }
+        }
+
         prefs.edit().putString(getGesturePrefKey(index, gesture), ACTION_NONE).apply()
         if (cleanContainerData) {
             val containerId = getContainerId(handleId, gesture)
