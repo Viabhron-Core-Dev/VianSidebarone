@@ -425,12 +425,15 @@ class HandleManager(private val context: Context) {
             .apply()
 
         // Ensure container pages key is seeded for any configured open_sidebar gesture
+        val primaryContainerId = if (config.id == "handle_1") getFirstHandlePrimaryContainerId() else ""
         for (gesture in HandleGestures.ALL) {
             if (config.getActionForGesture(gesture) == ACTION_OPEN_SIDEBAR) {
                 val containerId = getContainerId(config.id, gesture)
                 val pagesKey = getContainerPagesKey(containerId)
                 if (!prefs.contains(pagesKey)) {
-                    prefs.edit().putString(pagesKey, DEFAULT_PAGE_HYBRID).apply()
+                    val isFirstSidebar = containerId == "handle_1_swipe_left" || (config.id == "handle_1" && containerId == primaryContainerId)
+                    val defaultPage = if (isFirstSidebar) DEFAULT_PAGE_HYBRID else "default_hybrid_$containerId"
+                    prefs.edit().putString(pagesKey, defaultPage).apply()
                 }
             }
         }
@@ -653,7 +656,8 @@ class HandleManager(private val context: Context) {
             val containerId = getContainerId(handleId, gesture)
             val pagesKey = getContainerPagesKey(containerId)
             if (!prefs.contains(pagesKey)) {
-                val defaultPage = if (handleId == "handle_1") DEFAULT_PAGE_HYBRID else "default_hybrid_$containerId"
+                val isFirstSidebar = containerId == "handle_1_swipe_left" || (handleId == "handle_1" && containerId == getFirstHandlePrimaryContainerId())
+                val defaultPage = if (isFirstSidebar) DEFAULT_PAGE_HYBRID else "default_hybrid_$containerId"
                 prefs.edit().putString(pagesKey, defaultPage).apply()
             }
         }

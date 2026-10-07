@@ -384,6 +384,142 @@ class HandleGestureContainerTest {
         assertEquals(setOf("com.pkg.c"), whitelist2)
         assertFalse(fakePrefs.getStringSet("force_stop_whitelist_current", emptySet())?.contains("com.pkg.c") == true)
     }
+
+    // 10. Verify Direct Element gesture configuration path
+    @Test
+    fun testDirectElementGestureConfiguration() {
+        val manager = HandleManager(fakeContext)
+
+        // Configure a gesture directly with an element ID (e.g. app or system action)
+        manager.configureGesture("handle_1", HandleGestures.SWIPE_RIGHT, "app:com.android.settings")
+
+        val handle = manager.getHandle("handle_1")
+        assertNotNull(handle)
+        assertEquals("app:com.android.settings", handle?.getActionForGesture(HandleGestures.SWIPE_RIGHT))
+
+        val gestureInfo = manager.getGesturesForHandle("handle_1").first { it.gesture == HandleGestures.SWIPE_RIGHT }
+        assertEquals("app:com.android.settings", gestureInfo.action)
+        assertFalse(gestureInfo.isContainerTarget)
+
+        // Confirm gesture target resolves to Action, not Container
+        val target = HandleManager.resolveGestureTarget("handle_1", HandleGestures.SWIPE_RIGHT, "app:com.android.settings")
+        assertTrue(target is GestureTarget.Action)
+        assertEquals("app:com.android.settings", (target as GestureTarget.Action).actionKey)
+    }
+
+    // 11. Verify Per-Container Sidebar Page Deck CRUD & Opening Face Persistence
+    @Test
+    fun testPerContainerPageDeckAndOpeningFace() {
+        val handleManager = HandleManager(fakeContext)
+        val pageManager = PageManager(fakeContext)
+
+        // Set up two distinct gestures configured as ACTION_OPEN_SIDEBAR
+        handleManager.configureGesture("handle_1", HandleGestures.SWIPE_LEFT, HandleManager.ACTION_OPEN_SIDEBAR)
+        handleManager.configureGesture("handle_1", HandleGestures.SWIPE_DOWN, HandleManager.ACTION_OPEN_SIDEBAR)
+
+        val container1 = HandleManager.getContainerId("handle_1", HandleGestures.SWIPE_LEFT)
+        val container2 = HandleManager.getContainerId("handle_1", HandleGestures.SWIPE_DOWN)
+
+        // Container 1 starts with default_hybrid (Home Grid)
+        val stack1 = pageManager.getPageStack(container1)
+        assertEquals(1, stack1.size)
+        assertEquals("default_hybrid", stack1[0].pageId)
+
+        // Add Apps and Calculator to Container 1
+        pageManager.addPage(container1, "apps_page_1")
+        pageManager.addPage(container1, "calculator_page_1")
+        val updatedStack1 = pageManager.getPageStack(container1)
+        assertEquals(3, updatedStack1.size)
+        assertEquals("default_hybrid", updatedStack1[0].pageId)
+        assertEquals("apps_page_1", updatedStack1[1].pageId)
+        assertEquals("calculator_page_1", updatedStack1[2].pageId)
+
+        // Set opening face of Container 1 to Apps
+        pageManager.saveSelectedPageId(container1, "apps_page_1")
+        assertEquals("apps_page_1", pageManager.getSelectedPageId(container1))
+
+        // Reorder Container 1: move Calculator to front
+        pageManager.reorderPages(container1, 2, 0)
+        val reordered1 = pageManager.getPageStack(container1)
+        assertEquals("calculator_page_1", reordered1[0].pageId)
+        assertEquals("default_hybrid", reordered1[1].pageId)
+        assertEquals("apps_page_1", reordered1[2].pageId)
+
+        // Confirm Container 2 remains completely isolated with its own default page
+        val stack2 = pageManager.getPageStack(container2)
+        assertEquals(1, stack2.size)
+        assertEquals("default_hybrid_$container2", stack2[0].pageId)
+        assertNull(pageManager.getSelectedPageId(container2))
+
+        // Add Media Player to Container 2
+        pageManager.addPage(container2, "media_player_2")
+        val updatedStack2 = pageManager.getPageStack(container2)
+        assertEquals(2, updatedStack2.size)
+        assertEquals("media_player_2", updatedStack2[1].pageId)
+
+        // Delete page from Container 1
+        pageManager.removePage(container1, "default_hybrid")
+        val postDelete1 = pageManager.getPageStack(container1)
+        assertEquals(2, postDelete1.size)
+        assertEquals(listOf("calculator_page_1", "apps_page_1"), postDelete1.map { it.pageId })
+        // Selected face remains apps_page_1
+        assertEquals("apps_page_1", pageManager.getSelectedPageId(container1))
+    }
+
+    // 16. Verify Two-Choice gesture flow (Sidebar Page vs Direct Element) and Container Page Management
+    @Test
+    fun testGestureTwoChoiceFlowAndPageManagement() {
+        val handleManager = HandleManager(fakeContext)
+        val pageManager = PageManager(fakeContext)
+
+        // Case A: Gesture configured as Sidebar Page
+        handleManager.configureGesture("handle_1", HandleGestures.SWIPE_RIGHT, HandleManager.ACTION_OPEN_SIDEBAR)
+        val containerId = HandleManager.getContainerId("handle_1", HandleGestures.SWIPE_RIGHT)
+        val targetSidebar = HandleManager.resolveGestureTarget("handle_1", HandleGestures.SWIPE_RIGHT, HandleManager.ACTION_OPEN_SIDEBAR)
+        assertTrue(targetSidebar is GestureTarget.Container)
+        assertEquals(containerId, (targetSidebar as GestureTarget.Container).containerId)
+
+        // Case B: Gesture configured as Direct Element
+        handleManager.configureGesture("handle_1", HandleGestures.DOUBLE_TAP, "app:com.android.chrome")
+        val targetDirect = HandleManager.resolveGestureTarget("handle_1", HandleGestures.DOUBLE_TAP, "app:com.android.chrome")
+        assertTrue(targetDirect is GestureTarget.Action)
+        assertEquals("app:com.android.chrome", (targetDirect as GestureTarget.Action).actionKey)
+
+        // In Container for SWIPE_RIGHT: manage pages
+        val initialStack = pageManager.getPageStack(containerId)
+        assertEquals(1, initialStack.size)
+
+        // Add a Single Widget page with custom title
+        val widgetPageId = "widget_news_feed"
+        pageManager.addPage(containerId, widgetPageId, position = -1, pageType = "widget", title = "Single Widget")
+        val stackAfterAdd = pageManager.getPageStack(containerId)
+        assertEquals(2, stackAfterAdd.size)
+        val addedPage = stackAfterAdd.first { it.pageId == widgetPageId }
+        assertEquals("widget", addedPage.type)
+        assertEquals("Single Widget", addedPage.title)
+
+        // Rename the page
+        pageManager.renamePage(containerId, widgetPageId, "Morning News Feed")
+        val stackAfterRename = pageManager.getPageStack(containerId)
+        val renamedPage = stackAfterRename.first { it.pageId == widgetPageId }
+        assertEquals("Morning News Feed", renamedPage.title)
+
+        // Choose as opening face
+        pageManager.saveSelectedPageId(containerId, widgetPageId)
+        assertEquals(widgetPageId, pageManager.getSelectedPageId(containerId))
+
+        // Reorder: move to top
+        pageManager.reorderPages(containerId, 1, 0)
+        val reorderedStack = pageManager.getPageStack(containerId)
+        assertEquals(widgetPageId, reorderedStack[0].pageId)
+
+        // Remove the default hybrid page
+        pageManager.removePage(containerId, initialStack[0].pageId)
+        val finalStack = pageManager.getPageStack(containerId)
+        assertEquals(1, finalStack.size)
+        assertEquals(widgetPageId, finalStack[0].pageId)
+        assertEquals(widgetPageId, pageManager.getSelectedPageId(containerId))
+    }
 }
 
 /**

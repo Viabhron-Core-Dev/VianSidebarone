@@ -375,3 +375,38 @@
 * How it was verified: local build only (`gradle :app:testDebugUnitTest` executed and passed 184/184 tests; `compile_applet` passed cleanly).
 * Any deviation from what was requested, and why: None.
 * Any known issue or follow-up needed: None.
+
+### Entry: 2026-10-06T23:30:00Z
+* Timestamp: 2026-10-06T23:30:00Z
+* One-line summary: Implemented two-choice gesture action selection (Sidebar Page vs Element directly), container-isolated Sidebar Page management screen, page renaming/reordering/opening-face persistence, and first Sidebar special startup guarantee.
+* Exact files touched:
+  - `/app/src/main/java/com/example/core/HandleManager.kt`
+  - `/app/src/main/java/com/example/core/PageManager.kt`
+  - `/app/src/main/java/com/example/feature/settings/handle/HandleSettingsScreen.kt`
+  - `/app/src/test/java/com/example/core/HandleGestureContainerTest.kt`
+  - `/receipts/RECEIPTS_096.md`
+* What was actually done:
+  - Gesture Action Selection Two-Choice Flow:
+    * Replaced the flat raw list of actions in `HandleSettingsScreen.kt` with a 2-step setup: trigger selection followed by exactly two primary choices: "Sidebar Page" and "Element directly".
+    * "Sidebar Page": Configures gesture with `HandleManager.ACTION_OPEN_SIDEBAR`, resolves `containerId = HandleManager.getContainerId(handleId, gesture)`, and opens `ContainerPageManagementScreen` scoped to that specific container.
+    * "Element directly": Launches `AddElementActivity` with `handle_id` and `gesture`, picks one element, and connects it directly via modern `HandleManager.configureGesture(handleId, gesture, actionKey)` without relying on legacy `SELECT_ELEMENT_FOR_HANDLE`.
+  - Container Page Management Screen (`ContainerPageManagementScreen`):
+    * Scoped strictly to `containerId = HandleManager.getContainerId(handleId, gesture)`.
+    * View pages in container deck via `PageManager.getPageStack(containerId)`.
+    * Add pages selecting from all 11 valid `PageFactory` types (`HYBRID_GRID`, `APPS`, `WIDGETS_GRID`, `widget`, `CALCULATOR`, `COMPASS`, `MEDIA`, `APP_TRACKER`, `RESOURCES_TRACKER`, `SCHEDULER`, `NOTIFICATIONS`).
+    * Rename pages via newly added `PageManager.renamePage(containerId, pageId, newTitle)` with dedicated Compose dialog.
+    * Reorder pages via `PageManager.reorderPages(containerId, from, to)` with ▲ and ▼ controls.
+    * Choose Sidebar default opening face via RadioButton persisted to `"handle_${containerId}_selected_page"` via `PageManager.saveSelectedPageId(containerId, pageId)`.
+    * Delete pages via `PageManager.removePage(containerId, pageId)` with safety check ensuring at least one page remains.
+  - Special First Sidebar Startup Invariant:
+    * Fixed `saveHandle` and `configureGesture` in `HandleManager.kt` so only `handle_1`'s primary startup gesture seeds `DEFAULT_PAGE_HYBRID` ("default_hybrid").
+    * All other gestures on `handle_1` and other handles seed container-isolated `"default_hybrid_$containerId"`.
+  - Security & Keystore Cleanup:
+    * Scanned workspace and deleted generated `debug.keystore` and `debug.keystore.base64` build artifacts from root; confirmed both remain tracked in `.gitignore`.
+  - Automated Verification:
+    * Added comprehensive unit test `testGestureTwoChoiceFlowAndPageManagement` to `HandleGestureContainerTest.kt`.
+    * Executed full unit test suite: all 187 tests passed (`BUILD SUCCESSFUL in 5s`).
+    * Applet successfully compiled via `compile_applet`.
+* How it was verified: local build only (`gradle :app:testDebugUnitTest` executed and passed 187/187 tests; `compile_applet` passed cleanly).
+* Any deviation from what was requested, and why: None.
+* Any known issue or follow-up needed: None.

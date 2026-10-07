@@ -104,6 +104,7 @@ fun SettingsNavigationApp(initialRoute: String, onFinish: () -> Unit) {
     when {
         currentRoute == "handles" || currentRoute.startsWith("pages_") || currentRoute.startsWith("handle_") -> {
             HandleSettingsScreen(
+                initialRoute = currentRoute,
                 onNavigateBack = { navigateBack() }
             )
         }

@@ -296,20 +296,26 @@ class AddElementActivity : ComponentActivity() {
     }
     
     private fun finishWithId(id: String) {
-        if (intent?.action == "SELECT_ELEMENT_FOR_HANDLE") {
-            val prefix = intent.getStringExtra("handle_prefix") ?: return
-            val gesture = intent.getStringExtra("gesture") ?: return
-            val prefs = getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
-            prefs.edit().putString("${prefix}$gesture", "open_element:$id").apply()
-            
-            // Notify service to reload configuration
-            val updateIntent = Intent(this, com.example.core.HandleService::class.java).apply {
-                action = "UPDATE_CONFIG"
+        val resultIntent = Intent().apply { putExtra("ELEMENT_ID", id) }
+        setResult(Activity.RESULT_OK, resultIntent)
+
+        val handleId = intent.getStringExtra("handle_id")
+        val gesture = intent.getStringExtra("gesture")
+        if (!handleId.isNullOrEmpty() && !gesture.isNullOrEmpty()) {
+            com.example.core.HandleManager.getInstance(this).configureGesture(handleId, gesture, id)
+        } else if (intent?.action == "SELECT_ELEMENT_FOR_HANDLE") {
+            val prefix = intent.getStringExtra("handle_prefix") ?: ""
+            val gest = intent.getStringExtra("gesture") ?: ""
+            if (prefix.isNotEmpty() && gest.isNotEmpty()) {
+                val prefs = getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
+                prefs.edit().putString("${prefix}$gest", "open_element:$id").apply()
+                
+                // Notify service to reload configuration
+                val updateIntent = Intent(this, com.example.core.HandleService::class.java).apply {
+                    action = "UPDATE_CONFIG"
+                }
+                startService(updateIntent)
             }
-            startService(updateIntent)
-        } else {
-            val resultIntent = Intent().apply { putExtra("ELEMENT_ID", id) }
-            setResult(Activity.RESULT_OK, resultIntent)
         }
         finish()
     }

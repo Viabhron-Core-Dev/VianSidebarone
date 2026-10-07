@@ -1,6 +1,7 @@
 package com.example.feature.settings.handle
 
 import android.content.Context
+import android.content.Intent
 import android.graphics.Color as AndroidColor
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
@@ -43,11 +44,38 @@ import com.example.util.HandleShape
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HandleSettingsScreen(
+    initialRoute: String? = null,
     onNavigateBack: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
     val handleManager = remember { HandleManager.getInstance(context) }
     var selectedHandleId by remember { mutableStateOf<String?>(null) }
+
+    // Direct route into ContainerPageManagementScreen if route starts with "pages_"
+    var directContainerId by remember {
+        mutableStateOf(
+            if (initialRoute?.startsWith("pages_") == true) {
+                initialRoute.removePrefix("pages_").substringBefore("|")
+            } else null
+        )
+    }
+
+    if (directContainerId != null) {
+        val cId = directContainerId!!
+        val container = handleManager.getContainer(cId)
+        val hName = container?.let { handleManager.getHandle(it.handleId)?.name } ?: "Sidebar"
+        val gLabel = container?.gesture?.replace('_', ' ')?.replaceFirstChar { it.uppercase() } ?: "Gesture"
+        ContainerPageManagementScreen(
+            containerId = cId,
+            handleName = hName,
+            gestureLabel = gLabel,
+            onBack = {
+                directContainerId = null
+                onNavigateBack?.invoke()
+            }
+        )
+        return
+    }
 
     if (selectedHandleId == null) {
         ReferenceHandlesListScreen(
@@ -143,13 +171,43 @@ private fun ReferenceHandleItem(
     onRefresh: () -> Unit
 ) {
     val context = LocalContext.current
+    var managingContainerId by remember { mutableStateOf<String?>(null) }
+    var managingHandleName by remember { mutableStateOf("") }
+    var managingGestureLabel by remember { mutableStateOf("") }
+
+    if (managingContainerId != null) {
+        ContainerPageManagementScreen(
+            containerId = managingContainerId!!,
+            handleName = managingHandleName,
+            gestureLabel = managingGestureLabel,
+            onBack = {
+                managingContainerId = null
+                onRefresh()
+            }
+        )
+        return
+    }
+
     var showMenu by remember { mutableStateOf(false) }
     var showRenameDialog by remember { mutableStateOf(false) }
     var showAddGestureDialog by remember { mutableStateOf(false) }
-    var showChangeActionDialog by remember { mutableStateOf(false) }
-    var gestureToChange by remember { mutableStateOf("") }
+    var showTwoChoiceDialog by remember { mutableStateOf(false) }
+    var gestureToConfigure by remember { mutableStateOf("") }
+    var pendingDirectElementGesture by remember { mutableStateOf("") }
     var showChangeTriggerDialog by remember { mutableStateOf(false) }
     var triggerToChange by remember { mutableStateOf("") }
+
+    val elementPickerLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val elementId = result.data?.getStringExtra("ELEMENT_ID")
+        val targetGesture = pendingDirectElementGesture
+        if (!elementId.isNullOrEmpty() && targetGesture.isNotEmpty()) {
+            handleManager.configureGesture(handle.id, targetGesture, elementId)
+            onRefresh()
+        }
+        pendingDirectElementGesture = ""
+    }
 
     val gestureLabels = remember {
         mapOf(
@@ -264,7 +322,18 @@ private fun ReferenceHandleItem(
                         )
                     } else {
                         configuredGestures.forEach { (gesture, action) ->
-                            val actionName = actionLabels[action] ?: "Action: $action"
+                            val actionName = when {
+                                action == HandleManager.ACTION_OPEN_SIDEBAR -> "Sidebar"
+                                action.startsWith("app:") -> "App: " + action.removePrefix("app:")
+                                action.startsWith("link:") -> "Link: " + action.removePrefix("link:")
+                                action.startsWith("system:") -> "System: " + action.removePrefix("system:").replace("_", " ").replaceFirstChar { it.uppercase() }
+                                action.startsWith("widget:") -> "Widget: " + action.removePrefix("widget:")
+                                action.startsWith("popup_widget:") -> "Popup Widget: " + action.removePrefix("popup_widget:")
+                                action.startsWith("folder:") -> "Folder: " + action.removePrefix("folder:")
+                                action.startsWith("floating_trigger:") -> "Floating: " + action.removePrefix("floating_trigger:")
+                                actionLabels.containsKey(action) -> actionLabels[action]!!
+                                else -> "Action: $action"
+                            }
 
                             Card(
                                 modifier = Modifier
@@ -275,6 +344,17 @@ private fun ReferenceHandleItem(
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
+                                        .clickable {
+                                            if (action == HandleManager.ACTION_OPEN_SIDEBAR) {
+                                                val cId = HandleManager.getContainerId(handle.id, gesture)
+                                                managingContainerId = cId
+                                                managingHandleName = handle.name
+                                                managingGestureLabel = gestureLabels[gesture] ?: gesture
+                                            } else {
+                                                gestureToConfigure = gesture
+                                                showTwoChoiceDialog = true
+                                            }
+                                        }
                                         .padding(16.dp),
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.SpaceBetween
@@ -285,6 +365,13 @@ private fun ReferenceHandleItem(
                                             style = MaterialTheme.typography.titleSmall
                                         )
                                         Text(actionName, style = MaterialTheme.typography.bodyMedium)
+                                        if (action == HandleManager.ACTION_OPEN_SIDEBAR) {
+                                            Text(
+                                                "Tap to manage pages",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.primary
+                                            )
+                                        }
                                     }
                                     var showGestureItemMenu by remember { mutableStateOf(false) }
                                     Box {
@@ -295,12 +382,24 @@ private fun ReferenceHandleItem(
                                             expanded = showGestureItemMenu,
                                             onDismissRequest = { showGestureItemMenu = false }
                                         ) {
+                                            if (action == HandleManager.ACTION_OPEN_SIDEBAR) {
+                                                DropdownMenuItem(
+                                                    text = { Text("Manage Sidebar Pages") },
+                                                    onClick = {
+                                                        showGestureItemMenu = false
+                                                        val cId = HandleManager.getContainerId(handle.id, gesture)
+                                                        managingContainerId = cId
+                                                        managingHandleName = handle.name
+                                                        managingGestureLabel = gestureLabels[gesture] ?: gesture
+                                                    }
+                                                )
+                                            }
                                             DropdownMenuItem(
                                                 text = { Text("Change Action") },
                                                 onClick = {
                                                     showGestureItemMenu = false
-                                                    gestureToChange = gesture
-                                                    showChangeActionDialog = true
+                                                    gestureToConfigure = gesture
+                                                    showTwoChoiceDialog = true
                                                 }
                                             )
                                             DropdownMenuItem(
@@ -377,10 +476,11 @@ private fun ReferenceHandleItem(
     }
 
     // Add Gesture Dialog
+
+    // Step 1 Dialog: Choose Gesture Trigger
     if (showAddGestureDialog) {
         val availableGestures = HandleGestures.ALL.filter { handle.getActionForGesture(it) == HandleManager.ACTION_NONE }
         var selectedGesture by remember { mutableStateOf(availableGestures.firstOrNull() ?: "") }
-        var selectedAction by remember { mutableStateOf(HandleManager.ACTION_OPEN_SIDEBAR) }
 
         AlertDialog(
             onDismissRequest = { showAddGestureDialog = false },
@@ -412,14 +512,14 @@ private fun ReferenceHandleItem(
                     TextButton(
                         onClick = {
                             if (selectedGesture.isNotEmpty()) {
-                                handleManager.configureGesture(handle.id, selectedGesture, selectedAction)
-                                onRefresh()
+                                gestureToConfigure = selectedGesture
+                                showAddGestureDialog = false
+                                showTwoChoiceDialog = true
                             }
-                            showAddGestureDialog = false
                         },
                         modifier = Modifier.testTag("dialog_confirm_add_gesture")
                     ) {
-                        Text("Add")
+                        Text("Next")
                     }
                 }
             },
@@ -431,42 +531,97 @@ private fun ReferenceHandleItem(
         )
     }
 
-    // Change Action Dialog
-    if (showChangeActionDialog && gestureToChange.isNotEmpty()) {
-        val currentAction = handle.getActionForGesture(gestureToChange)
-        var selectedAction by remember { mutableStateOf(currentAction) }
-
+    // Step 2 Dialog: Exactly TWO choices (Sidebar Page vs Element directly)
+    if (showTwoChoiceDialog && gestureToConfigure.isNotEmpty()) {
+        val targetGesture = gestureToConfigure
         AlertDialog(
-            onDismissRequest = { showChangeActionDialog = false },
-            title = { Text("Change Action for ${gestureLabels[gestureToChange] ?: gestureToChange}") },
+            onDismissRequest = {
+                showTwoChoiceDialog = false
+                gestureToConfigure = ""
+            },
+            title = { Text("Configure Gesture: ${gestureLabels[targetGesture] ?: targetGesture}") },
             text = {
-                Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
-                    actionLabels.filter { it.key != HandleManager.ACTION_NONE }.forEach { (actKey, actLabel) ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { selectedAction = actKey }
-                                .padding(vertical = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            RadioButton(selected = selectedAction == actKey, onClick = { selectedAction = actKey })
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(actLabel, style = MaterialTheme.typography.bodyMedium)
+                Column(modifier = Modifier.padding(vertical = 8.dp)) {
+                    Text(
+                        "Choose the target type for this gesture:",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // Option A: Sidebar Page
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                handleManager.configureGesture(handle.id, targetGesture, HandleManager.ACTION_OPEN_SIDEBAR)
+                                onRefresh()
+                                showTwoChoiceDialog = false
+                                gestureToConfigure = ""
+                                val cId = HandleManager.getContainerId(handle.id, targetGesture)
+                                managingContainerId = cId
+                                managingHandleName = handle.name
+                                managingGestureLabel = gestureLabels[targetGesture] ?: targetGesture
+                            }
+                            .testTag("option_sidebar_page"),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Text(
+                                "Sidebar Page",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                "This gesture opens and manages the multi-page Sidebar belonging to this container.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // Option B: Element directly
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                pendingDirectElementGesture = targetGesture
+                                showTwoChoiceDialog = false
+                                gestureToConfigure = ""
+                                val intent = Intent(context, com.example.feature.settings.AddElementActivity::class.java).apply {
+                                    putExtra("handle_id", handle.id)
+                                    putExtra("gesture", targetGesture)
+                                }
+                                elementPickerLauncher.launch(intent)
+                            }
+                            .testTag("option_direct_element"),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Text(
+                                "Element directly",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = MaterialTheme.colorScheme.onSecondaryContainer
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                "Directly triggers one specific element or shortcut when this gesture is performed.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.8f)
+                            )
                         }
                     }
                 }
             },
-            confirmButton = {
-                TextButton(onClick = {
-                    handleManager.configureGesture(handle.id, gestureToChange, selectedAction)
-                    onRefresh()
-                    showChangeActionDialog = false
-                }) {
-                    Text("Save")
-                }
-            },
+            confirmButton = {},
             dismissButton = {
-                TextButton(onClick = { showChangeActionDialog = false }) {
+                TextButton(onClick = {
+                    showTwoChoiceDialog = false
+                    gestureToConfigure = ""
+                }) {
                     Text("Cancel")
                 }
             }
@@ -517,6 +672,296 @@ private fun ReferenceHandleItem(
             },
             dismissButton = {
                 TextButton(onClick = { showChangeTriggerDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+}
+
+/**
+ * ContainerPageManagementScreen: Dedicated per-container Sidebar Page management screen.
+ * Strictly scoped to containerId = HandleManager.getContainerId(handleId, gesture).
+ * Allows viewing, adding, deleting, reordering, and selecting the opening face.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ContainerPageManagementScreen(
+    containerId: String,
+    handleName: String,
+    gestureLabel: String,
+    onBack: () -> Unit
+) {
+    val context = LocalContext.current
+    val pageManager = remember { com.example.core.PageManager.getInstance(context) }
+    var pages by remember { mutableStateOf(pageManager.getPageStack(containerId)) }
+    var selectedFaceId by remember { mutableStateOf(pageManager.getSelectedPageId(containerId) ?: pages.firstOrNull()?.pageId ?: "") }
+    var showAddPageDialog by remember { mutableStateOf(false) }
+
+    var pageToRename by remember { mutableStateOf<com.example.core.SidebarPage?>(null) }
+
+    fun refreshPages() {
+        pages = pageManager.getPageStack(containerId)
+        selectedFaceId = pageManager.getSelectedPageId(containerId) ?: pages.firstOrNull()?.pageId ?: ""
+    }
+
+    BackHandler(onBack = onBack)
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = {
+                    Column {
+                        Text("Sidebar Pages")
+                        Text(
+                            "$handleName • $gestureLabel",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                },
+                navigationIcon = {
+                    IconButton(onClick = onBack, modifier = Modifier.testTag("pages_back_button")) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    }
+                }
+            )
+        },
+        floatingActionButton = {
+            FloatingActionButton(
+                onClick = { showAddPageDialog = true },
+                modifier = Modifier.testTag("add_page_button")
+            ) {
+                Icon(Icons.Default.Add, contentDescription = "Add Page")
+            }
+        }
+    ) { padding ->
+        LazyColumn(
+            modifier = Modifier
+                .padding(padding)
+                .fillMaxSize()
+                .padding(16.dp)
+                .testTag("container_pages_list")
+        ) {
+            item {
+                Text(
+                    "Pages in this Sidebar (${pages.size})",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Text(
+                    "Horizontal swiping in the Sidebar navigates between these pages. Tap the radio button to select the opening face.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.outline
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+            }
+
+            items(pages, key = { it.pageId }) { page ->
+                val isFace = page.pageId == selectedFaceId
+                val pageIndex = pages.indexOf(page)
+
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp)
+                        .testTag("page_card_${page.pageId}"),
+                    colors = CardDefaults.cardColors(
+                        containerColor = if (isFace) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceVariant
+                    )
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        RadioButton(
+                            selected = isFace,
+                            onClick = {
+                                selectedFaceId = page.pageId
+                                pageManager.saveSelectedPageId(containerId, page.pageId)
+                            },
+                            modifier = Modifier.testTag("radio_face_${page.pageId}")
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    page.title,
+                                    style = MaterialTheme.typography.titleMedium
+                                )
+                                if (isFace) {
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Surface(
+                                        shape = RoundedCornerShape(4.dp),
+                                        color = MaterialTheme.colorScheme.primary
+                                    ) {
+                                        Text(
+                                            "Opening Face",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onPrimary,
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                        )
+                                    }
+                                }
+                            }
+                            Text(
+                                "Type: ${com.example.core.PageTypes.resolveDefaultTitle(page.type)}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.outline
+                            )
+                        }
+
+                        // Page actions: Rename, Reorder, Delete
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            IconButton(
+                                onClick = { pageToRename = page },
+                                modifier = Modifier.size(36.dp).testTag("rename_page_${page.pageId}")
+                            ) {
+                                Text("✎", style = MaterialTheme.typography.bodyLarge)
+                            }
+                            if (pageIndex > 0) {
+                                IconButton(
+                                    onClick = {
+                                        pageManager.reorderPages(containerId, pageIndex, pageIndex - 1)
+                                        refreshPages()
+                                    },
+                                    modifier = Modifier.size(36.dp)
+                                ) {
+                                    Text("▲", style = MaterialTheme.typography.bodyMedium)
+                                }
+                            }
+                            if (pageIndex < pages.size - 1) {
+                                IconButton(
+                                    onClick = {
+                                        pageManager.reorderPages(containerId, pageIndex, pageIndex + 1)
+                                        refreshPages()
+                                    },
+                                    modifier = Modifier.size(36.dp)
+                                ) {
+                                    Text("▼", style = MaterialTheme.typography.bodyMedium)
+                                }
+                            }
+                            // Delete button (can delete if more than 1 page)
+                            if (pages.size > 1) {
+                                IconButton(
+                                    onClick = {
+                                        pageManager.removePage(containerId, page.pageId)
+                                        refreshPages()
+                                    },
+                                    modifier = Modifier.size(36.dp).testTag("delete_page_${page.pageId}")
+                                ) {
+                                    Text("✕", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            item {
+                Spacer(modifier = Modifier.height(80.dp))
+            }
+        }
+    }
+
+    // Rename Page Dialog
+    if (pageToRename != null) {
+        val targetPage = pageToRename!!
+        var updatedTitle by remember { mutableStateOf(targetPage.title) }
+        AlertDialog(
+            onDismissRequest = { pageToRename = null },
+            title = { Text("Rename Page") },
+            text = {
+                OutlinedTextField(
+                    value = updatedTitle,
+                    onValueChange = { updatedTitle = it },
+                    label = { Text("Page Title") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth().testTag("rename_page_input")
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        if (updatedTitle.isNotBlank()) {
+                            pageManager.renamePage(containerId, targetPage.pageId, updatedTitle.trim())
+                            refreshPages()
+                        }
+                        pageToRename = null
+                    },
+                    modifier = Modifier.testTag("dialog_confirm_rename_page")
+                ) {
+                    Text("Save")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pageToRename = null }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    if (showAddPageDialog) {
+        val supportedTypes = listOf(
+            com.example.core.PageTypes.HYBRID_GRID to "Home Grid",
+            com.example.core.PageTypes.APPS to "Apps",
+            com.example.core.PageTypes.WIDGETS_GRID to "Widgets Grid",
+            "widget" to "Single Widget",
+            com.example.core.PageTypes.CALCULATOR to "Calculator",
+            com.example.core.PageTypes.COMPASS to "Compass",
+            com.example.core.PageTypes.MEDIA to "Media Player",
+            com.example.core.PageTypes.APP_TRACKER to "App Tracker",
+            com.example.core.PageTypes.RESOURCES_TRACKER to "Resources Tracker",
+            com.example.core.PageTypes.SCHEDULER to "Scheduler",
+            com.example.core.PageTypes.NOTIFICATIONS to "Notifications"
+        )
+        var selectedType by remember { mutableStateOf(supportedTypes.first().first) }
+
+        AlertDialog(
+            onDismissRequest = { showAddPageDialog = false },
+            title = { Text("Add Sidebar Page") },
+            text = {
+                Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                    Text("Select Page Type:", style = MaterialTheme.typography.bodySmall)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    supportedTypes.forEach { (typeKey, typeLabel) ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { selectedType = typeKey }
+                                .padding(vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(
+                                selected = selectedType == typeKey,
+                                onClick = { selectedType = typeKey }
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(typeLabel, style = MaterialTheme.typography.bodyMedium)
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val selectedEntry = supportedTypes.firstOrNull { it.first == selectedType }
+                        val selectedLabel = selectedEntry?.second ?: com.example.core.PageTypes.resolveDefaultTitle(selectedType)
+                        val newPageId = "${selectedType}_${System.currentTimeMillis()}"
+                        pageManager.addPage(containerId, newPageId, position = -1, pageType = selectedType, title = selectedLabel)
+                        refreshPages()
+                        showAddPageDialog = false
+                    },
+                    modifier = Modifier.testTag("dialog_confirm_add_page")
+                ) {
+                    Text("Add")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showAddPageDialog = false }) {
                     Text("Cancel")
                 }
             }

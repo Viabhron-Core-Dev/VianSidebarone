@@ -387,15 +387,19 @@ class PageManager internal constructor(private val context: Context) {
      * Position < 0 or >= size appends to the end.
      * Returns the updated ordered page stack.
      */
-    fun addPage(containerId: String, pageId: String, position: Int = -1): List<SidebarPage> {
+    fun addPage(
+        containerId: String,
+        pageId: String,
+        position: Int = -1,
+        pageType: String = PageTypes.resolvePageType(pageId),
+        title: String = PageTypes.resolveDefaultTitle(pageType)
+    ): List<SidebarPage> {
         val current = getPageStack(containerId).toMutableList()
         val existingIndex = current.indexOfFirst { it.pageId == pageId }
         val pageToAdd = if (existingIndex >= 0) {
             current.removeAt(existingIndex)
         } else {
-            val type = PageTypes.resolvePageType(pageId)
-            val title = PageTypes.resolveDefaultTitle(type)
-            SidebarPage.createDefault(id = pageId, type = type, title = title, order = current.size)
+            SidebarPage.createDefault(id = pageId, type = pageType, title = title, order = current.size)
         }
 
         if (position in 0..current.size) {
@@ -413,6 +417,27 @@ class PageManager internal constructor(private val context: Context) {
     fun addPage(container: SidebarContainer, pageId: String, position: Int = -1): List<SidebarPage> {
         return addPage(container.containerId, pageId, position)
     }
+
+    /**
+     * Renames a page in the container's page stack.
+     * Returns the updated ordered page stack.
+     */
+    fun renamePage(containerId: String, pageId: String, newTitle: String): List<SidebarPage> {
+        val current = getPageStack(containerId).toMutableList()
+        val index = current.indexOfFirst { it.pageId == pageId }
+        if (index >= 0) {
+            val existing = current[index]
+            current[index] = existing.copy(title = newTitle.trim())
+            savePageStack(containerId, current)
+        }
+        return getPageStack(containerId)
+    }
+
+    /**
+     * Convenience overload for SidebarContainer instance.
+     */
+    fun renamePage(container: SidebarContainer, pageId: String, newTitle: String): List<SidebarPage> =
+        renamePage(container.containerId, pageId, newTitle)
 
     /**
      * Removes a page by ID from the container's page stack.
