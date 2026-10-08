@@ -51,27 +51,30 @@ fun HandleSettingsScreen(
     val handleManager = remember { HandleManager.getInstance(context) }
     var selectedHandleId by remember { mutableStateOf<String?>(null) }
 
-    // Direct route into ContainerPageManagementScreen if route starts with "pages_"
-    var directContainerId by remember {
+    // Managing container state: Triple(containerId, handleName, gestureLabel)
+    var managingContainerInfo by remember {
         mutableStateOf(
             if (initialRoute?.startsWith("pages_") == true) {
-                initialRoute.removePrefix("pages_").substringBefore("|")
+                val cId = initialRoute.removePrefix("pages_").substringBefore("|")
+                val container = handleManager.getContainer(cId)
+                val hName = container?.let { handleManager.getHandle(it.handleId)?.name } ?: "Sidebar"
+                val gLabel = container?.gesture?.replace('_', ' ')?.replaceFirstChar { it.uppercase() } ?: "Gesture"
+                Triple(cId, hName, gLabel)
             } else null
         )
     }
 
-    if (directContainerId != null) {
-        val cId = directContainerId!!
-        val container = handleManager.getContainer(cId)
-        val hName = container?.let { handleManager.getHandle(it.handleId)?.name } ?: "Sidebar"
-        val gLabel = container?.gesture?.replace('_', ' ')?.replaceFirstChar { it.uppercase() } ?: "Gesture"
+    if (managingContainerInfo != null) {
+        val (cId, hName, gLabel) = managingContainerInfo!!
         ContainerPageManagementScreen(
             containerId = cId,
             handleName = hName,
             gestureLabel = gLabel,
             onBack = {
-                directContainerId = null
-                onNavigateBack?.invoke()
+                managingContainerInfo = null
+                if (initialRoute?.startsWith("pages_") == true) {
+                    onNavigateBack?.invoke()
+                }
             }
         )
         return
@@ -81,6 +84,9 @@ fun HandleSettingsScreen(
         ReferenceHandlesListScreen(
             handleManager = handleManager,
             onNavigateToHandle = { handleId -> selectedHandleId = handleId },
+            onManageContainer = { containerId, handleName, gestureLabel ->
+                managingContainerInfo = Triple(containerId, handleName, gestureLabel)
+            },
             onBack = onNavigateBack
         )
     } else {
@@ -97,6 +103,7 @@ fun HandleSettingsScreen(
 fun ReferenceHandlesListScreen(
     handleManager: HandleManager,
     onNavigateToHandle: (String) -> Unit,
+    onManageContainer: (containerId: String, handleName: String, gestureLabel: String) -> Unit,
     onBack: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
@@ -149,6 +156,7 @@ fun ReferenceHandlesListScreen(
                         expandedHandleId = if (expandedHandleId == handle.id) null else handle.id
                     },
                     onNavigateToHandle = { onNavigateToHandle(handle.id) },
+                    onManageContainer = onManageContainer,
                     onRefresh = { refresh() }
                 )
                 Spacer(modifier = Modifier.height(16.dp))
@@ -168,25 +176,10 @@ private fun ReferenceHandleItem(
     canDelete: Boolean,
     onExpand: () -> Unit,
     onNavigateToHandle: () -> Unit,
+    onManageContainer: (containerId: String, handleName: String, gestureLabel: String) -> Unit,
     onRefresh: () -> Unit
 ) {
     val context = LocalContext.current
-    var managingContainerId by remember { mutableStateOf<String?>(null) }
-    var managingHandleName by remember { mutableStateOf("") }
-    var managingGestureLabel by remember { mutableStateOf("") }
-
-    if (managingContainerId != null) {
-        ContainerPageManagementScreen(
-            containerId = managingContainerId!!,
-            handleName = managingHandleName,
-            gestureLabel = managingGestureLabel,
-            onBack = {
-                managingContainerId = null
-                onRefresh()
-            }
-        )
-        return
-    }
 
     var showMenu by remember { mutableStateOf(false) }
     var showRenameDialog by remember { mutableStateOf(false) }
@@ -347,9 +340,7 @@ private fun ReferenceHandleItem(
                                         .clickable {
                                             if (action == HandleManager.ACTION_OPEN_SIDEBAR) {
                                                 val cId = HandleManager.getContainerId(handle.id, gesture)
-                                                managingContainerId = cId
-                                                managingHandleName = handle.name
-                                                managingGestureLabel = gestureLabels[gesture] ?: gesture
+                                                onManageContainer(cId, handle.name, gestureLabels[gesture] ?: gesture)
                                             } else {
                                                 gestureToConfigure = gesture
                                                 showTwoChoiceDialog = true
@@ -388,9 +379,7 @@ private fun ReferenceHandleItem(
                                                     onClick = {
                                                         showGestureItemMenu = false
                                                         val cId = HandleManager.getContainerId(handle.id, gesture)
-                                                        managingContainerId = cId
-                                                        managingHandleName = handle.name
-                                                        managingGestureLabel = gestureLabels[gesture] ?: gesture
+                                                        onManageContainer(cId, handle.name, gestureLabels[gesture] ?: gesture)
                                                     }
                                                 )
                                             }
@@ -559,9 +548,7 @@ private fun ReferenceHandleItem(
                                 showTwoChoiceDialog = false
                                 gestureToConfigure = ""
                                 val cId = HandleManager.getContainerId(handle.id, targetGesture)
-                                managingContainerId = cId
-                                managingHandleName = handle.name
-                                managingGestureLabel = gestureLabels[targetGesture] ?: targetGesture
+                                onManageContainer(cId, handle.name, gestureLabels[targetGesture] ?: targetGesture)
                             }
                             .testTag("option_sidebar_page"),
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)

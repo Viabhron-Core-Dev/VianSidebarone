@@ -410,3 +410,31 @@
 * How it was verified: local build only (`gradle :app:testDebugUnitTest` executed and passed 187/187 tests; `compile_applet` passed cleanly).
 * Any deviation from what was requested, and why: None.
 * Any known issue or follow-up needed: None.
+
+### Entry: 2026-10-08T01:55:00Z
+* Timestamp: 2026-10-08T01:55:00Z
+* One-line summary: Fixed on-device crash (IllegalStateException: Vertically scrollable component was measured with an infinity maximum height constraints) by hoisting ContainerPageManagementScreen to the top level of HandleSettingsScreen outside the handles list LazyColumn.
+* Exact files touched:
+  - `/app/src/main/java/com/example/feature/settings/handle/HandleSettingsScreen.kt`
+  - `/receipts/RECEIPTS_096.md`
+* What was actually done:
+  - Root Cause Analysis:
+    * `ContainerPageManagementScreen` contains its own `Scaffold` and `LazyColumn`.
+    * Previously, `ReferenceHandleItem` locally instantiated `ContainerPageManagementScreen` inside its own composable scope.
+    * Because `ReferenceHandleItem` is rendered as an item inside the parent `handles_list` `LazyColumn`, Compose measured it with `Constraints.Infinity` vertically.
+    * When `ContainerPageManagementScreen` rendered its `Scaffold` and nested `LazyColumn` inside that item, the inner `LazyColumn` received unbounded vertical height constraints, immediately throwing `IllegalStateException`.
+  - Architecture & Layout Fix:
+    * Hoisted container management navigation state (`managingContainerInfo: Triple<containerId, handleName, gestureLabel>?`) to the top level of `HandleSettingsScreen`.
+    * Threaded `onManageContainer` callback down through `ReferenceHandlesListScreen` to `ReferenceHandleItem`.
+    * On selecting "Sidebar Page", tapping an active sidebar gesture row, or choosing "Manage Sidebar Pages" in the gesture menu, `onManageContainer` is invoked.
+    * `HandleSettingsScreen` renders `ContainerPageManagementScreen` as a full root-level destination outside of `ReferenceHandlesListScreen` and outside of any `LazyColumn`.
+    * `ContainerPageManagementScreen` receives bounded window/screen constraints from the root layout, correctly measures its `Scaffold` top app bar and FAB, and cleanly bounds its `LazyColumn`.
+    * On tapping Back (`onBack`), `managingContainerInfo` resets to `null`, cleanly returning to the handles list with refreshed data.
+  - Security & Keystore Cleanup:
+    * Scanned for and deleted generated `debug.keystore` and `debug.keystore.base64` files from workspace root.
+  - Verification:
+    * Executed full unit test suite: all 187 tests passed (`BUILD SUCCESSFUL in 1m 43s`).
+    * Applet successfully compiled via `compile_applet`.
+* How it was verified: local build only (`gradle :app:testDebugUnitTest` executed and passed 187/187 tests; `compile_applet` passed cleanly).
+* Any deviation from what was requested, and why: None.
+* Any known issue or follow-up needed: None.
