@@ -182,6 +182,14 @@ class HandleManager(private val context: Context) {
         fun getContainerSelectedPageKey(containerId: String): String =
             "handle_${containerId}_selected_page"
 
+        /**
+         * SharedPreferences key for the configured Opening Face of an independent container.
+         * Contract requirement: "handle_${containerId}_opening_face"
+         * Distinct from the runtime selected/swiped page during a live session.
+         */
+        fun getContainerOpeningFaceKey(containerId: String): String =
+            "handle_${containerId}_opening_face"
+
         fun getCleanHandleId(handleOrContainerId: String): String =
             PageManager.getCleanHandleId(handleOrContainerId)
 
@@ -513,6 +521,7 @@ class HandleManager(private val context: Context) {
         val editor = prefs.edit()
         editor.remove(getContainerPagesKey(containerId))
         editor.remove(getContainerSelectedPageKey(containerId))
+        editor.remove(getContainerOpeningFaceKey(containerId))
 
         val prefix = "handle_${containerId}_"
         val allKeys = prefs.all.keys
@@ -546,11 +555,16 @@ class HandleManager(private val context: Context) {
             editor.putString(getContainerPagesKey(newContainerId), pagesJson)
         }
 
-        // 2. Migrate Selected page
+        // 2. Migrate Selected page & Opening face
         val oldSelectedKey = getContainerSelectedPageKey(oldContainerId)
         val selectedPage = prefs.getString(oldSelectedKey, null)
         if (selectedPage != null) {
             editor.putString(getContainerSelectedPageKey(newContainerId), selectedPage)
+        }
+        val oldFaceKey = getContainerOpeningFaceKey(oldContainerId)
+        val openingFace = prefs.getString(oldFaceKey, null)
+        if (openingFace != null) {
+            editor.putString(getContainerOpeningFaceKey(newContainerId), openingFace)
         }
 
         // 3. Migrate all container-prefixed keys ("handle_${oldContainerId}_*")

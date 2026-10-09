@@ -682,14 +682,14 @@ fun ContainerPageManagementScreen(
     val context = LocalContext.current
     val pageManager = remember { com.example.core.PageManager.getInstance(context) }
     var pages by remember { mutableStateOf(pageManager.getPageStack(containerId)) }
-    var selectedFaceId by remember { mutableStateOf(pageManager.getSelectedPageId(containerId) ?: pages.firstOrNull()?.pageId ?: "") }
+    var selectedFaceId by remember { mutableStateOf(pageManager.getOpeningFaceId(containerId) ?: pages.firstOrNull()?.pageId ?: "") }
     var showAddPageDialog by remember { mutableStateOf(false) }
 
     var pageToRename by remember { mutableStateOf<com.example.core.SidebarPage?>(null) }
 
     fun refreshPages() {
         pages = pageManager.getPageStack(containerId)
-        selectedFaceId = pageManager.getSelectedPageId(containerId) ?: pages.firstOrNull()?.pageId ?: ""
+        selectedFaceId = pageManager.getOpeningFaceId(containerId) ?: pages.firstOrNull()?.pageId ?: ""
     }
 
     BackHandler(onBack = onBack)
@@ -767,7 +767,7 @@ fun ContainerPageManagementScreen(
                             selected = isFace,
                             onClick = {
                                 selectedFaceId = page.pageId
-                                pageManager.saveSelectedPageId(containerId, page.pageId)
+                                pageManager.saveOpeningFaceId(containerId, page.pageId)
                             },
                             modifier = Modifier.testTag("radio_face_${page.pageId}")
                         )
@@ -894,9 +894,9 @@ fun ContainerPageManagementScreen(
     if (showAddPageDialog) {
         val supportedTypes = listOf(
             com.example.core.PageTypes.HYBRID_GRID to "Home Grid",
-            com.example.core.PageTypes.APPS to "Apps",
+            com.example.core.PageTypes.APPS to "Apps Grid",
             com.example.core.PageTypes.WIDGETS_GRID to "Widgets Grid",
-            "widget" to "Single Widget",
+            com.example.core.PageTypes.WIDGET to "Single Widget",
             com.example.core.PageTypes.CALCULATOR to "Calculator",
             com.example.core.PageTypes.COMPASS to "Compass",
             com.example.core.PageTypes.MEDIA to "Media Player",

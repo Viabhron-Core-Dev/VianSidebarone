@@ -12,8 +12,11 @@ object PageTypes {
     const val HYBRID = "default_hybrid"
     const val HYBRID_GRID = "hybrid_grid"
     const val APPS = "apps"
+    const val APPS_GRID = "apps_grid"
     const val WIDGETS = "widgets"
     const val WIDGETS_GRID = "widgets_grid"
+    const val WIDGET = "widget"
+    const val SINGLE_WIDGET = "single_widget"
     const val MEDIA = "media_player"
     const val TOOLS = "tools"
     const val APP_TRACKER = "app_tracker"
@@ -27,8 +30,8 @@ object PageTypes {
         HYBRID_GRID,
         APPS,
         WIDGETS_GRID,
+        WIDGET,
         MEDIA,
-        TOOLS,
         APP_TRACKER,
         CALCULATOR,
         COMPASS,
@@ -38,9 +41,10 @@ object PageTypes {
     )
 
     fun resolveDefaultTitle(pageType: String): String = when (pageType) {
-        HYBRID, HYBRID_GRID -> "Home Grid"
-        APPS -> "Apps"
-        WIDGETS, WIDGETS_GRID, "widget" -> "Widgets"
+        HYBRID, HYBRID_GRID, "home_grid" -> "Home Grid"
+        APPS, APPS_GRID -> "Apps Grid"
+        WIDGETS, WIDGETS_GRID -> "Widgets Grid"
+        WIDGET, SINGLE_WIDGET -> "Single Widget"
         MEDIA -> "Media Player"
         TOOLS -> "Quick Tools"
         APP_TRACKER -> "App Tracker"
@@ -53,17 +57,24 @@ object PageTypes {
     }
 
     fun resolvePageType(pageId: String): String = when {
-        pageId == HYBRID || pageId == HYBRID_GRID || pageId.contains("hybrid") -> HYBRID_GRID
-        pageId == APPS || pageId.contains("apps") -> APPS
-        pageId == WIDGETS || pageId == WIDGETS_GRID || pageId.contains("widget") -> WIDGETS_GRID
-        pageId == MEDIA || pageId.contains("media") -> MEDIA
-        pageId == TOOLS || pageId.contains("tool") -> TOOLS
-        pageId == APP_TRACKER || (pageId.contains("tracker") && !pageId.contains("resource")) -> APP_TRACKER
-        pageId == CALCULATOR || pageId.contains("calc") -> CALCULATOR
-        pageId == COMPASS || pageId.contains("compass") -> COMPASS
-        pageId == SCHEDULER || pageId.contains("schedul") || pageId.contains("reminder") -> SCHEDULER
-        pageId == NOTIFICATIONS || pageId.contains("notif") -> NOTIFICATIONS
-        pageId == RESOURCES_TRACKER || pageId.contains("resource") -> RESOURCES_TRACKER
+        pageId == HYBRID || pageId == HYBRID_GRID || pageId == "home_grid" ||
+                pageId.startsWith("hybrid_grid_") || pageId.startsWith("default_hybrid") -> HYBRID_GRID
+        pageId == TOOLS || pageId == "quick_tools" -> HYBRID_GRID // Legacy tools alias migrated cleanly to HYBRID_GRID
+        pageId == APPS || pageId == APPS_GRID ||
+                pageId.startsWith("apps_") || pageId.startsWith("apps_grid_") -> APPS
+        // Plural widgets / widgets_grid explicitly resolve to WIDGETS_GRID
+        pageId == WIDGETS_GRID || pageId == WIDGETS ||
+                pageId.startsWith("widgets_grid_") || pageId.startsWith("widgets_") -> WIDGETS_GRID
+        // Single Widget: explicit tokens and justified prefixes
+        pageId == WIDGET || pageId == SINGLE_WIDGET ||
+                pageId.startsWith("widget_") || pageId.startsWith("single_widget_") -> WIDGET
+        pageId == MEDIA || pageId == "media" || pageId.startsWith("media_player_") -> MEDIA
+        pageId == APP_TRACKER || pageId.startsWith("app_tracker_") -> APP_TRACKER
+        pageId == CALCULATOR || pageId.startsWith("calculator_") -> CALCULATOR
+        pageId == COMPASS || pageId.startsWith("compass_") -> COMPASS
+        pageId == SCHEDULER || pageId == "short_reminders" || pageId.startsWith("scheduler_") -> SCHEDULER
+        pageId == NOTIFICATIONS || pageId == "notification" || pageId.startsWith("notifications_") -> NOTIFICATIONS
+        pageId == RESOURCES_TRACKER || pageId.startsWith("resources_tracker_") -> RESOURCES_TRACKER
         else -> pageId
     }
 }
@@ -145,9 +156,23 @@ data class SidebarPage(
         fun fromJson(obj: JSONObject, orderIndex: Int = 0): SidebarPage {
             val rawId = obj.optString("id").ifEmpty { obj.optString("pageId", "") }
             val rawType = obj.optString("type").ifEmpty { obj.optString("pageType", "") }
-            val sanitizedType = if (rawType == "default_hybrid") PageTypes.HYBRID_GRID else if (rawType.isNotEmpty()) rawType else PageTypes.resolvePageType(rawId)
+            val sanitizedType = when {
+                rawType == "default_hybrid" -> PageTypes.HYBRID_GRID
+                rawType == "tools" -> PageTypes.HYBRID_GRID // Dead tools type migrated cleanly to HYBRID_GRID
+                rawType == "widgets" -> PageTypes.WIDGETS_GRID
+                rawType.isNotEmpty() -> rawType
+                else -> PageTypes.resolvePageType(rawId)
+            }
             val rawTitle = obj.optString("title", "")
-            val sanitizedTitle = if (rawTitle.isBlank() || rawTitle.equals("default_hybrid", ignoreCase = true)) {
+            val isKnownTypeToken = rawTitle.isBlank() ||
+                rawTitle.equals("default_hybrid", ignoreCase = true) ||
+                rawTitle.equals("apps", ignoreCase = true) ||
+                rawTitle.equals("apps_grid", ignoreCase = true) ||
+                rawTitle.equals("widgets", ignoreCase = true) ||
+                rawTitle.equals("widgets_grid", ignoreCase = true) ||
+                rawTitle.equals("widget", ignoreCase = true) ||
+                rawTitle.equals("single_widget", ignoreCase = true)
+            val sanitizedTitle = if (isKnownTypeToken) {
                 PageTypes.resolveDefaultTitle(sanitizedType)
             } else if (rawTitle == "Home Grid" && !rawId.startsWith("default_hybrid")) {
                 "Hybrid"
@@ -246,12 +271,17 @@ class PageManager internal constructor(private val context: Context) {
             order = 0
         )
 
-        // Ensure default hybrid grid elements exist in storage
-        if (!prefs.contains("hybrid_grid_$defaultPageId")) {
+        // Ensure default hybrid grid elements exist in storage (both container-isolated and legacy keys)
+        val isolatedGridKey = "handle_${containerId}_hybrid_grid_$defaultPageId"
+        if (!prefs.contains(isolatedGridKey) && !prefs.contains("hybrid_grid_$defaultPageId")) {
             val jsonStr = """[{"id": "system:ebook_reader", "cols": 1, "rows": 1, "x": 0, "y": 0}, {"id": "system:log_keeper", "cols": 1, "rows": 1, "x": 1, "y": 0}]"""
-            prefs.edit().putString("hybrid_grid_$defaultPageId", jsonStr).apply()
-            prefs.edit().putInt("hybrid_grid_cols_$defaultPageId", 3).apply()
-            prefs.edit().putBoolean("handle_${containerId}_sidebar_wrap_content", true).apply()
+            prefs.edit()
+                .putString(isolatedGridKey, jsonStr)
+                .putString("hybrid_grid_$defaultPageId", jsonStr)
+                .putInt("handle_${containerId}_hybrid_grid_cols_$defaultPageId", 3)
+                .putInt("hybrid_grid_cols_$defaultPageId", 3)
+                .putBoolean("handle_${containerId}_sidebar_wrap_content", true)
+                .apply()
         }
 
         if (raw.isNullOrBlank()) {
@@ -450,6 +480,9 @@ class PageManager internal constructor(private val context: Context) {
         if (getSelectedPageId(containerId) == pageId) {
             saveSelectedPageId(containerId, current.firstOrNull()?.pageId)
         }
+        if (getOpeningFaceId(containerId) == pageId) {
+            saveOpeningFaceId(containerId, current.firstOrNull()?.pageId)
+        }
         return getPageStack(containerId)
     }
 
@@ -458,6 +491,80 @@ class PageManager internal constructor(private val context: Context) {
      */
     fun removePage(container: SidebarContainer, pageId: String): List<SidebarPage> {
         return removePage(container.containerId, pageId)
+    }
+
+    /**
+     * Retrieves the configured Opening Face page ID for an independent container.
+     * Guaranteed distinct from runtime live-session page swiping.
+     * Never falls back to swiped session pages to prevent swiping from changing the opening face.
+     */
+    fun getOpeningFaceId(containerId: String): String? {
+        val key = HandleManager.getContainerOpeningFaceKey(containerId)
+        val saved = prefs.getString(key, null)
+        if (saved != null) return saved
+
+        val cleanContainerId = getCleanHandleId(containerId)
+        // Check fallback for clean handle or default gesture
+        val fallbackFace = if (containerId == cleanContainerId || containerId.endsWith("_swipe_left")) {
+            prefs.getString("handle_${cleanContainerId}_opening_face", null)
+                ?: if (cleanContainerId == "sidebar") prefs.getString("sidebar_opening_face", null) else null
+        } else null
+
+        if (fallbackFace != null) {
+            saveOpeningFaceId(containerId, fallbackFace)
+            return fallbackFace
+        }
+
+        // Check legacy default_page_index
+        val legacyIndex = prefs.getInt("handle_${containerId}_default_page_index", -1).takeIf { it >= 0 }
+            ?: prefs.getInt("handle_${cleanContainerId}_default_page_index", -1).takeIf { it >= 0 }
+            ?: prefs.getInt("sidebar_default_page_index", -1).takeIf { it >= 0 }
+
+        val stack = getPageStack(containerId)
+        if (legacyIndex != null) {
+            val legacyPage = stack.getOrNull(legacyIndex) ?: stack.firstOrNull()
+            if (legacyPage != null) {
+                saveOpeningFaceId(containerId, legacyPage.pageId)
+                return legacyPage.pageId
+            }
+        }
+
+        // Fallback to first page of the container stack (canonical Home Grid or first page).
+        // Live-session swiped pages (getSelectedPageId) MUST NOT override the configured opening face.
+        val firstPageId = stack.firstOrNull()?.pageId
+        if (firstPageId != null) {
+            saveOpeningFaceId(containerId, firstPageId)
+            return firstPageId
+        }
+        return null
+    }
+
+    /**
+     * Convenience overload for SidebarContainer instance.
+     */
+    fun getOpeningFaceId(container: SidebarContainer): String? =
+        getOpeningFaceId(container.containerId)
+
+    /**
+     * Persists the configured Opening Face page ID for an independent container.
+     * Invoked exclusively by user configuration in Page Management.
+     */
+    fun saveOpeningFaceId(containerId: String, pageId: String?) {
+        val key = HandleManager.getContainerOpeningFaceKey(containerId)
+        if (pageId != null) {
+            prefs.edit().putString(key, pageId).apply()
+            OverlaySyncManager.syncString(context, key, pageId)
+        } else {
+            prefs.edit().remove(key).apply()
+        }
+        LogKeeper.log(context, TAG, "Saved opening face '$pageId' for container '$containerId'")
+    }
+
+    /**
+     * Convenience overload for SidebarContainer instance.
+     */
+    fun saveOpeningFaceId(container: SidebarContainer, pageId: String?) {
+        saveOpeningFaceId(container.containerId, pageId)
     }
 
     /**

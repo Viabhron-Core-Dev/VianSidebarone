@@ -182,10 +182,10 @@ class SidebarManager private constructor(private val context: Context) : Sidebar
         // Load ordered page stack metadata lazily via PageManager
         val pages = pageManager.getPageStack(container)
 
-        // Restore persisted selected page for this container, or default to first page
-        val savedPageId = pageManager.getSelectedPageId(container.containerId)
-        val (initialPage, initialIndex) = if (savedPageId != null) {
-            val idx = pages.indexOfFirst { it.pageId == savedPageId }
+        // Restore configured Opening Face for this container, or default to first page
+        val openingFaceId = pageManager.getOpeningFaceId(container.containerId)
+        val (initialPage, initialIndex) = if (openingFaceId != null) {
+            val idx = pages.indexOfFirst { it.pageId == openingFaceId }
             if (idx >= 0) {
                 pages[idx] to idx
             } else {
@@ -195,9 +195,9 @@ class SidebarManager private constructor(private val context: Context) : Sidebar
             pages.firstOrNull() to 0
         }
 
-        // If no prior selection was saved and a page exists, persist it as default
-        if (savedPageId == null && initialPage != null) {
-            pageManager.saveSelectedPageId(container.containerId, initialPage.pageId)
+        // If no prior face was saved and a page exists, persist it as configured opening face
+        if (openingFaceId == null && initialPage != null) {
+            pageManager.saveOpeningFaceId(container.containerId, initialPage.pageId)
         }
 
         // Load placed elements for the active container page
@@ -384,8 +384,8 @@ class SidebarManager private constructor(private val context: Context) : Sidebar
     override fun refreshPages(): SidebarRuntimeState? {
         val current = _activeState.value ?: return null
         val pages = pageManager.getPageStack(current.container)
-        val savedPageId = pageManager.getSelectedPageId(current.containerId) ?: current.currentPage?.pageId
-        val idx = pages.indexOfFirst { it.pageId == savedPageId }.let { if (it >= 0) it else 0 }
+        val targetPageId = current.currentPage?.pageId ?: pageManager.getOpeningFaceId(current.containerId)
+        val idx = pages.indexOfFirst { it.pageId == targetPageId }.let { if (it >= 0) it else 0 }
         val page = pages.getOrNull(idx)
         val elements = if (page != null) {
             placementManager.getElementsForPage(current.containerId, page.pageId)

@@ -402,14 +402,18 @@ class SidebarPageRenderer(
     }
 
     private fun resolvePageTypeTheme(pageType: String): Pair<String, Int> = when (pageType) {
-        PageTypes.HYBRID -> "⚡" to Color.parseColor("#818CF8")
-        PageTypes.APPS -> "📱" to Color.parseColor("#34D399")
-        PageTypes.WIDGETS -> "🧩" to Color.parseColor("#FBBF24")
+        PageTypes.HYBRID, PageTypes.HYBRID_GRID, "home_grid" -> "⚡" to Color.parseColor("#818CF8")
+        PageTypes.APPS, PageTypes.APPS_GRID -> "📱" to Color.parseColor("#34D399")
+        PageTypes.WIDGETS, PageTypes.WIDGETS_GRID -> "🧩" to Color.parseColor("#FBBF24")
+        PageTypes.WIDGET, PageTypes.SINGLE_WIDGET -> "🧩" to Color.parseColor("#FBBF24")
         PageTypes.MEDIA -> "🎵" to Color.parseColor("#F472B6")
         PageTypes.TOOLS -> "🛠️" to Color.parseColor("#60A5FA")
         PageTypes.APP_TRACKER -> "📊" to Color.parseColor("#A78BFA")
         PageTypes.CALCULATOR -> "🧮" to Color.parseColor("#FB923C")
         PageTypes.COMPASS -> "🧭" to Color.parseColor("#2DD4BF")
+        PageTypes.SCHEDULER -> "📅" to Color.parseColor("#38BDF8")
+        PageTypes.NOTIFICATIONS, "notification" -> "🔔" to Color.parseColor("#F43F5E")
+        PageTypes.RESOURCES_TRACKER -> "📈" to Color.parseColor("#10B981")
         else -> "📄" to Color.parseColor("#94A3B8")
     }
 

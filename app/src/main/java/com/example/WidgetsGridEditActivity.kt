@@ -83,7 +83,7 @@ class WidgetsGridEditActivity : ComponentActivity() {
             if (elementId != null) {
                 // Add widget to prefs directly and reload
                 val prefs = getSharedPreferences("FloatingReaderPrefs", Context.MODE_PRIVATE)
-                val parsedItems = loadLocalItems(prefs, pageId).toMutableList()
+                val parsedItems = loadLocalItems(prefs, pageId, containerId).toMutableList()
                 
                 var defaultCols = if (elementId.startsWith("widget:")) 2 else 1
                 var defaultRows = if (elementId.startsWith("widget:")) 2 else 1
@@ -97,7 +97,8 @@ class WidgetsGridEditActivity : ComponentActivity() {
                         }
                     } catch (e: Exception) {}
                 }
-                val totalCols = prefs.getInt("widgets_grid_cols_$pageId", 4)
+                val widgetsColsKey = if (containerId != "sidebar" || prefs.contains("handle_${containerId}_widgets_grid_cols_$pageId")) "handle_${containerId}_widgets_grid_cols_$pageId" else "widgets_grid_cols_$pageId"
+                val totalCols = prefs.getInt(widgetsColsKey, prefs.getInt("widgets_grid_cols_$pageId", 4))
                 defaultCols = minOf(defaultCols, totalCols)
 
                 var targetX = 0
@@ -132,7 +133,7 @@ class WidgetsGridEditActivity : ComponentActivity() {
                     x = targetX,
                     y = targetY
                 ))
-                saveItems(prefs, pageId, parsedItems)
+                saveItems(prefs, pageId, parsedItems, this, containerId)
                 LogKeeper.writeLog("WidgetsGridEdit", "Added item: $elementId at ($targetX, $targetY)")
                 
                 val intent = Intent("WIDGET_ADDED_TO_GRID")
@@ -193,7 +194,7 @@ fun WidgetGridEditor(
         ) {
             Text("Edit Widgets Grid", fontSize = 20.sp, color = Color.White)
             Button(onClick = {
-                saveItems(prefs, pageId, items, context)
+                saveItems(prefs, pageId, items, context, containerId)
                 onClose()
             }) {
                 Text("Done")
@@ -236,7 +237,7 @@ fun WidgetGridEditor(
                 onInteractionStateChange = { isInteracting -> isUserInteracting = isInteracting },
                 onUpdateItems = { newItems -> 
                     items = newItems
-                    saveItems(prefs, pageId, newItems)
+                    saveItems(prefs, pageId, newItems, context, containerId)
                 }
             )
         }

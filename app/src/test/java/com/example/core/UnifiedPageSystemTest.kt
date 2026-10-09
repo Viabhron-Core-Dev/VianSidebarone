@@ -232,4 +232,118 @@ class UnifiedPageSystemTest {
         assertTrue(com.example.utils.PageManager.isPageTypePresent(fakePrefs, "app_tracker"))
         assertFalse(PageManager.isPageTypePresentInPrefs(fakePrefs, "non_existent_page"))
     }
+
+    @Test
+    fun testPageTypeResolutionAndDistinctions() {
+        // Standard IDs
+        assertEquals(PageTypes.HYBRID_GRID, PageTypes.resolvePageType("default_hybrid"))
+        assertEquals(PageTypes.HYBRID_GRID, PageTypes.resolvePageType("hybrid_grid"))
+        assertEquals(PageTypes.HYBRID_GRID, PageTypes.resolvePageType("home_grid"))
+        assertEquals(PageTypes.HYBRID_GRID, PageTypes.resolvePageType("tools")) // Legacy compatibility
+        assertEquals(PageTypes.APPS, PageTypes.resolvePageType("apps"))
+        assertEquals(PageTypes.APPS, PageTypes.resolvePageType("apps_grid"))
+        assertEquals(PageTypes.WIDGETS_GRID, PageTypes.resolvePageType("widgets"))
+        assertEquals(PageTypes.WIDGETS_GRID, PageTypes.resolvePageType("widgets_grid"))
+        assertEquals(PageTypes.WIDGET, PageTypes.resolvePageType("widget"))
+        assertEquals(PageTypes.WIDGET, PageTypes.resolvePageType("single_widget"))
+
+        // Specific system prefixes
+        assertEquals(PageTypes.APPS, PageTypes.resolvePageType("apps_123456789"))
+        assertEquals(PageTypes.APPS, PageTypes.resolvePageType("apps_grid_123456789"))
+        assertEquals(PageTypes.WIDGETS_GRID, PageTypes.resolvePageType("widgets_grid_123456789"))
+        assertEquals(PageTypes.WIDGET, PageTypes.resolvePageType("widget_123456789"))
+        assertEquals(PageTypes.HYBRID_GRID, PageTypes.resolvePageType("hybrid_grid_123456789"))
+
+        // Arbitrary IDs MUST NOT be classified as built-in page types
+        assertEquals("user_apps_notes", PageTypes.resolvePageType("user_apps_notes"))
+        assertEquals("my_widgets_area", PageTypes.resolvePageType("my_widgets_area"))
+        assertEquals("my_widget_view", PageTypes.resolvePageType("my_widget_view"))
+        assertEquals("dev_tools", PageTypes.resolvePageType("dev_tools"))
+        assertEquals("super_calculator_app", PageTypes.resolvePageType("super_calculator_app"))
+
+        // Titles
+        assertEquals("Apps Grid", PageTypes.resolveDefaultTitle(PageTypes.APPS))
+        assertEquals("Apps Grid", PageTypes.resolveDefaultTitle(PageTypes.APPS_GRID))
+        assertEquals("Widgets Grid", PageTypes.resolveDefaultTitle(PageTypes.WIDGETS_GRID))
+        assertEquals("Single Widget", PageTypes.resolveDefaultTitle(PageTypes.WIDGET))
+        assertEquals("Single Widget", PageTypes.resolveDefaultTitle(PageTypes.SINGLE_WIDGET))
+        assertEquals("Home Grid", PageTypes.resolveDefaultTitle(PageTypes.HYBRID_GRID))
+    }
+
+    @Test
+    fun testOpeningFaceIndependenceFromSessionSwipe() {
+        val pageManager = PageManager.getInstance(fakeContext)
+        val containerId = "handle_1_swipe_left"
+
+        // Setup container stack with 3 pages
+        val pages = listOf(
+            SidebarPage("default_hybrid", PageTypes.HYBRID_GRID, "Home Grid", 0),
+            SidebarPage("apps_page", PageTypes.APPS, "Apps Grid", 1),
+            SidebarPage("widget_page", PageTypes.WIDGET, "Single Widget", 2)
+        )
+        pageManager.savePageStack(containerId, pages)
+
+        // Initial opening face defaults to first page
+        assertEquals("default_hybrid", pageManager.getOpeningFaceId(containerId))
+
+        // Configure opening face to widget_page
+        pageManager.saveOpeningFaceId(containerId, "widget_page")
+        assertEquals("widget_page", pageManager.getOpeningFaceId(containerId))
+
+        // Live session user swipes to apps_page
+        pageManager.saveSelectedPageId(containerId, "apps_page")
+        assertEquals("apps_page", pageManager.getSelectedPageId(containerId))
+
+        // Swiping MUST NOT overwrite the configured opening face
+        assertEquals("widget_page", pageManager.getOpeningFaceId(containerId))
+
+        // Opening face persists across another container's actions
+        val container2 = "handle_2_tap"
+        pageManager.savePageStack(container2, pages)
+        pageManager.saveOpeningFaceId(container2, "apps_page")
+
+        assertEquals("widget_page", pageManager.getOpeningFaceId(containerId))
+        assertEquals("apps_page", pageManager.getOpeningFaceId(container2))
+    }
+
+    @Test
+    fun testSidebarAppsManagerParseContainerAndPageId() {
+        val parsed1 = com.example.feature.sidebar.SidebarAppsManager.parseContainerAndPageId("handle_1_swipe_left_apps_grid_123")
+        assertEquals("handle_1_swipe_left", parsed1.first)
+        assertEquals("apps_grid_123", parsed1.second)
+
+        val parsed2 = com.example.feature.sidebar.SidebarAppsManager.parseContainerAndPageId("1_swipe_left_default_apps")
+        assertEquals("1_swipe_left", parsed2.first)
+        assertEquals("default_apps", parsed2.second)
+
+        val parsed3 = com.example.feature.sidebar.SidebarAppsManager.parseContainerAndPageId("sidebar_apps_grid_456")
+        assertEquals("sidebar", parsed3.first)
+        assertEquals("apps_grid_456", parsed3.second)
+
+        val parsed4 = com.example.feature.sidebar.SidebarAppsManager.parseContainerAndPageId("handle_2_tap_my_apps")
+        assertEquals("handle_2_tap", parsed4.first)
+        assertEquals("my_apps", parsed4.second)
+    }
+
+    @Test
+    fun testHybridGridAndWidgetsGridContainerIsolation() {
+        val containerA = "handle_1_swipe_left"
+        val containerB = "handle_2_tap"
+        val pageId = "default_hybrid"
+
+        val itemA = listOf(com.example.feature.sidebar.GridWidgetItem("widget:100", 2, 2, 0, 0))
+        val itemB = listOf(com.example.feature.sidebar.GridWidgetItem("widget:200", 3, 3, 1, 1))
+
+        com.example.saveHybridItems(fakePrefs, pageId, itemA, null, containerA)
+        com.example.saveHybridItems(fakePrefs, pageId, itemB, null, containerB)
+
+        val loadedA = com.example.loadHybridLocalItems(fakePrefs, pageId, containerA)
+        val loadedB = com.example.loadHybridLocalItems(fakePrefs, pageId, containerB)
+
+        assertEquals(1, loadedA.size)
+        assertEquals("widget:100", loadedA[0].id)
+
+        assertEquals(1, loadedB.size)
+        assertEquals("widget:200", loadedB[0].id)
+    }
 }

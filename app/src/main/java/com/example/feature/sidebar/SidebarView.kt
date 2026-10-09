@@ -120,7 +120,7 @@ class SidebarView(
                     else prefs.getInt("handle_${containerId}_sidebar_width", prefs.getInt("sidebar_width", 265))
                 }
                 "hybrid_grid", "default_hybrid" -> {
-                    val cols = prefs.getInt("hybrid_grid_cols_${initialPage?.id}", 4)
+                    val cols = prefs.getInt("handle_${containerId}_hybrid_grid_cols_${initialPage?.id}", prefs.getInt("hybrid_grid_cols_${initialPage?.id}", 4))
                     if (cols == 3) prefs.getInt("handle_${containerId}_sidebar_width", prefs.getInt("sidebar_width", 220))
                     else if (cols <= 2) prefs.getInt("handle_${containerId}_sidebar_width", prefs.getInt("sidebar_width", 155))
                     else prefs.getInt("handle_${containerId}_sidebar_width", prefs.getInt("sidebar_width", 265))
@@ -505,7 +505,7 @@ class SidebarView(
                     else prefs.getInt("handle_${containerId}_sidebar_width", prefs.getInt("sidebar_width", 265))
                 }
                 "hybrid_grid", "default_hybrid" -> {
-                    val cols = prefs.getInt("hybrid_grid_cols_${page.id}", 4)
+                    val cols = prefs.getInt("handle_${containerId}_hybrid_grid_cols_${page.id}", prefs.getInt("hybrid_grid_cols_${page.id}", 4))
                     if (cols == 3) prefs.getInt("handle_${containerId}_sidebar_width", prefs.getInt("sidebar_width", 220))
                     else if (cols <= 2) prefs.getInt("handle_${containerId}_sidebar_width", prefs.getInt("sidebar_width", 155))
                     else prefs.getInt("handle_${containerId}_sidebar_width", prefs.getInt("sidebar_width", 265))

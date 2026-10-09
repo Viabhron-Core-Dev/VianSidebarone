@@ -43,7 +43,18 @@ class HybridGridPageView(
 
     private val prefs = context.getSharedPreferences("FloatingReaderPrefs", Context.MODE_PRIVATE)
 
-    private val appsManager = SidebarAppsManager(context, prefs, scope, "hg_${pageId}") {
+    private val appsManagerKey = run {
+        val isolated = "hg_${containerId}_${pageId}"
+        if (!prefs.contains(isolated) && prefs.contains("hg_${pageId}")) {
+            val legacy = prefs.getString("hg_${pageId}", null)
+            if (legacy != null) {
+                prefs.edit().putString(isolated, legacy).apply()
+            }
+        }
+        isolated
+    }
+
+    private val appsManager = SidebarAppsManager(context, prefs, scope, appsManagerKey) {
         post { loadWidgets() }
     }
 
@@ -124,9 +135,75 @@ class HybridGridPageView(
         // Keeps memory lightweight when navigated away
     }
 
+    private fun getGridPrefKey(): String {
+        val isolatedKey = "handle_${containerId}_hybrid_grid_$pageId"
+        if (prefs.contains(isolatedKey)) return isolatedKey
+        if (containerId.startsWith("handle_")) {
+            val altKey = "${containerId}_hybrid_grid_$pageId"
+            if (prefs.contains(altKey)) {
+                val altVal = prefs.getString(altKey, null)
+                if (altVal != null) {
+                    prefs.edit().putString(isolatedKey, altVal).apply()
+                }
+                return isolatedKey
+            }
+        }
+        val legacyKey = "hybrid_grid_$pageId"
+        if (prefs.contains(legacyKey) && (containerId == "sidebar" || containerId == "handle_1_swipe_left" || containerId == "handle_1")) {
+            val legacyVal = prefs.getString(legacyKey, null)
+            if (legacyVal != null) {
+                prefs.edit().putString(isolatedKey, legacyVal).apply()
+            }
+            return isolatedKey
+        }
+        return isolatedKey
+    }
+
+    private fun getGridColsPrefKey(): String {
+        val isolatedKey = "handle_${containerId}_hybrid_grid_cols_$pageId"
+        if (prefs.contains(isolatedKey)) return isolatedKey
+        if (containerId.startsWith("handle_")) {
+            val altKey = "${containerId}_hybrid_grid_cols_$pageId"
+            if (prefs.contains(altKey)) {
+                val altCols = prefs.getInt(altKey, 4)
+                prefs.edit().putInt(isolatedKey, altCols).apply()
+                return isolatedKey
+            }
+        }
+        val legacyKey = "hybrid_grid_cols_$pageId"
+        if (prefs.contains(legacyKey) && (containerId == "sidebar" || containerId == "handle_1_swipe_left" || containerId == "handle_1")) {
+            val legacyCols = prefs.getInt(legacyKey, 4)
+            prefs.edit().putInt(isolatedKey, legacyCols).apply()
+            return isolatedKey
+        }
+        return isolatedKey
+    }
+
+    private fun getGridModifiedPrefKey(): String {
+        val isolatedKey = "handle_${containerId}_hybrid_grid_modified_$pageId"
+        if (prefs.contains(isolatedKey)) return isolatedKey
+        if (containerId.startsWith("handle_")) {
+            val altKey = "${containerId}_hybrid_grid_modified_$pageId"
+            if (prefs.contains(altKey)) {
+                val altMod = prefs.getBoolean(altKey, false)
+                prefs.edit().putBoolean(isolatedKey, altMod).apply()
+                return isolatedKey
+            }
+        }
+        val legacyKey = "hybrid_grid_modified_$pageId"
+        if (prefs.contains(legacyKey) && (containerId == "sidebar" || containerId == "handle_1_swipe_left" || containerId == "handle_1")) {
+            val legacyMod = prefs.getBoolean(legacyKey, false)
+            prefs.edit().putBoolean(isolatedKey, legacyMod).apply()
+            return isolatedKey
+        }
+        return isolatedKey
+    }
+
     private fun getWidgetItems(): List<GridWidgetItem> {
-        var jsonStr = prefs.getString("hybrid_grid_$pageId", null)
-        val isModified = prefs.getBoolean("hybrid_grid_modified_$pageId", false)
+        val gridKey = getGridPrefKey()
+        val modKey = getGridModifiedPrefKey()
+        var jsonStr = prefs.getString(gridKey, null)
+        val isModified = prefs.getBoolean(modKey, false)
         if (jsonStr == null || (jsonStr == "[]" && pageId.startsWith("default_hybrid") && !isModified)) {
             if (pageId.startsWith("default_hybrid")) {
                 jsonStr = """[{"id": "system:ebook_reader", "cols": 1, "rows": 1, "x": 0, "y": 0}, {"id": "system:log_keeper", "cols": 1, "rows": 1, "x": 1, "y": 0}]"""
@@ -174,10 +251,16 @@ class HybridGridPageView(
             obj.put("y", it.y)
             arr.put(obj)
         }
-        prefs.edit().putString("hybrid_grid_$pageId", arr.toString())
-            .putBoolean("hybrid_grid_modified_$pageId", true)
-            .apply()
-        com.example.core.LogKeeper.writeLog("HybridGrid", "Saved ${items.size} items to prefs for page $pageId")
+        val gridKey = getGridPrefKey()
+        val modKey = getGridModifiedPrefKey()
+        val json = arr.toString()
+        val editor = prefs.edit().putString(gridKey, json).putBoolean(modKey, true)
+        if (containerId == "sidebar" || containerId == "handle_1_swipe_left" || containerId == "handle_1") {
+            editor.putString("hybrid_grid_$pageId", json)
+                .putBoolean("hybrid_grid_modified_$pageId", true)
+        }
+        editor.apply()
+        com.example.core.LogKeeper.writeLog("HybridGrid", "Saved ${items.size} items to prefs for container $containerId, page $pageId")
     }
 
     private fun addWidgetIdToPrefs(widgetId: Int) {
@@ -185,7 +268,7 @@ class HybridGridPageView(
         if (items.none { it.id == "widget:$widgetId" || it.id.startsWith("widget:$widgetId:") }) {
             val appWidgetManager = AppWidgetManager.getInstance(context)
             val info = appWidgetManager.getAppWidgetInfo(widgetId)
-            val totalCols = prefs.getInt("hybrid_grid_cols_$pageId", 4)
+            val totalCols = prefs.getInt(getGridColsPrefKey(), 4)
             val density = context.resources.displayMetrics.density
             val cellW = if (width > 0) width / totalCols else (60 * density).toInt()
             val (cols, rows) = com.example.calculateWidgetSpan(info, totalCols, cellW, density)
@@ -217,7 +300,7 @@ class HybridGridPageView(
                 if (wId != null && (cols <= 1 || rows <= 1)) {
                     val appWidgetManager = AppWidgetManager.getInstance(context)
                     val info = appWidgetManager.getAppWidgetInfo(wId)
-                    val totalCols = prefs.getInt("hybrid_grid_cols_$pageId", 4)
+                    val totalCols = prefs.getInt(getGridColsPrefKey(), 4)
                     val density = context.resources.displayMetrics.density
                     val cellW = if (width > 0) width / totalCols else (60 * density).toInt()
                     val (calcCols, calcRows) = com.example.calculateWidgetSpan(info, totalCols, cellW, density)
@@ -254,7 +337,7 @@ class HybridGridPageView(
             return
         }
         gridLayout.removeAllViews()
-        val totalCols = prefs.getInt("hybrid_grid_cols_$pageId", 4)
+        val totalCols = prefs.getInt(getGridColsPrefKey(), 4)
         
         val gridWidth = width
         val cellWidth = gridWidth / totalCols

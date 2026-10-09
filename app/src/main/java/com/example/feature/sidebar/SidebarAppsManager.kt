@@ -565,16 +565,41 @@ class SidebarAppsManager(
     private suspend fun loadActiveApps() = withContext(Dispatchers.IO) {
         var jsonStr = prefs.getString(prefKey, null)
         if (jsonStr == null) {
-            if (prefKey == "sidebar_apps_sidebar_default_apps") {
+            if (prefKey == "sidebar_apps_sidebar_default_apps" || prefKey == "sidebar_apps_sidebar_apps") {
                 jsonStr = prefs.getString("sidebar_apps", null)
             }
-            if (jsonStr == null) {
-                // Fallback to legacy key before using empty list
-                val pageId = prefKey.substringAfterLast("_")
-                jsonStr = prefs.getString("sidebar_apps_$pageId", "[]") ?: "[]"
+            if (jsonStr == null && prefKey.startsWith("sidebar_apps_")) {
+                val rest = prefKey.removePrefix("sidebar_apps_")
+                // Check if rest itself was a legacy page ID directly under sidebar_apps_$rest
+                jsonStr = prefs.getString("sidebar_apps_$rest", null)
+
+                if (jsonStr == null) {
+                    val (containerId, pageId) = parseContainerAndPageId(rest)
+                    if (pageId.isNotEmpty()) {
+                        val cleanHandle = com.example.core.PageManager.getCleanHandleId(containerId)
+                        jsonStr = prefs.getString("sidebar_apps_${cleanHandle}_$pageId", null)
+                            ?: prefs.getString("sidebar_apps_$pageId", null)
+                            ?: if (containerId == "sidebar" || containerId == "handle_1_swipe_left" || containerId == "handle_1") {
+                                prefs.getString("sidebar_apps", null)
+                            } else null
+                    }
+                }
+            } else if (jsonStr == null && prefKey.startsWith("hg_")) {
+                val rest = prefKey.removePrefix("hg_")
+                val pageId = if (rest.contains("_")) parseContainerAndPageId(rest).second.ifEmpty { rest } else rest
+                jsonStr = prefs.getString("hg_$pageId", null)
+            } else if (jsonStr == null && prefKey.startsWith("wg_")) {
+                val rest = prefKey.removePrefix("wg_")
+                val pageId = if (rest.contains("_")) parseContainerAndPageId(rest).second.ifEmpty { rest } else rest
+                jsonStr = prefs.getString("wg_$pageId", null)
+            }
+
+            if (jsonStr != null && jsonStr != "[]") {
+                prefs.edit().putString(prefKey, jsonStr).apply()
             }
         }
-        val jsonArray = JSONArray(jsonStr)
+        val safeJson = jsonStr ?: "[]"
+        val jsonArray = JSONArray(safeJson)
         val selectedIds = mutableListOf<String>()
         for (i in 0 until jsonArray.length()) {
             val itemStr = jsonArray.getString(i)
@@ -881,6 +906,37 @@ class SidebarAppsManager(
             withContext(Dispatchers.Main) {
                 notifyUpdated()
             }
+        }
+    }
+
+    companion object {
+        fun parseContainerAndPageId(rest: String): Pair<String, String> {
+            val gestures = listOf(
+                "_swipe_left_",
+                "_swipe_right_",
+                "_swipe_up_",
+                "_swipe_down_",
+                "_double_tap_",
+                "_long_press_",
+                "_tap_"
+            )
+            for (g in gestures) {
+                val idx = rest.indexOf(g)
+                if (idx != -1) {
+                    val containerId = rest.substring(0, idx + g.length - 1)
+                    val pageId = rest.substring(idx + g.length)
+                    return containerId to pageId
+                }
+            }
+            if (rest.startsWith("sidebar_")) {
+                return "sidebar" to rest.removePrefix("sidebar_")
+            }
+            val handleRegex = Regex("^(handle_\\w+?)_(.*)$")
+            val match = handleRegex.find(rest)
+            if (match != null) {
+                return match.groupValues[1] to match.groupValues[2]
+            }
+            return "" to rest
         }
     }
 }

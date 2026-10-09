@@ -163,6 +163,22 @@
 
 ---
 
+### 12.10 — Sidebar Page Identity, Opening Face & Container Isolation Corrections (Completed)
+- [x] **Page Type Identity & Resolution**:
+  - `PageTypes.resolvePageType`: Restricted to exact standard tokens (`HYBRID`, `HYBRID_GRID`, `home_grid`, `APPS`, `APPS_GRID`, `WIDGETS`, `WIDGETS_GRID`, `WIDGET`, `SINGLE_WIDGET`) and system timestamp prefixes (`apps_`, `widgets_grid_`, `widget_`, `hybrid_grid_`). Eradicated loose `.contains(...)` substring matching to prevent arbitrary IDs (`user_apps_notes`, `my_widgets_area`, `my_widget_view`) from misclassifying as built-in types.
+  - Legacy `tools` type mapped cleanly to `HYBRID_GRID` without deleting constants or factory branches.
+  - Display titles strictly resolved: "Apps Grid", "Widgets Grid", "Single Widget", and "Home Grid".
+- [x] **Configured Opening Face vs. Session Selection**:
+  - `PageManager.getOpeningFaceId`: Guarantees independent opening face per container, with fallback to clean handle / legacy `default_page_index`, defaulting to first page of container stack. Never falls back to session swiped pages.
+  - `SidebarManager.openContainer`: Reopening a container strictly restores its configured opening face. Live swiping updates only runtime session selection (`saveSelectedPageId`).
+- [x] **SidebarAppsManager Compound Page ID Extraction**:
+  - Eradicated `substringAfterLast("_")` truncation. Introduced `parseContainerAndPageId` resolving gestures and compound IDs (`apps_grid_123`, `default_apps`) preserving full canonical IDs and migrating legacy keys without data loss.
+- [x] **Hybrid & Widgets Grid Container Persistence Isolation**:
+  - Container-scoped preferences (`handle_${containerId}_hybrid_grid_$pageId`, `handle_${containerId}_widgets_grid_$pageId`) with alt key and legacy migration preserving the resident Home Grid.
+  - Wired `containerId` across `WidgetsGridEditActivity` and `HybridGridEditActivity` editors.
+
+---
+
 ## Phase 14: PWA Engine & External AI App Integration (Tier 5 - Highest Complexity)
 - [ ] **14.1 Local PWA Runner Core**: Embedded lightweight local HTTP/asset server (`PwaServer`), `PwaWindowManager`, `PwaDatabase`, and ZIP manifest importer (`PwaImportActivity`).
 - [ ] **14.2 Dual-Mode Windowing**: Floating overlay for lightweight PWAs vs. Fullscreen `PwaActivity` for complex web applications.

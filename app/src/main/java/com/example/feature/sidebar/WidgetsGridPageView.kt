@@ -45,7 +45,18 @@ class WidgetsGridPageView(
 
     private val prefs = context.getSharedPreferences("FloatingReaderPrefs", Context.MODE_PRIVATE)
 
-    private val appsManager = SidebarAppsManager(context, prefs, scope, "wg_${containerId}_${pageId}") {
+    private val appsManagerKey = run {
+        val isolated = "wg_${containerId}_${pageId}"
+        if (!prefs.contains(isolated) && prefs.contains("wg_${pageId}")) {
+            val legacy = prefs.getString("wg_${pageId}", null)
+            if (legacy != null) {
+                prefs.edit().putString(isolated, legacy).apply()
+            }
+        }
+        isolated
+    }
+
+    private val appsManager = SidebarAppsManager(context, prefs, scope, appsManagerKey) {
         post { loadWidgets() }
     }
 
@@ -114,6 +125,16 @@ class WidgetsGridPageView(
     private fun getWidgetsPrefKey(): String {
         val isolatedKey = "handle_${containerId}_widgets_grid_$pageId"
         if (prefs.contains(isolatedKey)) return isolatedKey
+        if (containerId.startsWith("handle_")) {
+            val altKey = "${containerId}_widgets_grid_$pageId"
+            if (prefs.contains(altKey)) {
+                val altVal = prefs.getString(altKey, null)
+                if (altVal != null) {
+                    prefs.edit().putString(isolatedKey, altVal).apply()
+                }
+                return isolatedKey
+            }
+        }
         val legacyKey = "widgets_grid_$pageId"
         if (prefs.contains(legacyKey) && (containerId == "sidebar" || containerId == "handle_1_swipe_left" || containerId == "handle_1")) {
             val legacyVal = prefs.getString(legacyKey, null)
@@ -128,6 +149,14 @@ class WidgetsGridPageView(
     private fun getWidgetsColsPrefKey(): String {
         val isolatedKey = "handle_${containerId}_widgets_grid_cols_$pageId"
         if (prefs.contains(isolatedKey)) return isolatedKey
+        if (containerId.startsWith("handle_")) {
+            val altKey = "${containerId}_widgets_grid_cols_$pageId"
+            if (prefs.contains(altKey)) {
+                val altCols = prefs.getInt(altKey, 4)
+                prefs.edit().putInt(isolatedKey, altCols).apply()
+                return isolatedKey
+            }
+        }
         val legacyKey = "widgets_grid_cols_$pageId"
         if (prefs.contains(legacyKey) && (containerId == "sidebar" || containerId == "handle_1_swipe_left" || containerId == "handle_1")) {
             val legacyCols = prefs.getInt(legacyKey, 4)

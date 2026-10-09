@@ -41,6 +41,7 @@ import kotlin.math.roundToInt
 class HybridGridEditActivity : ComponentActivity() {
     private lateinit var prefs: android.content.SharedPreferences
     private lateinit var pageId: String
+    private lateinit var containerId: String
     private lateinit var appWidgetManager: AppWidgetManager
     private lateinit var appsManager: com.example.feature.sidebar.SidebarAppsManager
 
@@ -50,10 +51,18 @@ class HybridGridEditActivity : ComponentActivity() {
             finish()
             return
         }
-        LogKeeper.writeLog("HybridGridEdit", "Opened editor for page: $pageId")
+        containerId = intent.getStringExtra("CONTAINER_ID") ?: "sidebar"
+        LogKeeper.writeLog("HybridGridEdit", "Opened editor for page: $pageId in container: $containerId")
         prefs = getSharedPreferences("FloatingReaderPrefs", Context.MODE_PRIVATE)
         appWidgetManager = AppWidgetManager.getInstance(this)
-        appsManager = com.example.feature.sidebar.SidebarAppsManager(this, prefs, kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO), "hg_${pageId}") {}
+        val isolatedKey = "hg_${containerId}_${pageId}"
+        if (!prefs.contains(isolatedKey) && prefs.contains("hg_${pageId}")) {
+            val legacy = prefs.getString("hg_${pageId}", null)
+            if (legacy != null) {
+                prefs.edit().putString(isolatedKey, legacy).apply()
+            }
+        }
+        appsManager = com.example.feature.sidebar.SidebarAppsManager(this, prefs, kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO), isolatedKey) {}
         appsManager.ensureLoaded()
 
         setContent {
@@ -64,6 +73,7 @@ class HybridGridEditActivity : ComponentActivity() {
                         prefs = prefs,
                         appWidgetManager = appWidgetManager,
                         appsManager = appsManager,
+                        containerId = containerId,
                         onClose = { finish() },
                         onAddWidget = {
                             val intent = Intent(this@HybridGridEditActivity, AddElementActivity::class.java).apply {
@@ -88,7 +98,7 @@ class HybridGridEditActivity : ComponentActivity() {
             val uuid = data.getStringExtra("FOLDER_UUID")
             if (updatedFolder != null && uuid != null) {
                 val prefs = getSharedPreferences("FloatingReaderPrefs", Context.MODE_PRIVATE)
-                val parsedItems = loadHybridLocalItems(prefs, pageId).toMutableList()
+                val parsedItems = loadHybridLocalItems(prefs, pageId, containerId).toMutableList()
                 
                 val index = parsedItems.indexOfFirst {
                     val itemUuid = it.id.removePrefix("folder:").substringBefore(":")
@@ -103,7 +113,7 @@ class HybridGridEditActivity : ComponentActivity() {
                     com.example.core.LogKeeper.writeLog("FolderElement", "folder replacement in the parent page: replacing index $index in Hybrid Grid page with $newCount children")
                     
                     parsedItems[index] = parsedItems[index].copy(id = updatedFolder)
-                    saveHybridItems(prefs, pageId, parsedItems, this)
+                    saveHybridItems(prefs, pageId, parsedItems, this, containerId)
                     com.example.core.LogKeeper.writeLog("FolderElement", "final saved child count: $newCount")
                     LogKeeper.writeLog("HybridGridEdit", "Updated folder: $uuid")
                     
@@ -119,7 +129,7 @@ class HybridGridEditActivity : ComponentActivity() {
             val elementId = data.getStringExtra("ELEMENT_ID")
             if (elementId != null) {
                 val prefs = getSharedPreferences("FloatingReaderPrefs", Context.MODE_PRIVATE)
-                val parsedItems = loadHybridLocalItems(prefs, pageId).toMutableList()
+                val parsedItems = loadHybridLocalItems(prefs, pageId, containerId).toMutableList()
                 
                 var defaultCols = if (elementId.startsWith("widget:")) 2 else 1
                 var defaultRows = if (elementId.startsWith("widget:")) 2 else 1
@@ -134,7 +144,8 @@ class HybridGridEditActivity : ComponentActivity() {
                     } catch (e: Exception) {}
                 }
                 
-                val totalCols = prefs.getInt("hybrid_grid_cols_$pageId", 4)
+                val gridColsKey = if (containerId != "sidebar" || prefs.contains("handle_${containerId}_hybrid_grid_cols_$pageId")) "handle_${containerId}_hybrid_grid_cols_$pageId" else "hybrid_grid_cols_$pageId"
+                val totalCols = prefs.getInt(gridColsKey, prefs.getInt("hybrid_grid_cols_$pageId", 4))
                 defaultCols = minOf(defaultCols, totalCols)
 
                 var targetX = 0
@@ -169,7 +180,7 @@ class HybridGridEditActivity : ComponentActivity() {
                     x = targetX,
                     y = targetY
                 ))
-                saveHybridItems(prefs, pageId, parsedItems, this)
+                saveHybridItems(prefs, pageId, parsedItems, this, containerId)
                 LogKeeper.writeLog("HybridGridEdit", "Added item: $elementId at ($targetX, $targetY)")
                 val intent = Intent("ELEMENT_ADDED_TO_HYBRID")
                 intent.putExtra("PAGE_ID", pageId)
@@ -182,8 +193,8 @@ class HybridGridEditActivity : ComponentActivity() {
 
     override fun onBackPressed() {
         val prefs = getSharedPreferences("FloatingReaderPrefs", Context.MODE_PRIVATE)
-        val currentFreshItems = loadHybridLocalItems(prefs, pageId)
-        saveHybridItems(prefs, pageId, currentFreshItems, this)
+        val currentFreshItems = loadHybridLocalItems(prefs, pageId, containerId)
+        saveHybridItems(prefs, pageId, currentFreshItems, this, containerId)
         super.onBackPressed()
     }
 
@@ -213,19 +224,21 @@ fun HybridGridEditor(
     prefs: android.content.SharedPreferences,
     appWidgetManager: AppWidgetManager,
     appsManager: com.example.feature.sidebar.SidebarAppsManager,
+    containerId: String = "sidebar",
     onClose: () -> Unit,
     onAddWidget: () -> Unit
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
-    var cols by remember { mutableIntStateOf(prefs.getInt("hybrid_grid_cols_$pageId", 4)) }
-    var items by remember { mutableStateOf(loadHybridLocalItems(prefs, pageId)) }
+    val gridColsKey = if (containerId != "sidebar" || prefs.contains("handle_${containerId}_hybrid_grid_cols_$pageId")) "handle_${containerId}_hybrid_grid_cols_$pageId" else "hybrid_grid_cols_$pageId"
+    var cols by remember { mutableIntStateOf(prefs.getInt(gridColsKey, prefs.getInt("hybrid_grid_cols_$pageId", 4))) }
+    var items by remember { mutableStateOf(loadHybridLocalItems(prefs, pageId, containerId)) }
     var isUserInteracting by remember { mutableStateOf(false) }
 
     val lifecycleOwner = androidx.compose.ui.platform.LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
             if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
-                items = loadHybridLocalItems(prefs, pageId)
+                items = loadHybridLocalItems(prefs, pageId, containerId)
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -237,7 +250,7 @@ fun HybridGridEditor(
     DisposableEffect(context, pageId) {
         val updateReceiver = object : android.content.BroadcastReceiver() {
             override fun onReceive(c: Context?, intent: Intent?) {
-                items = loadHybridLocalItems(prefs, pageId)
+                items = loadHybridLocalItems(prefs, pageId, containerId)
             }
         }
         val filter = android.content.IntentFilter("ELEMENT_ADDED_TO_HYBRID").apply {
@@ -258,13 +271,13 @@ fun HybridGridEditor(
 
     // Auto-save when cols change
     LaunchedEffect(cols) {
-        val currentCols = prefs.getInt("hybrid_grid_cols_$pageId", 4)
+        val currentCols = prefs.getInt(gridColsKey, 4)
         if (cols != currentCols) {
-            prefs.edit().putInt("hybrid_grid_cols_$pageId", cols).commit()
-            com.example.core.OverlaySyncManager.syncInt(context, "hybrid_grid_cols_$pageId", cols)
-            val currentFreshItems = loadHybridLocalItems(prefs, pageId)
+            prefs.edit().putInt(gridColsKey, cols).commit()
+            com.example.core.OverlaySyncManager.syncInt(context, gridColsKey, cols)
+            val currentFreshItems = loadHybridLocalItems(prefs, pageId, containerId)
             items = currentFreshItems
-            saveHybridItems(prefs, pageId, currentFreshItems, context)
+            saveHybridItems(prefs, pageId, currentFreshItems, context, containerId)
         }
     }
 
@@ -276,8 +289,8 @@ fun HybridGridEditor(
         ) {
             Text("Edit Hybrid Grid", fontSize = 20.sp, color = Color.White)
             Button(onClick = {
-                val currentFreshItems = loadHybridLocalItems(prefs, pageId)
-                saveHybridItems(prefs, pageId, currentFreshItems, context)
+                val currentFreshItems = loadHybridLocalItems(prefs, pageId, containerId)
+                saveHybridItems(prefs, pageId, currentFreshItems, context, containerId)
                 onClose()
             }) {
                 Text("Done")
@@ -322,7 +335,7 @@ fun HybridGridEditor(
                 onInteractionStateChange = { isInteracting -> isUserInteracting = isInteracting },
                 onUpdateItems = { newItems ->
                     items = newItems
-                    saveHybridItems(prefs, pageId, newItems, context)
+                    saveHybridItems(prefs, pageId, newItems, context, containerId)
                 }
             )
         }
@@ -555,9 +568,15 @@ fun getHybridWidgetName(context: Context, id: String, appWidgetManager: AppWidge
     }
 }
 
-fun loadHybridLocalItems(prefs: android.content.SharedPreferences, pageId: String): List<GridWidgetItem> {
-    var jsonStr = prefs.getString("hybrid_grid_$pageId", null)
-    val isModified = prefs.getBoolean("hybrid_grid_modified_$pageId", false)
+fun loadHybridLocalItems(prefs: android.content.SharedPreferences, pageId: String, containerId: String = "sidebar"): List<GridWidgetItem> {
+    val isolatedKey = "handle_${containerId}_hybrid_grid_$pageId"
+    val legacyKey = "hybrid_grid_$pageId"
+    val key = if (prefs.contains(isolatedKey)) isolatedKey
+        else if (containerId.startsWith("handle_") && prefs.contains("${containerId}_hybrid_grid_$pageId")) "${containerId}_hybrid_grid_$pageId"
+        else if (prefs.contains(legacyKey) && (containerId == "sidebar" || containerId == "handle_1_swipe_left" || containerId == "handle_1")) legacyKey
+        else isolatedKey
+    var jsonStr = prefs.getString(key, null)
+    val isModified = prefs.getBoolean("handle_${containerId}_hybrid_grid_modified_$pageId", prefs.getBoolean("hybrid_grid_modified_$pageId", false))
     if (jsonStr == null || (jsonStr == "[]" && pageId.startsWith("default_hybrid") && !isModified)) {
         if (pageId.startsWith("default_hybrid")) {
             jsonStr = """[{"id": "system:ebook_reader", "cols": 1, "rows": 1, "x": 0, "y": 0}, {"id": "system:log_keeper", "cols": 1, "rows": 1, "x": 1, "y": 0}]"""
@@ -565,32 +584,7 @@ fun loadHybridLocalItems(prefs: android.content.SharedPreferences, pageId: Strin
             jsonStr = "[]"
         }
     }
-    val arr = JSONArray(jsonStr)
-    val list = mutableListOf<GridWidgetItem>()
-    for (i in 0 until arr.length()) {
-        val obj = arr.optJSONObject(i)
-        if (obj != null) {
-            val idStr = if (obj.has("id")) {
-                val rawId = obj.get("id")
-                if (rawId is Int) "widget:$rawId" else rawId.toString()
-            } else ""
-            if (idStr.isNotEmpty()) {
-                list.add(GridWidgetItem(
-                    id = idStr,
-                    cols = obj.optInt("cols", 1),
-                    rows = obj.optInt("rows", 1),
-                    x = obj.optInt("x", 0),
-                    y = obj.optInt("y", 0)
-                ))
-            }
-        } else {
-            val id = arr.optInt(i, -1)
-            if (id != -1) {
-                list.add(GridWidgetItem("widget:$id", 2, 2, 0, 0))
-            }
-        }
-    }
-    return list
+    return parseHybridItems(jsonStr)
 }
 
 fun parseHybridItems(jsonStr: String): List<GridWidgetItem> {
@@ -622,7 +616,7 @@ fun parseHybridItems(jsonStr: String): List<GridWidgetItem> {
     return list
 }
 
-fun saveHybridItems(prefs: android.content.SharedPreferences, pageId: String, items: List<GridWidgetItem>, context: Context? = null) {
+fun saveHybridItems(prefs: android.content.SharedPreferences, pageId: String, items: List<GridWidgetItem>, context: Context? = null, containerId: String = "sidebar") {
     val arr = JSONArray()
     items.forEach { 
         val obj = JSONObject()
@@ -634,12 +628,14 @@ fun saveHybridItems(prefs: android.content.SharedPreferences, pageId: String, it
         arr.put(obj)
     }
     val json = arr.toString()
-    prefs.edit().putString("hybrid_grid_$pageId", json)
-        .putBoolean("hybrid_grid_modified_$pageId", true)
+    val key = if (containerId != "sidebar" || prefs.contains("handle_${containerId}_hybrid_grid_$pageId")) "handle_${containerId}_hybrid_grid_$pageId" else "hybrid_grid_$pageId"
+    val modKey = if (containerId != "sidebar" || prefs.contains("handle_${containerId}_hybrid_grid_modified_$pageId")) "handle_${containerId}_hybrid_grid_modified_$pageId" else "hybrid_grid_modified_$pageId"
+    prefs.edit().putString(key, json)
+        .putBoolean(modKey, true)
         .commit()
     if (context != null) {
-        com.example.core.OverlaySyncManager.syncString(context, "hybrid_grid_$pageId", json)
-        com.example.core.OverlaySyncManager.syncBoolean(context, "hybrid_grid_modified_$pageId", true)
+        com.example.core.OverlaySyncManager.syncString(context, key, json)
+        com.example.core.OverlaySyncManager.syncBoolean(context, modKey, true)
         try {
             val intent = Intent("UPDATE_GRID").apply {
                 putExtra("PAGE_ID", pageId)
@@ -648,5 +644,5 @@ fun saveHybridItems(prefs: android.content.SharedPreferences, pageId: String, it
             context.sendBroadcast(intent)
         } catch (e: Exception) {}
     }
-    LogKeeper.writeLog("HybridGridEdit", "Saved ${items.size} items to prefs for page: $pageId")
+    LogKeeper.writeLog("HybridGridEdit", "Saved ${items.size} items to prefs for page: $pageId in container: $containerId")
 }

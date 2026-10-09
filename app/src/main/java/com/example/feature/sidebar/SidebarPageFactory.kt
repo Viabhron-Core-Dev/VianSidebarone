@@ -59,7 +59,7 @@ class DefaultSidebarPageFactory(
             "compass" -> CompassPageView(context) { newHeight ->
                 onHeightChanged(newHeight)
             }
-            "apps" -> {
+            "apps", "apps_grid" -> {
                 val prefKey = "sidebar_apps_${containerId}_${config.id}"
                 if (!prefs.contains(prefKey)) {
                     val legacyHandleKey = "sidebar_apps_${physicalHandleId}_${config.id}"
@@ -83,7 +83,7 @@ class DefaultSidebarPageFactory(
                 p.updateData(manager.activeItems)
                 p
             }
-            "hybrid_grid", "default_hybrid" -> {
+            "hybrid_grid", "default_hybrid", "tools" -> {
                 val pageId = if (config.type == "default_hybrid" && !config.id.startsWith("default_hybrid")) "default_hybrid" else config.id
                 HybridGridPageView(
                     context, pageId, viewScope, containerId,
@@ -93,7 +93,7 @@ class DefaultSidebarPageFactory(
                     onHeightChanged(newHeight)
                 }
             }
-            "widgets_grid" -> {
+            "widgets_grid", "widgets" -> {
                 WidgetsGridPageView(context, config.id, viewScope, containerId) { newHeight ->
                     onHeightChanged(newHeight)
                 }
@@ -128,7 +128,7 @@ class DefaultSidebarPageFactory(
                     onHeightChanged(newHeight)
                 }
             }
-            "widget" -> {
+            "widget", "single_widget" -> {
                 WidgetPageView(context, config.id) { newHeight ->
                     onHeightChanged(newHeight)
                 }

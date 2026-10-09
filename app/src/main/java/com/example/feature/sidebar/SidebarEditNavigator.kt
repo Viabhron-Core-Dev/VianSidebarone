@@ -23,7 +23,7 @@ object SidebarEditNavigator {
         physicalHandleId: String = "handle_1"
     ): Intent {
         return when (pageConfig.type) {
-            "apps" -> {
+            "apps", "apps_grid" -> {
                 Intent(context, com.example.SidebarEditActivity::class.java).apply {
                     putExtra("PAGE_ID", pageConfig.id)
                     putExtra("CONTAINER_ID", containerId)
@@ -31,20 +31,24 @@ object SidebarEditNavigator {
                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 }
             }
-            "widgets_grid" -> {
+            "widgets_grid", "widgets" -> {
                 Intent(context, com.example.WidgetsGridEditActivity::class.java).apply {
                     putExtra("PAGE_ID", pageConfig.id)
+                    putExtra("CONTAINER_ID", containerId)
                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 }
             }
-            "hybrid_grid", "default_hybrid" -> {
+            "hybrid_grid", "default_hybrid", "tools" -> {
                 Intent(context, com.example.HybridGridEditActivity::class.java).apply {
                     putExtra("PAGE_ID", pageConfig.id)
+                    putExtra("CONTAINER_ID", containerId)
                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 }
             }
             "app_tracker" -> {
                 Intent(context, com.example.AppTrackerSettingsActivity::class.java).apply {
+                    putExtra("CONTAINER_ID", containerId)
+                    putExtra("PAGE_ID", pageConfig.id)
                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 }
             }
@@ -58,7 +62,7 @@ object SidebarEditNavigator {
                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 }
             }
-            "calculator", "compass", "resources_tracker", "media_player", "widget" -> {
+            "calculator", "compass", "resources_tracker", "media_player", "widget", "single_widget" -> {
                 Intent(context, com.example.SettingsActivity::class.java).apply {
                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
                     putExtra("start_route", "pages_${containerId}|edit_page:${pageConfig.id}")
