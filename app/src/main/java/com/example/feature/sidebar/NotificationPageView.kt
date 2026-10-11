@@ -163,13 +163,29 @@ class NotificationPageView(
                 val prefs = context.getSharedPreferences("NotificationPrefs", Context.MODE_PRIVATE)
                 val sidebarHidden = prefs.getStringSet("sidebar_hidden_packages", emptySet()) ?: emptySet()
 
-                // Mirror all live notifications in Android notification bar, excluding self app and user-blocked packages
                 val sbns = listener.activeNotifications
                     .filter { 
                         it.packageName != context.packageName && 
                         !sidebarHidden.contains(it.packageName)
                     }
                     .sortedByDescending { it.postTime }
+
+                android.util.Log.d("SidebarNotifDiag", "=== SNAPSHOT START: totalActive=${sbns.size} ===")
+                sbns.forEachIndexed { index, sbn ->
+                    val extras = sbn.notification.extras
+                    val title = extras?.getCharSequence(Notification.EXTRA_TITLE)?.toString()?.trim() ?: ""
+                    val text = extras?.getCharSequence(Notification.EXTRA_TEXT)?.toString()?.trim() ?: ""
+                    val channelId = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                        sbn.notification.channelId ?: "null"
+                    } else {
+                        "n/a"
+                    }
+                    android.util.Log.d(
+                        "SidebarNotifDiag",
+                        "[$index] pkg=${sbn.packageName} key=${sbn.key} id=${sbn.id} tag=${sbn.tag} postTime=${sbn.postTime} isOngoing=${sbn.isOngoing} channel=$channelId title='$title' text='$text'"
+                    )
+                }
+                android.util.Log.d("SidebarNotifDiag", "=== SNAPSHOT END ===")
 
                 activeNotifications = sbns
                 adapter.submitList(activeNotifications)

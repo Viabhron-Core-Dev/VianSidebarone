@@ -147,38 +147,56 @@ class AppsPageView(
         refreshList()
     }
 
-    private fun refreshList() {
-        val flatList = mutableListOf<SidebarItem>()
-        val baseItems = if (sourceApps.isNotEmpty()) {
-            sourceApps
-        } else if (manager.allInstalledApps.isNotEmpty()) {
-            manager.allInstalledApps.map { SidebarItem.App(it.packageName, it.label) }
-        } else {
-            emptyList()
-        }
+    fun getDisplayedItems(): List<SidebarItem> = displayedItems
+    fun getEmptyViewVisibility(): Int = emptyView.visibility
+    fun getRecyclerViewVisibility(): Int = recyclerView.visibility
 
-        for (item in baseItems) {
-            flatList.add(item)
-            if (item is SidebarItem.Folder && expandedFolders.contains(item.id)) {
-                for (itemId in item.items) {
-                    val parsedItem = manager.parseId(itemId)
-                    if (parsedItem != null) {
-                        flatList.add(parsedItem)
+    companion object {
+        /**
+         * Resolves the list of displayed sidebar items from configured source items,
+         * expanded folders, and optional search query without substituting the installed app catalogue.
+         */
+        fun resolveDisplayedItems(
+            sourceApps: List<SidebarItem>,
+            expandedFolders: Set<String>,
+            searchQuery: String,
+            itemParser: (String) -> SidebarItem?
+        ): List<SidebarItem> {
+            val flatList = mutableListOf<SidebarItem>()
+            val baseItems = sourceApps
+
+            for (item in baseItems) {
+                flatList.add(item)
+                if (item is SidebarItem.Folder && expandedFolders.contains(item.id)) {
+                    for (itemId in item.items) {
+                        val parsedItem = itemParser(itemId)
+                        if (parsedItem != null) {
+                            flatList.add(parsedItem)
+                        }
                     }
                 }
             }
-        }
 
-        displayedItems = if (searchQuery.isNotEmpty()) {
-            flatList.filter { item ->
-                when (item) {
-                    is SidebarItem.App -> item.label.contains(searchQuery, ignoreCase = true) || item.packageName.contains(searchQuery, ignoreCase = true)
-                    else -> item.label.contains(searchQuery, ignoreCase = true)
+            return if (searchQuery.isNotEmpty()) {
+                flatList.filter { item ->
+                    when (item) {
+                        is SidebarItem.App -> item.label.contains(searchQuery, ignoreCase = true) || item.packageName.contains(searchQuery, ignoreCase = true)
+                        else -> item.label.contains(searchQuery, ignoreCase = true)
+                    }
                 }
+            } else {
+                flatList
             }
-        } else {
-            flatList
         }
+    }
+
+    private fun refreshList() {
+        displayedItems = resolveDisplayedItems(
+            sourceApps = sourceApps,
+            expandedFolders = expandedFolders,
+            searchQuery = searchQuery,
+            itemParser = { manager.parseId(it) }
+        )
 
         adapter.updateItems(displayedItems)
         

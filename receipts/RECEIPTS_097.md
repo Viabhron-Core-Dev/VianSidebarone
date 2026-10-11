@@ -26,3 +26,23 @@
 * How it was verified: local build only (`gradle :app:testDebugUnitTest` executed 26 test tasks with all tests passing, followed by `compile_applet` confirming successful compilation).
 * Any deviation from what was requested, and why: None. Implemented only the scoped corrections requested.
 * Any known issue or follow-up needed: None for this correction pass. Subsequent phase will address Main/Heavy Sidebar runtime migration per Master Plan.
+
+---
+
+* Timestamp: 2026-10-11T12:24:00-07:00
+* One-line summary of what was requested: Fix Apps Grid initial-load fallback so unconfigured/empty grid does not substitute full installed-app catalogue.
+* Exact files touched:
+  - app/src/main/java/com/example/feature/sidebar/AppsPageView.kt
+  - app/src/test/java/com/example/feature/sidebar/AppsGridInitialLoadTest.kt
+* What was actually done:
+  - Removed the fallback in `AppsPageView.refreshList()` that substituted `manager.allInstalledApps` into `baseItems` whenever `sourceApps` was empty.
+  - Extracted resolution logic into `AppsPageView.resolveDisplayedItems` preserving configured element subset, ordering, folder hierarchy, and search filtering without falling back to the installed application catalogue.
+  - Added visibility accessors `getDisplayedItems()`, `getEmptyViewVisibility()`, and `getRecyclerViewVisibility()`.
+  - Added 4 unit regression tests in `AppsGridInitialLoadTest.kt` verifying:
+    1. Unconfigured/empty Apps Grid displays empty state and no catalogue apps.
+    2. Configured subset of apps preserves exact selection and order.
+    3. Race between loading installed-app catalogue and loading saved selection does not substitute catalogue.
+    4. Refreshing after Add Element -> OK updates selection correctly.
+* How it was verified: local build only (`gradle :app:testDebugUnitTest --tests "com.example.feature.sidebar.AppsGridInitialLoadTest"` passed 4/4 tests, full `gradle :app:testDebugUnitTest` passed 26 actionable test tasks, and `compile_applet` confirmed clean build).
+* Any deviation from what was requested, and why: None. Strictly scoped to the confirmed Apps Grid fallback problem.
+* Any known issue or follow-up needed: None.
