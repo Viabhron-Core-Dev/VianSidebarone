@@ -12,6 +12,9 @@ import android.view.WindowManager
 import android.widget.FrameLayout
 import com.example.core.LogKeeper
 import com.example.core.ipc.HeavyCommand
+import com.example.core.ipc.HeavyEvent
+import com.example.core.ipc.HeavyEventType
+import com.example.core.ipc.HeavyProcessHost
 import com.example.core.ipc.IpcErrorCode
 import com.example.core.ipc.IpcResult
 import com.example.feature.sidebar.CalculatorPageView
@@ -32,6 +35,7 @@ class HeavyPageHostManager private constructor(private val context: Context) {
     private val windowManager = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
     private val mainHandler = Handler(Looper.getMainLooper())
     private val activeWindows = ConcurrentHashMap<String, PageWindowHolder>()
+    private val lastReportedHeights = ConcurrentHashMap<String, Int>()
 
     private data class PageWindowHolder(
         val pageId: String,
@@ -45,6 +49,8 @@ class HeavyPageHostManager private constructor(private val context: Context) {
 
     /**
      * Mounts a Heavy-owned page view over the given screen coordinates.
+     * Defensive and idempotent: if the page is already mounted, updates its bounds
+     * without destroying or recreating the existing View.
      */
     fun mountPage(command: HeavyCommand): IpcResult {
         val pageId = command.payload["pageId"] ?: command.targetId ?: ""
@@ -63,8 +69,13 @@ class HeavyPageHostManager private constructor(private val context: Context) {
 
         mainHandler.post {
             try {
-                // If a window for this pageId already exists, unmount it first
-                unmountPageInternal(pageId)
+                // Idempotency check: if page is already mounted and attached, preserve it and update bounds
+                val existing = activeWindows[pageId]
+                if (existing != null && existing.isAttached) {
+                    LogKeeper.log(context, TAG, "Page '$pageId' already mounted in :heavy; updating bounds idempotently")
+                    updateBoundsInternal(existing, x, y, width, height)
+                    return@post
+                }
 
                 if (!Settings.canDrawOverlays(context)) {
                     LogKeeper.log(context, TAG, "Cannot mount page '$pageId': overlay permission denied in :heavy")
@@ -83,8 +94,7 @@ class HeavyPageHostManager private constructor(private val context: Context) {
                     "calculator" -> {
                         LogKeeper.log(context, TAG, "Instantiating CalculatorPageView in :heavy for pageId='$pageId'")
                         CalculatorPageView(context) { newH ->
-                            // Dynamic height report from Calculator drawer
-                            LogKeeper.log(context, TAG, "Calculator height changed to $newH in :heavy")
+                            reportDesiredPageHeight(pageId, newH)
                         }
                     }
                     else -> {
@@ -129,6 +139,29 @@ class HeavyPageHostManager private constructor(private val context: Context) {
     }
 
     /**
+     * Reports real content height calculated by a Heavy page back to Main across Binder.
+     */
+    private fun reportDesiredPageHeight(pageId: String, newHeight: Int) {
+        if (newHeight <= 0) return
+        val previous = lastReportedHeights[pageId]
+        if (previous == newHeight) return
+        lastReportedHeights[pageId] = newHeight
+
+        LogKeeper.log(context, TAG, "Reporting desired height $newHeight for page '$pageId' from :heavy to Main")
+        val event = HeavyEvent(
+            eventId = "height_${pageId}_${System.currentTimeMillis()}",
+            type = HeavyEventType.STATE_UPDATED,
+            sourceId = pageId,
+            payload = mapOf(
+                "action" to ACTION_PAGE_HEIGHT_CHANGED,
+                "pageId" to pageId,
+                "height" to newHeight.toString()
+            )
+        )
+        HeavyProcessHost.getInstance(context).reportEvent(event)
+    }
+
+    /**
      * Updates screen coordinates and dimensions for an active Heavy page window.
      */
     fun updatePageBounds(command: HeavyCommand): IpcResult {
@@ -140,32 +173,40 @@ class HeavyPageHostManager private constructor(private val context: Context) {
 
         mainHandler.post {
             val holder = activeWindows[pageId] ?: return@post
-            if (!holder.isAttached) return@post
-            try {
-                var changed = false
-                if (holder.layoutParams.x != x || holder.layoutParams.y != y) {
-                    holder.layoutParams.x = x
-                    holder.layoutParams.y = y
-                    changed = true
-                }
-                if (width > 0 && holder.layoutParams.width != width) {
-                    holder.layoutParams.width = width
-                    changed = true
-                }
-                if (height > 0 && holder.layoutParams.height != height) {
-                    holder.layoutParams.height = height
-                    changed = true
-                }
-                if (changed) {
-                    windowManager.updateViewLayout(holder.containerView, holder.layoutParams)
-                    LogKeeper.log(context, TAG, "Updated bounds for '$pageId' to ($x, $y) ${width}x$height in :heavy")
-                }
-            } catch (e: Throwable) {
-                LogKeeper.logCrash(context, TAG, e)
-            }
+            updateBoundsInternal(holder, x, y, width, height)
         }
 
         return IpcResult.success("Bounds updated")
+    }
+
+    private fun updateBoundsInternal(holder: PageWindowHolder, x: Int, y: Int, width: Int, height: Int): Boolean {
+        if (!holder.isAttached) return false
+        return try {
+            var changed = false
+            if (holder.layoutParams.x != x || holder.layoutParams.y != y) {
+                holder.layoutParams.x = x
+                holder.layoutParams.y = y
+                changed = true
+            }
+            if (width > 0 && holder.layoutParams.width != width) {
+                holder.layoutParams.width = width
+                changed = true
+            }
+            if (height > 0 && holder.layoutParams.height != height) {
+                holder.layoutParams.height = height
+                changed = true
+            }
+            if (changed) {
+                windowManager.updateViewLayout(holder.containerView, holder.layoutParams)
+                LogKeeper.log(context, TAG, "Updated bounds for '${holder.pageId}' to ($x, $y) ${width}x$height in :heavy")
+            } else {
+                LogKeeper.log(context, TAG, "Bounds unchanged for '${holder.pageId}' ($x, $y) ${width}x$height in :heavy; update suppressed")
+            }
+            changed
+        } catch (e: Throwable) {
+            LogKeeper.logCrash(context, TAG, e)
+            false
+        }
     }
 
     /**
@@ -192,6 +233,7 @@ class HeavyPageHostManager private constructor(private val context: Context) {
     }
 
     private fun unmountPageInternal(pageId: String) {
+        lastReportedHeights.remove(pageId)
         val holder = activeWindows.remove(pageId) ?: return
         if (holder.isAttached) {
             try {
@@ -206,6 +248,7 @@ class HeavyPageHostManager private constructor(private val context: Context) {
 
     companion object {
         private const val TAG = "HeavyPageHostManager"
+        const val ACTION_PAGE_HEIGHT_CHANGED = "page_height_changed"
 
         @Volatile
         private var instance: HeavyPageHostManager? = null

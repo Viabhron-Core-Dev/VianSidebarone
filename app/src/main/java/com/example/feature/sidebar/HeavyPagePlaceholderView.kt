@@ -1,18 +1,18 @@
 package com.example.feature.sidebar
 
 import android.content.Context
-import android.graphics.Color
 import android.graphics.Rect
-import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.view.ViewTreeObserver
 import android.widget.FrameLayout
-import android.widget.TextView
+import androidx.viewpager2.widget.ViewPager2
 import com.example.core.LogKeeper
 import com.example.core.SidebarPage
 import com.example.core.ipc.HeavyCommand
 import com.example.core.ipc.HeavyCommandType
+import com.example.core.ipc.HeavyConnectionListener
+import com.example.core.ipc.HeavyEvent
 import com.example.core.ipc.HeavyProcessConnectionManager
 import java.util.UUID
 
@@ -21,78 +21,178 @@ import java.util.UUID
  *
  * Runs exclusively in the Main process (com.example).
  * Responsibilities:
- * 1. Occupies the ViewPager2 page slot with standard width/height and layout parameters.
+ * 1. Occupies the ViewPager2 page slot with generic bootstrap height derived from host geometry,
+ *    never collapsing to an empty TextView's intrinsic font padding.
  * 2. Emits zero heavy allocations (no calculator evaluation engine, no heavy views).
- * 3. On page selection, calculates its precise on-screen coordinates (accounting for Sidebar overlay position)
- *    and issues a MOUNT_PAGE IPC command to :heavy via HeavyProcessConnectionManager.
- * 4. Listens for bounds/layout shifts and dispatches UPDATE_PAGE_BOUNDS to keep the Heavy window aligned.
- * 5. On page unselection or detach, issues an UNMOUNT_PAGE IPC command to cleanly tear down the Heavy window.
+ * 3. Idempotently tracks page selection and mounts Heavy only when ViewPager scroll state settles at IDLE.
+ * 4. Listens for Heavy page-height events across Binder (HeavyProcessConnectionManager), applying the
+ *    real desired height to Main's Sidebar layout without measurement loops.
+ * 5. Stabilizes geometry dispatch, suppressing transient per-frame coordinates during ViewPager settling.
+ * 6. On unselection or detachment, cleanly unmounts the Heavy window and releases its Heavy consumer.
  */
 class HeavyPagePlaceholderView(
     context: Context,
     private val config: SidebarPage,
     private val containerId: String,
     private val onHeightChanged: ((Int) -> Unit)? = null
-) : FrameLayout(context), SidebarPageControllable {
+) : FrameLayout(context), SidebarPageControllable, HeavyConnectionListener {
 
     private val connectionManager = HeavyProcessConnectionManager.getInstance(context)
-    private var isSelected = false
-    private val lastDispatchedRect = Rect()
     private val consumerTag = "HeavyPage_${config.id}_${UUID.randomUUID().toString().take(6)}"
 
+    private var isSelected = false
+    private var isMountRequested = false
+    private var isMounted = false
+    private var isScrollIdle = true
+
+    private var desiredHeightPx = -1
+    private val lastDispatchedRect = Rect()
+
     private var layoutListener: ViewTreeObserver.OnGlobalLayoutListener? = null
+    private var pendingStableUpdateRunnable: Runnable? = null
 
     init {
         layoutParams = ViewGroup.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT,
             ViewGroup.LayoutParams.WRAP_CONTENT
         )
-
-        // Visual subtle placeholder in Main beneath the transparent Heavy overlay
-        val placeholderText = TextView(context).apply {
-            text = ""
-            setTextColor(Color.TRANSPARENT)
-            gravity = Gravity.CENTER
-            layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
-        }
-        addView(placeholderText)
-
-        // Initial default height report (calibrated for standard Calculator 260dp)
-        post {
-            val density = resources.displayMetrics.density
-            val defaultHeight = (260 * density).toInt()
-            onHeightChanged?.invoke(defaultHeight)
-        }
+        // Clean transparent placeholder view; no dummy text view child to prevent intrinsic collapse
+        connectionManager.addListener(this)
     }
 
-    override fun onPageSelected() {
-        isSelected = true
-        LogKeeper.log(context, TAG, "Calculator placeholder onPageSelected for '${config.id}' in Main")
-
-        // Acquire connection to Heavy on demand
-        connectionManager.acquireConsumer(consumerTag)
-
-        // Wait for layout so global coordinates can be accurately determined
-        post {
-            if (isSelected) {
-                dispatchMountCommand()
-                setupLayoutMonitoring()
-            }
-        }
-    }
-
-    override fun onPageUnselected() {
-        isSelected = false
-        LogKeeper.log(context, TAG, "Calculator placeholder onPageUnselected for '${config.id}' in Main")
-        removeLayoutMonitoring()
-        dispatchUnmountCommand()
-        connectionManager.releaseConsumer(consumerTag)
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        connectionManager.addListener(this)
     }
 
     override fun onDetachedFromWindow() {
         super.onDetachedFromWindow()
-        if (isSelected) {
+        connectionManager.removeListener(this)
+        if (isSelected || isMountRequested) {
             onPageUnselected()
+        }
+    }
+
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        val width = MeasureSpec.getSize(widthMeasureSpec)
+        val height = if (desiredHeightPx > 0) {
+            desiredHeightPx
+        } else if (layoutParams.height > 0) {
+            layoutParams.height
+        } else {
+            // Generic bootstrap strategy: derive available content height from host container geometry
+            // If parent has valid height, adopt it; otherwise derive a comfortable fraction (45%) of screen height
+            val parentH = (parent as? View)?.height?.takeIf { it > 0 } ?: (parent as? View)?.measuredHeight?.takeIf { it > 0 }
+            parentH ?: ((context.resources.displayMetrics.heightPixels * 0.45f).toInt())
+        }
+        setMeasuredDimension(width, height)
+    }
+
+    override fun onPageSelected() {
+        if (isSelected && isMountRequested) {
+            LogKeeper.log(context, TAG, "Suppressed duplicate onPageSelected for '${config.id}' (already active/mounting)")
+            return
+        }
+        isSelected = true
+        isMountRequested = true
+        LogKeeper.log(context, TAG, "Placeholder onPageSelected for '${config.id}' in Main (mount requested)")
+
+        // Acquire connection to Heavy on demand
+        connectionManager.acquireConsumer(consumerTag)
+
+        if (isScrollIdle) {
+            scheduleStableMountOrUpdate(debounceMs = 0L)
+        }
+    }
+
+    override fun onPageUnselected() {
+        if (!isSelected && !isMountRequested) return
+        isSelected = false
+        isMountRequested = false
+        val wasMounted = isMounted
+        isMounted = false
+        LogKeeper.log(context, TAG, "Placeholder onPageUnselected for '${config.id}' in Main (wasMounted=$wasMounted)")
+
+        cancelPendingStableUpdate()
+        removeLayoutMonitoring()
+        if (wasMounted) {
+            dispatchUnmountCommand()
+        }
+        connectionManager.releaseConsumer(consumerTag)
+    }
+
+    override fun onPageScrollStateChanged(state: Int) {
+        val idle = (state == ViewPager2.SCROLL_STATE_IDLE)
+        isScrollIdle = idle
+        if (idle && isSelected) {
+            scheduleStableMountOrUpdate(debounceMs = 40L)
+        }
+    }
+
+    // --- IpcConnectionListener implementation ---
+
+    override fun onHeavyEvent(event: HeavyEvent) {
+        val action = event.payload["action"]
+        val targetPageId = event.payload["pageId"] ?: event.sourceId
+        if (action == "page_height_changed" && targetPageId == config.id) {
+            val reportedH = event.payload["height"]?.toIntOrNull() ?: return
+            if (reportedH > 0 && reportedH != desiredHeightPx) {
+                post {
+                    applyDesiredHeight(reportedH)
+                }
+            }
+        }
+    }
+
+    private fun applyDesiredHeight(newHeight: Int) {
+        if (newHeight <= 0 || newHeight == desiredHeightPx) return
+        LogKeeper.log(context, TAG, "Applying desired height $newHeight for '${config.id}' in Main")
+        desiredHeightPx = newHeight
+        requestLayout()
+        onHeightChanged?.invoke(newHeight)
+        // Check for bounds adjustment once Main layout stabilizes
+        scheduleStableMountOrUpdate(debounceMs = 50L)
+    }
+
+    // --- Geometry Synchronization ---
+
+    private fun cancelPendingStableUpdate() {
+        pendingStableUpdateRunnable?.let { removeCallbacks(it) }
+        pendingStableUpdateRunnable = null
+    }
+
+    private fun scheduleStableMountOrUpdate(debounceMs: Long = 40L) {
+        cancelPendingStableUpdate()
+        val r = Runnable {
+            if (!isSelected || !isScrollIdle) return@Runnable
+            val rect = getCurrentScreenRect() ?: run {
+                // If not yet measured, retry shortly once
+                if (isSelected && isScrollIdle) {
+                    scheduleStableMountOrUpdate(debounceMs = 50L)
+                }
+                return@Runnable
+            }
+            if (rect.width() <= 0 || rect.height() <= 0) return@Runnable
+
+            if (!isMounted) {
+                dispatchMountCommand(rect)
+                setupLayoutMonitoring()
+            } else {
+                if (rect.left == lastDispatchedRect.left &&
+                    rect.top == lastDispatchedRect.top &&
+                    rect.width() == lastDispatchedRect.width() &&
+                    rect.height() == lastDispatchedRect.height()) {
+                    LogKeeper.log(context, TAG, "Bounds unchanged for '${config.id}' $rect; update suppressed")
+                    return@Runnable
+                }
+                dispatchBoundsUpdate(rect)
+            }
+        }
+        pendingStableUpdateRunnable = r
+        if (debounceMs <= 0L) {
+            post(r)
+        } else {
+            postDelayed(r, debounceMs)
         }
     }
 
@@ -101,8 +201,9 @@ class HeavyPagePlaceholderView(
         val observer = viewTreeObserver
         if (observer.isAlive) {
             val listener = ViewTreeObserver.OnGlobalLayoutListener {
-                if (isSelected) {
-                    dispatchBoundsUpdateIfChanged()
+                if (isSelected && isScrollIdle) {
+                    // Debounce layout shifts (orientation, keyboard, sidebar height adjustments)
+                    scheduleStableMountOrUpdate(debounceMs = 60L)
                 }
             }
             layoutListener = listener
@@ -130,16 +231,9 @@ class HeavyPagePlaceholderView(
         return Rect(x, y, x + width, y + height)
     }
 
-    private fun dispatchMountCommand() {
-        val rect = getCurrentScreenRect() ?: run {
-            // If not yet measured, retry shortly
-            postDelayed({
-                if (isSelected) dispatchMountCommand()
-            }, 50L)
-            return
-        }
-
+    private fun dispatchMountCommand(rect: Rect) {
         lastDispatchedRect.set(rect)
+        isMounted = true
 
         val command = HeavyCommand(
             commandId = "mount_${config.id}_${System.currentTimeMillis()}",
@@ -157,13 +251,10 @@ class HeavyPagePlaceholderView(
         )
 
         val result = connectionManager.sendCommand(command, autoConnect = true)
-        LogKeeper.log(context, TAG, "Dispatched MOUNT_PAGE for '${config.id}' to :heavy. Result: ${result.success}")
+        LogKeeper.log(context, TAG, "Dispatched MOUNT_PAGE for '${config.id}' at $rect to :heavy. Result: ${result.success}")
     }
 
-    private fun dispatchBoundsUpdateIfChanged() {
-        val rect = getCurrentScreenRect() ?: return
-        if (rect == lastDispatchedRect) return
-
+    private fun dispatchBoundsUpdate(rect: Rect) {
         lastDispatchedRect.set(rect)
 
         val command = HeavyCommand(
@@ -180,6 +271,7 @@ class HeavyPagePlaceholderView(
         )
 
         connectionManager.sendCommand(command, autoConnect = false)
+        LogKeeper.log(context, TAG, "Dispatched stable UPDATE_PAGE_BOUNDS for '${config.id}' to $rect in :heavy")
     }
 
     private fun dispatchUnmountCommand() {
@@ -194,6 +286,12 @@ class HeavyPagePlaceholderView(
         connectionManager.sendCommand(command, autoConnect = false)
         LogKeeper.log(context, TAG, "Dispatched UNMOUNT_PAGE for '${config.id}' to :heavy")
     }
+
+    // Testing hooks
+    internal fun getDesiredHeightPx(): Int = desiredHeightPx
+    internal fun isMountedState(): Boolean = isMounted
+    internal fun isMountRequestedState(): Boolean = isMountRequested
+    internal fun getLastDispatchedRect(): Rect = Rect(lastDispatchedRect)
 
     companion object {
         private const val TAG = "HeavyPagePlaceholder"

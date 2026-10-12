@@ -459,6 +459,16 @@ class SidebarView(
                     }
                 }
             }
+
+            override fun onPageScrollStateChanged(state: Int) {
+                super.onPageScrollStateChanged(state)
+                val rcv = viewPager.getChildAt(0) as? androidx.recyclerview.widget.RecyclerView ?: return
+                for (i in 0 until rcv.childCount) {
+                    val child = rcv.getChildAt(i)
+                    val holder = rcv.getChildViewHolder(child) as? SidebarPageViewHolder
+                    (holder?.pageView as? SidebarPageControllable)?.onPageScrollStateChanged(state)
+                }
+            }
         }
         pageChangeCallback = callback
         viewPager.registerOnPageChangeCallback(callback)

@@ -5,4 +5,5 @@ interface SidebarPageControllable {
     fun onPageSelected() {}
     fun onPageUnselected() {}
     fun onTrimMemory(level: Int) {}
+    fun onPageScrollStateChanged(state: Int) {}
 }

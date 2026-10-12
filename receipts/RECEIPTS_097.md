@@ -100,3 +100,27 @@
 * How it was verified: local build only (`gradle :app:testDebugUnitTest` 26/26 passed, `compile_applet` succeeded, zero keystore artifacts confirmed).
 * Any deviation from what was requested, and why: None.
 * Any known issue or follow-up needed: None. Ready for next user instruction.
+
+---
+
+* Timestamp: 2026-10-12T13:50:00-07:00
+* One-line summary of what was requested: Implement focused geometry/lifecycle corrections for Heavy Calculator (height reporting, idempotent mount, ViewPager idle synchronization, bootstrap sizing) awaiting physical verification.
+* Exact files touched:
+  - app/src/main/java/com/example/feature/sidebar/SidebarPageControllable.kt
+  - app/src/main/java/com/example/feature/sidebar/SidebarView.kt
+  - app/src/main/java/com/example/feature/sidebar/HeavyPagePlaceholderView.kt
+  - app/src/main/java/com/example/feature/heavy/page/HeavyPageHostManager.kt
+  - app/src/test/java/com/example/feature/sidebar/HeavyCalculatorSplitTest.kt
+  - receipts/RECEIPTS_097.md
+* What was actually done:
+  - Neutralized 44px empty-TextView collapse in `HeavyPagePlaceholderView` by overriding `onMeasure` with a generic host geometry bootstrap strategy (parent height / 45% screen height fallback) and removing the empty TextView child.
+  - Implemented Heavy → Main height reporting in `HeavyPageHostManager` by forwarding `newHeight` from `CalculatorPageView` via `HeavyProcessHost.reportEvent` using `action = "page_height_changed"`, filtering unchanged or non-positive values.
+  - Added `HeavyConnectionListener` implementation to `HeavyPagePlaceholderView` to receive `page_height_changed`, update measured dimensions, and invoke `onHeightChanged` to drive `SidebarView.handleChildHeightChange` without feedback loops.
+  - Enforced selection and mount idempotency in `HeavyPagePlaceholderView`, suppressing duplicate `onPageSelected` dispatches while already active.
+  - Enforced Heavy-side mount idempotency in `HeavyPageHostManager.mountPage`, updating window bounds on duplicate mount requests instead of unmounting and recreating `CalculatorPageView`.
+  - Added `onPageScrollStateChanged` to `SidebarPageControllable` and forwarded ViewPager2 scroll states from `SidebarView`; synchronized bounds dispatching in `HeavyPagePlaceholderView` so in-flight coordinates during dragging/settling are suppressed and stable bounds are dispatched at `SCROLL_STATE_IDLE`.
+  - Added unit regression tests in `HeavyCalculatorSplitTest.kt` covering event serialization, height filtering/deduplication, bounds suppression, and bootstrap calculation.
+  - Purged transient `debug.keystore` and `debug.keystore.base64` artifacts per Credential Immunity Rule.
+* How it was verified: local build only (`gradle :app:testDebugUnitTest` executed 26 test tasks passing all tests, followed by `compile_applet` confirming clean build; awaiting on-device physical verification).
+* Any deviation from what was requested, and why: None. Scoped strictly to the verified geometry and lifecycle synchronization problems.
+* Any known issue or follow-up needed: Correction is pending physical-device retest to verify live overlay rendering and gesture interaction.

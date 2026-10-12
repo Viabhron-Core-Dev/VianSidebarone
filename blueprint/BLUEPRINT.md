@@ -181,10 +181,11 @@
 - [x] **Notification DiffUtil Updates**: Replaced unconditional `notifyDataSetChanged()` with Android identity-aware `DiffUtil.calculateDiff` matching `StatusBarNotification.key` (with package/id/tag fallback) and comparing displayed notification content fields (`title`, `text`, `subText`, `bigText`, `postTime`). Prevents viewport jumps while preserving in-place card updates for rapidly updating notifications.
 - [x] **Height Dispatch Guard**: Stabilized `loadNotifications()` with `lastDispatchedHeightPx` check, suppressing redundant `onHeightChanged` callbacks when calculated target height is unchanged to eliminate unnecessary WindowManager relayouts during scroll.
 
-### 12.12 — Main → Heavy Sidebar Page-Runtime Split: First Vertical Slice (Completed)
-- [x] **Lightweight Main Placeholder (`HeavyPagePlaceholderView`)**: Implemented non-rendering, zero-heavy-allocation View occupying the ViewPager page slot in Main. Measures global screen coordinates and lifecycle, issuing typed Binder IPC commands (`MOUNT_PAGE`, `UPDATE_PAGE_BOUNDS`, `UNMOUNT_PAGE`) to `:heavy`.
-- [x] **On-Demand Heavy Host (`HeavyPageHostManager`)**: Hosts `CalculatorPageView` inside a dedicated `TYPE_APPLICATION_OVERLAY` window in `:heavy`, aligned dynamically to Main's placeholder screen rect. Touch events and calculations execute entirely in `:heavy` without polluting Main process heap.
-- [x] **Strict Two-Process Foundation Preserved**: Main remains the sole authority for Handles, gestures, container/page hierarchy, Edit Mode, and the resident Home Grid (`"default_hybrid"` / `HybridGridPageView`). Resident Home Grid never wakes `:heavy`.
+### 12.12 — Main → Heavy Sidebar Page-Runtime Split: First Vertical Slice (Correction Implemented — Awaiting Physical Retest)
+- [x] **Lightweight Main Placeholder (`HeavyPagePlaceholderView`)**: Implemented non-rendering, zero-heavy-allocation View occupying the ViewPager page slot in Main. Overrides `onMeasure` with a generic host geometry bootstrap (parent height / 45% screen height fallback) eliminating the empty-TextView 44px collapse. Idempotently tracks page selection, listens for ViewPager2 `SCROLL_STATE_IDLE` before issuing stable `MOUNT_PAGE` or `UPDATE_PAGE_BOUNDS`, suppressing transient in-flight coordinates.
+- [x] **On-Demand Heavy Host (`HeavyPageHostManager`)**: Hosts `CalculatorPageView` inside a dedicated `TYPE_APPLICATION_OVERLAY` window in `:heavy`. Enforces mount idempotency (preserving existing View instance and updating bounds rather than unmounting/recreating). Reports real calculated `newHeight` across Binder to Main via `HeavyProcessHost.reportEvent` (`action = "page_height_changed"`), suppressing duplicate values.
+- [x] **Main ↔ Heavy Height Synchronization Loop Convergence**: Placeholder implements `HeavyConnectionListener`, receives desired height from `:heavy`, updates measured dimensions, and invokes `onHeightChanged` to drive `SidebarView.handleChildHeightChange`, converging cleanly without measurement loops.
+- [ ] **Physical On-Device Verification**: Pending physical device retest to verify live overlay positioning, swipe interaction, and calculator button usability.
 
 ---
 
