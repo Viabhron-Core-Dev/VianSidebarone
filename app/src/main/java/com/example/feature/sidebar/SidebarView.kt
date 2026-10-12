@@ -643,6 +643,7 @@ class SidebarView(
                     is HybridGridPageView -> pv.getCurrentHeightPx()
                     is WidgetsGridPageView -> pv.getCurrentHeightPx()
                     is WidgetPageView -> pv.getCurrentHeightPx()
+                    is HeavyPagePlaceholderView -> pv.getCurrentHeightPx()
                     else -> pv.height
                 }
             }

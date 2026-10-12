@@ -6,6 +6,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.ViewTreeObserver
 import android.widget.FrameLayout
+import android.view.ViewParent
 import androidx.viewpager2.widget.ViewPager2
 import com.example.core.LogKeeper
 import com.example.core.SidebarPage
@@ -15,6 +16,7 @@ import com.example.core.ipc.HeavyConnectionListener
 import com.example.core.ipc.HeavyEvent
 import com.example.core.ipc.HeavyProcessConnectionManager
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * HeavyPagePlaceholderView: Lightweight Main-process placeholder for pages hosted in :heavy (e.g. Calculator).
@@ -45,7 +47,7 @@ class HeavyPagePlaceholderView(
     private var isMounted = false
     private var isScrollIdle = true
 
-    private var desiredHeightPx = -1
+    private var desiredHeightPx = cachedDesiredHeights[config.id] ?: -1
     private val lastDispatchedRect = Rect()
 
     private var layoutListener: ViewTreeObserver.OnGlobalLayoutListener? = null
@@ -73,6 +75,22 @@ class HeavyPagePlaceholderView(
         }
     }
 
+    fun getBootstrapHeightPx(): Int {
+        val cached = cachedDesiredHeights[config.id]
+        if (cached != null && cached > 0) return cached
+        if (config.useCustomSettings && config.height > 0) {
+            return (config.height * context.resources.displayMetrics.density).toInt()
+        }
+        val defaultDp = when (config.type) {
+            "calculator" -> 260
+            "compass" -> 270
+            else -> 260
+        }
+        return (defaultDp * context.resources.displayMetrics.density).toInt()
+    }
+
+    fun getCurrentHeightPx(): Int = if (desiredHeightPx > 0) desiredHeightPx else getBootstrapHeightPx()
+
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         val width = MeasureSpec.getSize(widthMeasureSpec)
         val height = if (desiredHeightPx > 0) {
@@ -80,10 +98,7 @@ class HeavyPagePlaceholderView(
         } else if (layoutParams.height > 0) {
             layoutParams.height
         } else {
-            // Generic bootstrap strategy: derive available content height from host container geometry
-            // If parent has valid height, adopt it; otherwise derive a comfortable fraction (45%) of screen height
-            val parentH = (parent as? View)?.height?.takeIf { it > 0 } ?: (parent as? View)?.measuredHeight?.takeIf { it > 0 }
-            parentH ?: ((context.resources.displayMetrics.heightPixels * 0.45f).toInt())
+            getBootstrapHeightPx()
         }
         setMeasuredDimension(width, height)
     }
@@ -101,7 +116,7 @@ class HeavyPagePlaceholderView(
         connectionManager.acquireConsumer(consumerTag)
 
         if (isScrollIdle) {
-            scheduleStableMountOrUpdate(debounceMs = 0L)
+            scheduleStableMountOrUpdate(debounceMs = 50L)
         }
     }
 
@@ -137,6 +152,7 @@ class HeavyPagePlaceholderView(
         if (action == "page_height_changed" && targetPageId == config.id) {
             val reportedH = event.payload["height"]?.toIntOrNull() ?: return
             if (reportedH > 0 && reportedH != desiredHeightPx) {
+                cachedDesiredHeights[config.id] = reportedH
                 post {
                     applyDesiredHeight(reportedH)
                 }
@@ -161,10 +177,46 @@ class HeavyPagePlaceholderView(
         pendingStableUpdateRunnable = null
     }
 
+    private fun isHostAnimating(): Boolean {
+        var p: ViewParent? = parent
+        while (p != null) {
+            if (p is View && (p.translationX != 0f || p.translationY != 0f)) {
+                return true
+            }
+            p = p.parent
+        }
+        return false
+    }
+
+    private fun findParentViewPager(): ViewPager2? {
+        var p: ViewParent? = parent
+        while (p != null) {
+            if (p is ViewPager2) return p
+            p = p.parent
+        }
+        return null
+    }
+
     private fun scheduleStableMountOrUpdate(debounceMs: Long = 40L) {
         cancelPendingStableUpdate()
         val r = Runnable {
-            if (!isSelected || !isScrollIdle) return@Runnable
+            if (!isSelected) return@Runnable
+
+            // If ViewPager2 is still dragging or settling, wait for SCROLL_STATE_IDLE
+            val vp = findParentViewPager()
+            if (vp != null && vp.scrollState != ViewPager2.SCROLL_STATE_IDLE) {
+                isScrollIdle = false
+                return@Runnable
+            }
+            if (!isScrollIdle) return@Runnable
+
+            // If host sidebar is in the middle of sliding in (animateIn), defer until settled
+            if (isHostAnimating()) {
+                LogKeeper.log(context, TAG, "Host animating for '${config.id}'; deferring geometry synchronization")
+                scheduleStableMountOrUpdate(debounceMs = 50L)
+                return@Runnable
+            }
+
             val rect = getCurrentScreenRect() ?: run {
                 // If not yet measured, retry shortly once
                 if (isSelected && isScrollIdle) {
@@ -201,7 +253,7 @@ class HeavyPagePlaceholderView(
         val observer = viewTreeObserver
         if (observer.isAlive) {
             val listener = ViewTreeObserver.OnGlobalLayoutListener {
-                if (isSelected && isScrollIdle) {
+                if (isSelected && isScrollIdle && !isHostAnimating()) {
                     // Debounce layout shifts (orientation, keyboard, sidebar height adjustments)
                     scheduleStableMountOrUpdate(debounceMs = 60L)
                 }
@@ -295,5 +347,14 @@ class HeavyPagePlaceholderView(
 
     companion object {
         private const val TAG = "HeavyPagePlaceholder"
+        private val cachedDesiredHeights = ConcurrentHashMap<String, Int>()
+
+        internal fun getCachedDesiredHeight(pageId: String): Int? = cachedDesiredHeights[pageId]
+        internal fun setCachedDesiredHeight(pageId: String, height: Int) {
+            cachedDesiredHeights[pageId] = height
+        }
+        internal fun clearCachedDesiredHeights() {
+            cachedDesiredHeights.clear()
+        }
     }
 }

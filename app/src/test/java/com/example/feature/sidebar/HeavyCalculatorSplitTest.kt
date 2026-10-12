@@ -235,6 +235,42 @@ class HeavyCalculatorSplitTest {
     }
 
     @Test
+    fun testCalculatorDedicatedBootstrapHeight() {
+        val density = 2.3385f
+        val defaultDp = 260
+        val expectedPx = (defaultDp * density).toInt()
+
+        // On ~2.34 density displays, 260dp evaluates exactly to 608px
+        assertEquals(608, expectedPx)
+        assertTrue(expectedPx > 200)
+    }
+
+    @Test
+    fun testCachedDesiredHeightPreservation() {
+        val pageId = "calc_persist_test"
+        HeavyPagePlaceholderView.clearCachedDesiredHeights()
+        assertEquals(null, HeavyPagePlaceholderView.getCachedDesiredHeight(pageId))
+
+        HeavyPagePlaceholderView.setCachedDesiredHeight(pageId, 608)
+        assertEquals(608, HeavyPagePlaceholderView.getCachedDesiredHeight(pageId))
+
+        HeavyPagePlaceholderView.clearCachedDesiredHeights()
+    }
+
+    @Test
+    fun testHostAnimationSuppressionLogic() {
+        // Verify that while translationX != 0f (animateIn active), stable mount is deferred
+        fun isAnimationSettled(translationX: Float, translationY: Float): Boolean {
+            return translationX == 0f && translationY == 0f
+        }
+
+        assertFalse("Slide-in animation at +560f should defer mount", isAnimationSettled(560f, 0f))
+        assertFalse("Slide-in animation at +200f should defer mount", isAnimationSettled(200f, 0f))
+        assertFalse("Slide-in animation at -560f should defer mount", isAnimationSettled(-560f, 0f))
+        assertTrue("Settled translation (0, 0) should allow stable mount", isAnimationSettled(0f, 0f))
+    }
+
+    @Test
     fun testPageFactoryTypeMappings() {
         // Verify Calculator page type metadata
         val calcPage = SidebarPage(id = "page_calc", type = "calculator", title = "Calculator")

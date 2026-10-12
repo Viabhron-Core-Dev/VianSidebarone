@@ -103,6 +103,17 @@ class HeavyPageHostManager private constructor(private val context: Context) {
                     }
                 }
 
+                // Synchronously measure page view with target width to report height immediately
+                val measureW = if (width > 0) width else (280 * context.resources.displayMetrics.density).toInt()
+                pageView.measure(
+                    View.MeasureSpec.makeMeasureSpec(measureW, View.MeasureSpec.EXACTLY),
+                    View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
+                )
+                val immediateH = pageView.measuredHeight
+                if (immediateH > 0 && immediateH != height) {
+                    reportDesiredPageHeight(pageId, immediateH)
+                }
+
                 container.addView(pageView)
 
                 val windowType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -126,9 +137,11 @@ class HeavyPageHostManager private constructor(private val context: Context) {
                     this.y = y
                 }
 
+                container.alpha = 0f
                 windowManager.addView(container, lp)
                 val holder = PageWindowHolder(pageId, pageType, container, lp, isAttached = true)
                 activeWindows[pageId] = holder
+                container.animate().alpha(1f).setDuration(120).start()
                 LogKeeper.log(context, TAG, "Mounted page '$pageId' ($pageType) at ($x, $y) size ${width}x$height in :heavy")
             } catch (e: Throwable) {
                 LogKeeper.logCrash(context, TAG, e)
@@ -237,6 +250,7 @@ class HeavyPageHostManager private constructor(private val context: Context) {
         val holder = activeWindows.remove(pageId) ?: return
         if (holder.isAttached) {
             try {
+                holder.containerView.animate().cancel()
                 windowManager.removeViewImmediate(holder.containerView)
                 holder.isAttached = false
                 LogKeeper.log(context, TAG, "Unmounted page window '$pageId' in :heavy")
