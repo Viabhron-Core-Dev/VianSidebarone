@@ -46,3 +46,57 @@
 * How it was verified: local build only (`gradle :app:testDebugUnitTest --tests "com.example.feature.sidebar.AppsGridInitialLoadTest"` passed 4/4 tests, full `gradle :app:testDebugUnitTest` passed 26 actionable test tasks, and `compile_applet` confirmed clean build).
 * Any deviation from what was requested, and why: None. Strictly scoped to the confirmed Apps Grid fallback problem.
 * Any known issue or follow-up needed: None.
+
+---
+
+* Timestamp: 2026-10-11T14:55:00-07:00
+* One-line summary of what was requested: Implement focused Notification Sidebar scroll-stability correction using DiffUtil and guard redundant height dispatches.
+* Exact files touched:
+  - app/src/main/java/com/example/feature/sidebar/NotificationPageView.kt
+  - app/src/test/java/com/example/feature/sidebar/NotificationDiffAndScrollStabilityTest.kt
+* What was actually done:
+  - Replaced full adapter `notifyDataSetChanged()` in `NotificationPageView` with `DiffUtil.calculateDiff(NotificationDiffCallback(list, newList))` and `diffResult.dispatchUpdatesTo(this)`.
+  - Configured `NotificationDiffCallback` with `areItemsTheSame` matching `StatusBarNotification.key` (with package/id/tag fallback), and `areContentsTheSame` comparing title, text, subtext, bigText, and postTime.
+  - Added `lastDispatchedHeightPx` check preventing redundant `onHeightChanged` callbacks when calculated height does not change, preventing spurious WindowManager layout resets.
+  - Added unit regression tests in `NotificationDiffAndScrollStabilityTest.kt` verifying item identity matching, item content changes, fallback keys, targeted update dispatch, and height dispatch stabilization.
+* How it was verified: local build only (`gradle :app:testDebugUnitTest --tests "com.example.feature.sidebar.NotificationDiffAndScrollStabilityTest"` passed, full test suite passed, and `compile_applet` confirmed clean compilation).
+* Any deviation from what was requested, and why: None. Preserved existing notification filtering, actions, and deduplication behavior.
+* Any known issue or follow-up needed: None.
+
+---
+
+* Timestamp: 2026-10-11T15:20:00-07:00
+* One-line summary of what was requested: Implement first minimal vertical slice of Main -> Heavy Sidebar page-runtime split for Calculator.
+* Exact files touched:
+  - app/src/main/java/com/example/feature/sidebar/SidebarPageFactory.kt
+  - app/src/main/java/com/example/feature/sidebar/HeavyPagePlaceholderView.kt
+  - app/src/main/java/com/example/feature/heavy/page/HeavyPageHostManager.kt
+  - app/src/main/java/com/example/core/ipc/HeavyProcessHost.kt
+  - app/src/main/java/com/example/feature/floating/HeavyFloatingHostService.kt
+  - app/src/test/java/com/example/feature/sidebar/HeavyCalculatorSplitTest.kt
+* What was actually done:
+  - Created `HeavyPagePlaceholderView` in Main to occupy the ViewPager slot, measure on-screen bounds, and communicate lifecycle to `:heavy` via IPC without instantiating heavy page views or logic in Main.
+  - Routed `"calculator"` in `SidebarPageFactory` to `HeavyPagePlaceholderView` while keeping resident Home Grid (`"default_hybrid"` / `HybridGridPageView`) and all other page types unchanged in Main.
+  - Implemented `HeavyPageHostManager` in `:heavy` to host `CalculatorPageView` inside a dedicated `TYPE_APPLICATION_OVERLAY` window perfectly synchronized to Main's placeholder screen rect.
+  - Registered IPC command handlers in `HeavyProcessHost` for `MOUNT_PAGE`, `UNMOUNT_PAGE`, and `UPDATE_PAGE_BOUNDS`.
+  - Added active page reference tracking in `HeavyFloatingHostService` so `:heavy` manages its lifecycle cleanly.
+  - Added unit regression tests in `HeavyCalculatorSplitTest.kt` verifying command serialization, bound updates, and page factory routing.
+  - Purged ephemeral `debug.keystore` / `debug.keystore.base64` per Credential Immunity Rule.
+* How it was verified: local build only (`gradle :app:testDebugUnitTest` executed 26 test tasks passing all tests, followed by `compile_applet` confirming clean build).
+* Any deviation from what was requested, and why: None. Strictly isolated to Calculator as the first vertical slice.
+* Any known issue or follow-up needed: None. Subsequent phases can migrate additional non-home pages following this proven pattern.
+
+---
+
+* Timestamp: 2026-10-11T15:33:00-07:00
+* One-line summary of what was requested: Resume from conversation compaction; perform integrity audit, sync blueprint milestones 12.11 and 12.12, and enforce Credential Immunity Rule.
+* Exact files touched:
+  - blueprint/BLUEPRINT.md
+  - receipts/RECEIPTS_097.md
+* What was actually done:
+  - Validated repository compilation and verified 26 test tasks pass with zero regressions.
+  - Documented sections 12.11 (Notification Sidebar DiffUtil & Scroll-Stability) and 12.12 (Main -> Heavy Page-Runtime Split: Calculator Vertical Slice) in `blueprint/BLUEPRINT.md`.
+  - Audited workspace for exposed credentials and purged transient `debug.keystore` / `debug.keystore.base64` artifacts.
+* How it was verified: local build only (`gradle :app:testDebugUnitTest` 26/26 passed, `compile_applet` succeeded, zero keystore artifacts confirmed).
+* Any deviation from what was requested, and why: None.
+* Any known issue or follow-up needed: None. Ready for next user instruction.

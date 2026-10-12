@@ -169,8 +169,9 @@ class HeavyFloatingHostService : Service() {
         val activeFloating = host.getActiveInstanceCount()
         val activeModules = com.example.feature.heavy.module.HeavyModuleManager.getInstance(this).getActiveSessionCount()
         val isCallRecording = HeavyProcessHost.getInstance(this).getCallHostExtension().isRecordingActive()
-        if (activeFloating == 0 && activeModules == 0 && !isCallRecording) {
-            LogKeeper.log(this, "HeavyFloatingHostService", "No active mini-apps, modules, or call recordings in Heavy process; calling stopSelf()")
+        val activePages = com.example.feature.heavy.page.HeavyPageHostManager.getInstance(this).getActivePageCount()
+        if (activeFloating == 0 && activeModules == 0 && !isCallRecording && activePages == 0) {
+            LogKeeper.log(this, "HeavyFloatingHostService", "No active mini-apps, modules, call recordings, or heavy pages in Heavy process; calling stopSelf()")
             stopSelf()
         }
     }
@@ -179,6 +180,7 @@ class HeavyFloatingHostService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         com.example.feature.heavy.module.HeavyModuleManager.getInstance(this).setIdleListener(null)
+        com.example.feature.heavy.page.HeavyPageHostManager.getInstance(this).unmountAll()
         LogKeeper.log(this, "HeavyFloatingHostService", "Heavy process floating service destroyed")
     }
 

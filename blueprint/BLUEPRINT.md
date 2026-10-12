@@ -177,6 +177,15 @@
   - Container-scoped preferences (`handle_${containerId}_hybrid_grid_$pageId`, `handle_${containerId}_widgets_grid_$pageId`) with alt key and legacy migration preserving the resident Home Grid.
   - Wired `containerId` across `WidgetsGridEditActivity` and `HybridGridEditActivity` editors.
 
+### 12.11 — Notification Sidebar DiffUtil & Scroll-Stability Correction (Completed)
+- [x] **Notification DiffUtil Updates**: Replaced unconditional `notifyDataSetChanged()` with Android identity-aware `DiffUtil.calculateDiff` matching `StatusBarNotification.key` (with package/id/tag fallback) and comparing displayed notification content fields (`title`, `text`, `subText`, `bigText`, `postTime`). Prevents viewport jumps while preserving in-place card updates for rapidly updating notifications.
+- [x] **Height Dispatch Guard**: Stabilized `loadNotifications()` with `lastDispatchedHeightPx` check, suppressing redundant `onHeightChanged` callbacks when calculated target height is unchanged to eliminate unnecessary WindowManager relayouts during scroll.
+
+### 12.12 — Main → Heavy Sidebar Page-Runtime Split: First Vertical Slice (Completed)
+- [x] **Lightweight Main Placeholder (`HeavyPagePlaceholderView`)**: Implemented non-rendering, zero-heavy-allocation View occupying the ViewPager page slot in Main. Measures global screen coordinates and lifecycle, issuing typed Binder IPC commands (`MOUNT_PAGE`, `UPDATE_PAGE_BOUNDS`, `UNMOUNT_PAGE`) to `:heavy`.
+- [x] **On-Demand Heavy Host (`HeavyPageHostManager`)**: Hosts `CalculatorPageView` inside a dedicated `TYPE_APPLICATION_OVERLAY` window in `:heavy`, aligned dynamically to Main's placeholder screen rect. Touch events and calculations execute entirely in `:heavy` without polluting Main process heap.
+- [x] **Strict Two-Process Foundation Preserved**: Main remains the sole authority for Handles, gestures, container/page hierarchy, Edit Mode, and the resident Home Grid (`"default_hybrid"` / `HybridGridPageView`). Resident Home Grid never wakes `:heavy`.
+
 ---
 
 ## Phase 14: PWA Engine & External AI App Integration (Tier 5 - Highest Complexity)

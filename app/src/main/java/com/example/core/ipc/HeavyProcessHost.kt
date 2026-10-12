@@ -77,6 +77,21 @@ open class HeavyProcessHost internal constructor(private val context: Context? =
                 com.example.feature.heavy.HeavyAppsDataProvider.handleGetAppsData(context, cmd)
             }
         }
+        registerCommandHandler(HeavyCommandType.MOUNT_PAGE) { cmd ->
+            safeLog("HeavyProcessHost", "Routing MOUNT_PAGE to HeavyPageHostManager")
+            val ctx = context ?: return@registerCommandHandler IpcResult.error(IpcErrorCode.UNKNOWN_ERROR, "No context")
+            com.example.feature.heavy.page.HeavyPageHostManager.getInstance(ctx).mountPage(cmd)
+        }
+        registerCommandHandler(HeavyCommandType.UNMOUNT_PAGE) { cmd ->
+            safeLog("HeavyProcessHost", "Routing UNMOUNT_PAGE to HeavyPageHostManager")
+            val ctx = context ?: return@registerCommandHandler IpcResult.error(IpcErrorCode.UNKNOWN_ERROR, "No context")
+            com.example.feature.heavy.page.HeavyPageHostManager.getInstance(ctx).unmountPage(cmd)
+        }
+        registerCommandHandler(HeavyCommandType.UPDATE_PAGE_BOUNDS) { cmd ->
+            safeLog("HeavyProcessHost", "Routing UPDATE_PAGE_BOUNDS to HeavyPageHostManager")
+            val ctx = context ?: return@registerCommandHandler IpcResult.error(IpcErrorCode.UNKNOWN_ERROR, "No context")
+            com.example.feature.heavy.page.HeavyPageHostManager.getInstance(ctx).updatePageBounds(cmd)
+        }
     }
 
     fun getModuleManager(): com.example.feature.heavy.module.HeavyModuleManager {

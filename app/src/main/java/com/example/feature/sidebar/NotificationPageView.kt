@@ -47,10 +47,84 @@ class NotificationPageView(
     private val onHeightChanged: ((Int) -> Unit)? = null
 ) : FrameLayout(context), SidebarPageControllable {
 
+    // Height guard to prevent redundant WindowManager updates and viewport jumps
+    private var lastDispatchedHeightPx = 0
+
     companion object {
         // Static in-memory cache to prevent constant icon reloading and flickering
         private val appIconCache = ConcurrentHashMap<String, Drawable>()
         private val appNameCache = ConcurrentHashMap<String, String>()
+
+        /**
+         * Resolves a stable, unique key for a StatusBarNotification.
+         * Prefers sbn.key, falling back to canonical package/id/tag.
+         */
+        fun getNotificationItemKey(sbn: StatusBarNotification): String {
+            return sbn.key ?: "${sbn.packageName}_${sbn.id}_${sbn.tag ?: ""}"
+        }
+
+        /**
+         * Checks whether notification contents are identical for display purposes.
+         */
+        fun areNotificationContentsTheSame(oldItem: StatusBarNotification, newItem: StatusBarNotification): Boolean {
+            if (oldItem.postTime != newItem.postTime) return false
+            if (oldItem.isClearable != newItem.isClearable) return false
+            if (oldItem.isOngoing != newItem.isOngoing) return false
+
+            val oldExtras = oldItem.notification?.extras
+            val newExtras = newItem.notification?.extras
+
+            val oldTitle = oldExtras?.getCharSequence(Notification.EXTRA_TITLE)?.toString()?.trim() ?: ""
+            val newTitle = newExtras?.getCharSequence(Notification.EXTRA_TITLE)?.toString()?.trim() ?: ""
+            if (oldTitle != newTitle) return false
+
+            val oldText = oldExtras?.getCharSequence(Notification.EXTRA_TEXT)?.toString()?.trim() ?: ""
+            val newText = newExtras?.getCharSequence(Notification.EXTRA_TEXT)?.toString()?.trim() ?: ""
+            if (oldText != newText) return false
+
+            val oldSubText = oldExtras?.getCharSequence(Notification.EXTRA_SUB_TEXT)?.toString()?.trim() ?: ""
+            val newSubText = newExtras?.getCharSequence(Notification.EXTRA_SUB_TEXT)?.toString()?.trim() ?: ""
+            if (oldSubText != newSubText) return false
+
+            val oldBigText = oldExtras?.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString()?.trim() ?: ""
+            val newBigText = newExtras?.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString()?.trim() ?: ""
+            if (oldBigText != newBigText) return false
+
+            val oldLines = oldExtras?.getCharSequenceArray(Notification.EXTRA_TEXT_LINES)
+            val newLines = newExtras?.getCharSequenceArray(Notification.EXTRA_TEXT_LINES)
+            if (oldLines?.size != newLines?.size) return false
+            if (oldLines != null && newLines != null) {
+                for (i in oldLines.indices) {
+                    if (oldLines[i]?.toString() != newLines[i]?.toString()) return false
+                }
+            }
+
+            val oldActionsCount = oldItem.notification?.actions?.size ?: 0
+            val newActionsCount = newItem.notification?.actions?.size ?: 0
+            if (oldActionsCount != newActionsCount) return false
+
+            return true
+        }
+    }
+
+    class NotificationDiffCallback(
+        private val oldList: List<StatusBarNotification>,
+        private val newList: List<StatusBarNotification>
+    ) : androidx.recyclerview.widget.DiffUtil.Callback() {
+        override fun getOldListSize(): Int = oldList.size
+        override fun getNewListSize(): Int = newList.size
+
+        override fun areItemsTheSame(oldItemPosition: Int, newItemPosition: Int): Boolean {
+            val oldItem = oldList[oldItemPosition]
+            val newItem = newList[newItemPosition]
+            return getNotificationItemKey(oldItem) == getNotificationItemKey(newItem)
+        }
+
+        override fun areContentsTheSame(oldItemPosition: Int, newItemPosition: Int): Boolean {
+            val oldItem = oldList[oldItemPosition]
+            val newItem = newList[newItemPosition]
+            return areNotificationContentsTheSame(oldItem, newItem)
+        }
     }
 
     private val recyclerView: RecyclerView
@@ -121,6 +195,7 @@ class NotificationPageView(
     override fun onPageUnselected() {
         adapter.submitList(emptyList())
         activeNotifications = emptyList()
+        lastDispatchedHeightPx = 0
     }
 
     override fun onDetachedFromWindow() {
@@ -130,6 +205,7 @@ class NotificationPageView(
         } catch (e: Exception) {}
         adapter.submitList(emptyList())
         activeNotifications = emptyList()
+        lastDispatchedHeightPx = 0
     }
 
     private fun checkNotificationPermission(): Boolean {
@@ -150,7 +226,10 @@ class NotificationPageView(
                 )
                 val density = resources.displayMetrics.density
                 val targetH = if (measuredHeight > 0) measuredHeight else (160 * density).toInt()
-                onHeightChanged?.invoke(targetH)
+                if (targetH != lastDispatchedHeightPx) {
+                    lastDispatchedHeightPx = targetH
+                    onHeightChanged?.invoke(targetH)
+                }
             }
             return
         }
@@ -170,23 +249,6 @@ class NotificationPageView(
                     }
                     .sortedByDescending { it.postTime }
 
-                android.util.Log.d("SidebarNotifDiag", "=== SNAPSHOT START: totalActive=${sbns.size} ===")
-                sbns.forEachIndexed { index, sbn ->
-                    val extras = sbn.notification.extras
-                    val title = extras?.getCharSequence(Notification.EXTRA_TITLE)?.toString()?.trim() ?: ""
-                    val text = extras?.getCharSequence(Notification.EXTRA_TEXT)?.toString()?.trim() ?: ""
-                    val channelId = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-                        sbn.notification.channelId ?: "null"
-                    } else {
-                        "n/a"
-                    }
-                    android.util.Log.d(
-                        "SidebarNotifDiag",
-                        "[$index] pkg=${sbn.packageName} key=${sbn.key} id=${sbn.id} tag=${sbn.tag} postTime=${sbn.postTime} isOngoing=${sbn.isOngoing} channel=$channelId title='$title' text='$text'"
-                    )
-                }
-                android.util.Log.d("SidebarNotifDiag", "=== SNAPSHOT END ===")
-
                 activeNotifications = sbns
                 adapter.submitList(activeNotifications)
                 tvEmpty.visibility = if (activeNotifications.isEmpty()) View.VISIBLE else View.GONE
@@ -201,7 +263,10 @@ class NotificationPageView(
                     val minH = if (activeNotifications.isEmpty()) (100 * density).toInt() else (120 * density).toInt()
                     val maxH = (520 * density).toInt()
                     val targetH = measuredHeight.coerceIn(minH, maxH)
-                    onHeightChanged?.invoke(targetH)
+                    if (targetH != lastDispatchedHeightPx) {
+                        lastDispatchedHeightPx = targetH
+                        onHeightChanged?.invoke(targetH)
+                    }
                 }
             } catch (e: Exception) {
                 LogKeeper.writeLog("Notification", "Error loading active notifications: ${e.message}")
@@ -218,7 +283,10 @@ class NotificationPageView(
                 )
                 val density = resources.displayMetrics.density
                 val targetH = measuredHeight.coerceIn((100 * density).toInt(), (520 * density).toInt())
-                onHeightChanged?.invoke(targetH)
+                if (targetH != lastDispatchedHeightPx) {
+                    lastDispatchedHeightPx = targetH
+                    onHeightChanged?.invoke(targetH)
+                }
             }
         }
     }
@@ -227,8 +295,11 @@ class NotificationPageView(
         private var list = emptyList<StatusBarNotification>()
 
         fun submitList(newList: List<StatusBarNotification>) {
+            val diffResult = androidx.recyclerview.widget.DiffUtil.calculateDiff(
+                NotificationDiffCallback(list, newList)
+            )
             list = newList
-            notifyDataSetChanged()
+            diffResult.dispatchUpdatesTo(this)
         }
 
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
@@ -240,7 +311,7 @@ class NotificationPageView(
             val sbn = list[position]
             val notification = sbn.notification
             val extras = notification.extras
-            val itemKey = sbn.key ?: "${sbn.packageName}_${sbn.id}"
+            val itemKey = getNotificationItemKey(sbn)
 
             val title = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString()?.trim() ?: ""
             val text = extras.getCharSequence(Notification.EXTRA_TEXT)?.toString()?.trim() ?: ""

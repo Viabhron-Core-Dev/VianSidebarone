@@ -14,6 +14,9 @@ enum class HeavyCommandType {
     REQUEST_CALL_RECORDER,
     SHOW_WELCOME,
     GET_APPS_DATA,
+    MOUNT_PAGE,
+    UNMOUNT_PAGE,
+    UPDATE_PAGE_BOUNDS,
     CUSTOM
 }
 
