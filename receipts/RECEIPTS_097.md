@@ -144,3 +144,21 @@
 * How it was verified: local build only (`gradle :app:testDebugUnitTest` executed 26 test tasks passing all tests, followed by `compile_applet` confirming clean build; awaiting on-device physical verification).
 * Any deviation from what was requested, and why: None. Main remains authoritative for screen geometry; Heavy measures and reports content height in the background before being revealed.
 * Any known issue or follow-up needed: Ready for on-device physical verification.
+
+---
+
+* Timestamp: 2026-10-12T23:59:00-07:00
+* One-line summary of what was requested: Fix compiler error in SidebarView.kt (line 646: unresolved reference 'getCurrentHeightPx') and verify assembleDebug build.
+* Exact files touched:
+  - app/src/main/java/com/example/feature/sidebar/SidebarView.kt
+  - receipts/RECEIPTS_097.md
+* What was actually done:
+  - Identified stale `is HeavyPagePlaceholderView -> pv.getCurrentHeightPx()` call in `SidebarView.queryChildPageHeight(actualPosition)`.
+  - Removed stale reference: `HeavyPagePlaceholderView` does not and should not expose synchronous `getCurrentHeightPx()`, as Calculator runs in `:heavy` and reports desired height asynchronously across Binder via IPC to drive `handleChildHeightChange`.
+  - Fallback in `SidebarView` gracefully falls back to `else -> pv.height` (and `compactInitialDp` = 260dp on initial bootstrap before Heavy height reporting).
+  - Executed `gradle assembleDebug` and verified full APK debug build succeeds (`BUILD SUCCESSFUL in 2s 37 actionable tasks`).
+  - Executed `gradle :app:testDebugUnitTest` and verified all 26 test tasks pass with zero regressions.
+  - Purged transient `debug.keystore` and `debug.keystore.base64` per Credential Immunity Rule.
+* How it was verified: local build only (`gradle assembleDebug` passed, `gradle :app:testDebugUnitTest` passed 26/26, `compile_applet` passed).
+* Any deviation from what was requested, and why: None. No unrelated files touched; Internet Speed Monitor untouched.
+* Any known issue or follow-up needed: Ready for CI / GitHub APK pipeline.
