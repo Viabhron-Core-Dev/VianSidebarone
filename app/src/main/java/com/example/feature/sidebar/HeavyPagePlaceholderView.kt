@@ -2,9 +2,12 @@ package com.example.feature.sidebar
 
 import android.content.Context
 import android.graphics.Rect
+import android.os.Build
 import android.view.View
 import android.view.ViewGroup
 import android.view.ViewTreeObserver
+import android.view.WindowInsets
+import android.view.WindowManager
 import android.widget.FrameLayout
 import androidx.viewpager2.widget.ViewPager2
 import com.example.core.LogKeeper
@@ -180,11 +183,19 @@ class HeavyPagePlaceholderView(
 
     private fun scheduleFallbackReveal() {
         cancelFallbackReveal()
-        val r = Runnable {
-            if (isSelected && isMounted && !isRevealed) {
-                LogKeeper.log(context, TAG, "Fallback reveal triggered for '${config.id}' in Main after timeout")
-                isFallbackRevealTriggered = true
-                scheduleStableMountOrUpdate(debounceMs = 0L)
+        val r = object : Runnable {
+            override fun run() {
+                if (isSelected && isMounted && !isRevealed) {
+                    if (hasReceivedDesiredHeight || desiredHeightPx > 0) {
+                        LogKeeper.log(context, TAG, "Fallback reveal triggered for '${config.id}' in Main (desired height available: $desiredHeightPx)")
+                        isFallbackRevealTriggered = true
+                        scheduleStableMountOrUpdate(debounceMs = 0L)
+                    } else {
+                        LogKeeper.log(context, TAG, "Fallback timeout elapsed for '${config.id}': desired height not yet reported by Heavy; remaining hidden to prevent pre-height bootstrap flash")
+                        // Reschedule fallback check so we don't prematurely reveal before desired height geometry is established
+                        postDelayed(this, 350L)
+                    }
+                }
             }
         }
         fallbackRevealRunnable = r
@@ -195,6 +206,72 @@ class HeavyPagePlaceholderView(
         fallbackRevealRunnable?.let { removeCallbacks(it) }
         fallbackRevealRunnable = null
         isFallbackRevealTriggered = false
+    }
+
+    private fun logGeometryDiagnostics(finalRect: Rect) {
+        try {
+            val dm = context.resources.displayMetrics
+            val screenW = dm.widthPixels
+            val screenH = dm.heightPixels
+
+            val insetsStr = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                rootWindowInsets?.getInsets(WindowInsets.Type.systemBars())?.let {
+                    "systemBars[L=${it.left}, T=${it.top}, R=${it.right}, B=${it.bottom}]"
+                } ?: "insets=null"
+            } else {
+                @Suppress("DEPRECATION")
+                rootWindowInsets?.let {
+                    "stableInsets[L=${it.stableInsetLeft}, T=${it.stableInsetTop}, R=${it.stableInsetRight}, B=${it.stableInsetBottom}]"
+                } ?: "insets=null"
+            }
+
+            fun getGlobalRect(v: View?): Rect? {
+                if (v == null || !v.isAttachedToWindow || v.width <= 0 || v.height <= 0) return null
+                val loc = IntArray(2)
+                v.getLocationOnScreen(loc)
+                return Rect(loc[0], loc[1], loc[0] + v.width, loc[1] + v.height)
+            }
+
+            val placeholderRect = getGlobalRect(this)
+            val hostFrame = parent as? View
+            val hostFrameRect = getGlobalRect(hostFrame)
+            val rcv = hostFrame?.parent as? View
+            val vp = (rcv?.parent as? ViewPager2) ?: (hostFrame?.parent?.parent as? ViewPager2)
+            val vpRect = getGlobalRect(vp)
+            val containerView = vp?.parent as? View
+            val sidebarRoot = rootView
+            val sidebarRootRect = getGlobalRect(sidebarRoot)
+            val headerView = (sidebarRoot as? ViewGroup)?.let { vg ->
+                var found: View? = null
+                for (i in 0 until vg.childCount) {
+                    val child = vg.getChildAt(i)
+                    if (child !is ViewPager2 && child != containerView && child.height > 0 && child.height < (60 * dm.density)) {
+                        found = child
+                        break
+                    }
+                }
+                found
+            }
+            val headerRect = getGlobalRect(headerView)
+
+            val svLp = sidebarRoot?.layoutParams as? WindowManager.LayoutParams
+
+            LogKeeper.log(context, TAG, """
+                [GEOMETRY_DIAGNOSTICS for '${config.id}']
+                * Screen dimensions: ${screenW}x$screenH (density=${dm.density})
+                * System bar/inset values: $insetsStr
+                * Main Sidebar WindowManager LP: x=${svLp?.x}, y=${svLp?.y}, w=${svLp?.width}, h=${svLp?.height}, gravity=0x${Integer.toHexString(svLp?.gravity ?: 0)}
+                * Sidebar root global rect: $sidebarRootRect
+                * Header global rect: $headerRect
+                * ViewPager global rect: $vpRect
+                * Current page-content host global rect: $hostFrameRect
+                * HeavyPagePlaceholder global rect: $placeholderRect
+                * Reported Calculator desired height: $desiredHeightPx
+                * Final rectangle sent to Heavy: $finalRect
+            """.trimIndent())
+        } catch (e: Throwable) {
+            LogKeeper.log(context, TAG, "Failed to capture geometry diagnostics: ${e.message}")
+        }
     }
 
     private fun scheduleStableMountOrUpdate(debounceMs: Long = 40L) {
@@ -216,8 +293,8 @@ class HeavyPagePlaceholderView(
                 setupLayoutMonitoring()
                 scheduleFallbackReveal()
             } else {
-                // Stable bounds update: reveal when desired height is received, already known, or on fallback timeout
-                val readyToReveal = !isRevealed && (hasReceivedDesiredHeight || desiredHeightPx > 0 || isFallbackRevealTriggered)
+                // Stable bounds update: reveal ONLY when desired height is received or already known
+                val readyToReveal = !isRevealed && (hasReceivedDesiredHeight || desiredHeightPx > 0)
                 val boundsChanged = (rect.left != lastDispatchedRect.left ||
                         rect.top != lastDispatchedRect.top ||
                         rect.width() != lastDispatchedRect.width() ||
@@ -229,6 +306,9 @@ class HeavyPagePlaceholderView(
                 }
 
                 val willBeRevealed = readyToReveal || isRevealed
+                if (readyToReveal) {
+                    logGeometryDiagnostics(rect)
+                }
                 dispatchBoundsUpdate(rect, readyToShow = willBeRevealed)
                 if (readyToReveal) {
                     isRevealed = true

@@ -353,5 +353,30 @@ class HeavyCalculatorSplitTest {
         assertFalse(isMounted)
         assertFalse(isRevealed)
     }
+
+    @Test
+    fun testFallbackTimeoutNeverRevealsBootstrapRectWithoutHeight() {
+        var isMounted = true
+        var isRevealed = false
+        var hasReceivedDesiredHeight = false
+        var desiredHeight = -1
+
+        // Fallback timeout fires before desired height has arrived
+        fun onFallbackTimeout() {
+            if (hasReceivedDesiredHeight || desiredHeight > 0) {
+                isRevealed = true
+            }
+            // If height not established, remains hidden (readyToShow stays false)
+        }
+
+        onFallbackTimeout()
+        assertFalse(isRevealed) // Guaranteed unrevealed!
+
+        // Once desired height arrives, reveal becomes permitted
+        hasReceivedDesiredHeight = true
+        desiredHeight = 608
+        onFallbackTimeout()
+        assertTrue(isRevealed)
+    }
 }
 

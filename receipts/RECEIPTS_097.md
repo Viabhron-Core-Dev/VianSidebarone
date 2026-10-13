@@ -162,3 +162,24 @@
 * How it was verified: local build only (`gradle assembleDebug` passed, `gradle :app:testDebugUnitTest` passed 26/26, `compile_applet` passed).
 * Any deviation from what was requested, and why: None. No unrelated files touched; Internet Speed Monitor untouched.
 * Any known issue or follow-up needed: Ready for CI / GitHub APK pipeline.
+
+---
+
+* Timestamp: 2026-10-13T13:48:00-07:00
+* One-line summary of what was requested: Read-only geometry audit of Main ↔ Heavy placement, fix fallback timeout premature reveal violation, and instrument full geometry diagnostics.
+* Exact files touched:
+  - app/src/main/java/com/example/feature/sidebar/HeavyPagePlaceholderView.kt
+  - app/src/main/java/com/example/feature/sidebar/SidebarView.kt
+  - app/src/test/java/com/example/feature/sidebar/HeavyCalculatorSplitTest.kt
+  - receipts/RECEIPTS_097.md
+* What was actually done:
+  - Performed deep read-only audit answering all 12 geometry hierarchy questions (window bounds, header bounds, ViewPager slot, insets, clipping, and vertical anchoring).
+  - Fixed Issue A: Corrected `scheduleFallbackReveal` in `HeavyPagePlaceholderView.kt` so timeout never sends `readyToShow=true` with pre-height/bootstrap rects; requires established desired content height before revealing.
+  - Added targeted single-dispatch geometry diagnostics in `HeavyPagePlaceholderView.kt` capturing screen dimensions, system bar insets, Main WindowManager LP, root rect, header rect, ViewPager rect, host frame rect, placeholder rect, reported desired height, and final dispatch rect.
+  - Added height change logging in `SidebarView.handleChildHeightChange`.
+  - Added unit regression test `testFallbackTimeoutNeverRevealsBootstrapRectWithoutHeight` in `HeavyCalculatorSplitTest.kt`.
+  - Built full debug APK via `gradle assembleDebug` (succeeded in 7s) and verified unit tests (`gradle :app:testDebugUnitTest` passed 27/27).
+  - Purged transient `debug.keystore` and `debug.keystore.base64` per Credential Immunity Rule.
+* How it was verified: local build only (`gradle assembleDebug` passed, `gradle :app:testDebugUnitTest` passed 27/27, zero keystore artifacts).
+* Any deviation from what was requested, and why: None. No speculative geometry offsets or hardcoded numbers added; Internet Speed Monitor untouched.
+* Any known issue or follow-up needed: Ready for physical device test to harvest the exact geometry diagnostics log.

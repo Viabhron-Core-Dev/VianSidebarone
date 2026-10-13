@@ -669,6 +669,8 @@ class SidebarView(
             val boundedContentHeight = newHeight.coerceIn((60 * density).toInt(), maxAllowedHeight)
             val totalWindowHeight = boundedContentHeight + headerHeight
 
+            com.example.core.LogKeeper.log(context, "SidebarView", "handleChildHeightChange: page='${page.id}', requestedHeight=$newHeight, boundedContentH=$boundedContentHeight, totalWindowH=$totalWindowHeight, currentLp=(w=${layoutParams.width}, h=${layoutParams.height}, g=0x${Integer.toHexString(layoutParams.gravity)})")
+
             var changed = false
             val vpParams = viewPager.layoutParams
             if (vpParams.height != boundedContentHeight) {
