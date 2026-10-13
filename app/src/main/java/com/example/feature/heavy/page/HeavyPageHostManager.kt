@@ -42,7 +42,8 @@ class HeavyPageHostManager private constructor(private val context: Context) {
         val pageType: String,
         val containerView: FrameLayout,
         val layoutParams: WindowManager.LayoutParams,
-        var isAttached: Boolean = false
+        var isAttached: Boolean = false,
+        var isRevealed: Boolean = false
     )
 
     fun getActivePageCount(): Int = activeWindows.size
@@ -59,6 +60,7 @@ class HeavyPageHostManager private constructor(private val context: Context) {
         val y = command.payload["y"]?.toIntOrNull() ?: 0
         val width = command.payload["width"]?.toIntOrNull() ?: 0
         val height = command.payload["height"]?.toIntOrNull() ?: 0
+        val readyToShow = command.payload["readyToShow"] == "true"
 
         if (pageId.isEmpty() || pageType.isEmpty() || width <= 0 || height <= 0) {
             return IpcResult.error(
@@ -73,7 +75,7 @@ class HeavyPageHostManager private constructor(private val context: Context) {
                 val existing = activeWindows[pageId]
                 if (existing != null && existing.isAttached) {
                     LogKeeper.log(context, TAG, "Page '$pageId' already mounted in :heavy; updating bounds idempotently")
-                    updateBoundsInternal(existing, x, y, width, height)
+                    updateBoundsInternal(existing, x, y, width, height, readyToShow)
                     return@post
                 }
 
@@ -103,17 +105,6 @@ class HeavyPageHostManager private constructor(private val context: Context) {
                     }
                 }
 
-                // Synchronously measure page view with target width to report height immediately
-                val measureW = if (width > 0) width else (280 * context.resources.displayMetrics.density).toInt()
-                pageView.measure(
-                    View.MeasureSpec.makeMeasureSpec(measureW, View.MeasureSpec.EXACTLY),
-                    View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
-                )
-                val immediateH = pageView.measuredHeight
-                if (immediateH > 0 && immediateH != height) {
-                    reportDesiredPageHeight(pageId, immediateH)
-                }
-
                 container.addView(pageView)
 
                 val windowType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -123,13 +114,22 @@ class HeavyPageHostManager private constructor(private val context: Context) {
                     WindowManager.LayoutParams.TYPE_PHONE
                 }
 
+                var flags = WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                        WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
+                        WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH
+
+                // If not ready to show, maintain initial hidden bootstrap state (invisible and non-touchable)
+                if (!readyToShow) {
+                    container.visibility = View.INVISIBLE
+                    container.alpha = 0f
+                    flags = flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+                }
+
                 val lp = WindowManager.LayoutParams(
                     width,
                     height,
                     windowType,
-                    WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-                            WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
-                            WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
+                    flags,
                     PixelFormat.TRANSLUCENT
                 ).apply {
                     gravity = Gravity.TOP or Gravity.START
@@ -137,12 +137,14 @@ class HeavyPageHostManager private constructor(private val context: Context) {
                     this.y = y
                 }
 
-                container.alpha = 0f
                 windowManager.addView(container, lp)
-                val holder = PageWindowHolder(pageId, pageType, container, lp, isAttached = true)
+                val holder = PageWindowHolder(pageId, pageType, container, lp, isAttached = true, isRevealed = readyToShow)
                 activeWindows[pageId] = holder
-                container.animate().alpha(1f).setDuration(120).start()
-                LogKeeper.log(context, TAG, "Mounted page '$pageId' ($pageType) at ($x, $y) size ${width}x$height in :heavy")
+                if (readyToShow) {
+                    LogKeeper.log(context, TAG, "Mounted page '$pageId' ($pageType) at ($x, $y) size ${width}x$height in :heavy")
+                } else {
+                    LogKeeper.log(context, TAG, "Mounted hidden bootstrap page '$pageId' ($pageType) at ($x, $y) size ${width}x$height in :heavy")
+                }
             } catch (e: Throwable) {
                 LogKeeper.logCrash(context, TAG, e)
             }
@@ -183,44 +185,68 @@ class HeavyPageHostManager private constructor(private val context: Context) {
         val y = command.payload["y"]?.toIntOrNull() ?: 0
         val width = command.payload["width"]?.toIntOrNull() ?: 0
         val height = command.payload["height"]?.toIntOrNull() ?: 0
+        val readyToShow = command.payload["readyToShow"] == "true"
 
         mainHandler.post {
             val holder = activeWindows[pageId] ?: return@post
-            updateBoundsInternal(holder, x, y, width, height)
+            updateBoundsInternal(holder, x, y, width, height, readyToShow)
         }
 
         return IpcResult.success("Bounds updated")
     }
 
-    private fun updateBoundsInternal(holder: PageWindowHolder, x: Int, y: Int, width: Int, height: Int): Boolean {
+    private fun updateBoundsInternal(holder: PageWindowHolder, x: Int, y: Int, width: Int, height: Int, readyToShow: Boolean): Boolean {
         if (!holder.isAttached) return false
         return try {
-            var changed = false
+            var layoutChanged = false
             if (holder.layoutParams.x != x || holder.layoutParams.y != y) {
                 holder.layoutParams.x = x
                 holder.layoutParams.y = y
-                changed = true
+                layoutChanged = true
             }
             if (width > 0 && holder.layoutParams.width != width) {
                 holder.layoutParams.width = width
-                changed = true
+                layoutChanged = true
             }
             if (height > 0 && holder.layoutParams.height != height) {
                 holder.layoutParams.height = height
-                changed = true
+                layoutChanged = true
             }
-            if (changed) {
+            // Reveal if readyToShow is requested and page was previously hidden
+            if (readyToShow && !holder.isRevealed) {
+                holder.isRevealed = true
+                holder.containerView.visibility = View.VISIBLE
+                holder.containerView.alpha = 1f
+                holder.layoutParams.flags = holder.layoutParams.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
+                layoutChanged = true
+                LogKeeper.log(context, TAG, "Revealed existing page '${holder.pageId}' in :heavy")
+            }
+
+            if (layoutChanged) {
                 windowManager.updateViewLayout(holder.containerView, holder.layoutParams)
-                LogKeeper.log(context, TAG, "Updated bounds for '${holder.pageId}' to ($x, $y) ${width}x$height in :heavy")
+                LogKeeper.log(context, TAG, "Applied final bounds for '${holder.pageId}' to ($x, $y) ${width}x$height in :heavy (isRevealed=${holder.isRevealed})")
             } else {
                 LogKeeper.log(context, TAG, "Bounds unchanged for '${holder.pageId}' ($x, $y) ${width}x$height in :heavy; update suppressed")
             }
-            changed
+            layoutChanged
         } catch (e: Throwable) {
             LogKeeper.logCrash(context, TAG, e)
             false
         }
     }
+
+    private fun revealPageInternal(holder: PageWindowHolder) {
+        holder.isRevealed = true
+        holder.containerView.visibility = View.VISIBLE
+        holder.containerView.alpha = 1f
+        holder.layoutParams.flags = holder.layoutParams.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
+        windowManager.updateViewLayout(holder.containerView, holder.layoutParams)
+        LogKeeper.log(context, TAG, "Revealed existing page '${holder.pageId}' in :heavy")
+    }
+
+    // Testing / internal hooks
+    internal fun isPageRevealed(pageId: String): Boolean = activeWindows[pageId]?.isRevealed ?: false
+    internal fun isPageAttached(pageId: String): Boolean = activeWindows[pageId]?.isAttached ?: false
 
     /**
      * Unmounts and tears down an active Heavy page window.
@@ -250,7 +276,6 @@ class HeavyPageHostManager private constructor(private val context: Context) {
         val holder = activeWindows.remove(pageId) ?: return
         if (holder.isAttached) {
             try {
-                holder.containerView.animate().cancel()
                 windowManager.removeViewImmediate(holder.containerView)
                 holder.isAttached = false
                 LogKeeper.log(context, TAG, "Unmounted page window '$pageId' in :heavy")

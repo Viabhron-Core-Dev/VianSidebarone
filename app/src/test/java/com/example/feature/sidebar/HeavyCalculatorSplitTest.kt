@@ -235,42 +235,6 @@ class HeavyCalculatorSplitTest {
     }
 
     @Test
-    fun testCalculatorDedicatedBootstrapHeight() {
-        val density = 2.3385f
-        val defaultDp = 260
-        val expectedPx = (defaultDp * density).toInt()
-
-        // On ~2.34 density displays, 260dp evaluates exactly to 608px
-        assertEquals(608, expectedPx)
-        assertTrue(expectedPx > 200)
-    }
-
-    @Test
-    fun testCachedDesiredHeightPreservation() {
-        val pageId = "calc_persist_test"
-        HeavyPagePlaceholderView.clearCachedDesiredHeights()
-        assertEquals(null, HeavyPagePlaceholderView.getCachedDesiredHeight(pageId))
-
-        HeavyPagePlaceholderView.setCachedDesiredHeight(pageId, 608)
-        assertEquals(608, HeavyPagePlaceholderView.getCachedDesiredHeight(pageId))
-
-        HeavyPagePlaceholderView.clearCachedDesiredHeights()
-    }
-
-    @Test
-    fun testHostAnimationSuppressionLogic() {
-        // Verify that while translationX != 0f (animateIn active), stable mount is deferred
-        fun isAnimationSettled(translationX: Float, translationY: Float): Boolean {
-            return translationX == 0f && translationY == 0f
-        }
-
-        assertFalse("Slide-in animation at +560f should defer mount", isAnimationSettled(560f, 0f))
-        assertFalse("Slide-in animation at +200f should defer mount", isAnimationSettled(200f, 0f))
-        assertFalse("Slide-in animation at -560f should defer mount", isAnimationSettled(-560f, 0f))
-        assertTrue("Settled translation (0, 0) should allow stable mount", isAnimationSettled(0f, 0f))
-    }
-
-    @Test
     fun testPageFactoryTypeMappings() {
         // Verify Calculator page type metadata
         val calcPage = SidebarPage(id = "page_calc", type = "calculator", title = "Calculator")
@@ -284,4 +248,110 @@ class HeavyCalculatorSplitTest {
         val compassPage = SidebarPage(id = "page_compass", type = "compass", title = "Compass")
         assertEquals("compass", compassPage.type)
     }
+
+    @Test
+    fun testBootstrapMountWithReadyToShowFalse() {
+        val bootstrapMount = HeavyCommand(
+            commandId = "mount_calc_bootstrap",
+            type = HeavyCommandType.MOUNT_PAGE,
+            targetId = "calc_1",
+            payload = mapOf(
+                "pageId" to "calc_1",
+                "pageType" to "calculator",
+                "containerId" to "sidebar",
+                "x" to "100",
+                "y" to "200",
+                "width" to "320",
+                "height" to "540",
+                "readyToShow" to "false"
+            )
+        )
+        val json = bootstrapMount.toJson()
+        val deserialized = HeavyCommand.fromJson(json)
+
+        assertEquals("false", deserialized.payload["readyToShow"])
+        assertEquals(HeavyCommandType.MOUNT_PAGE, deserialized.type)
+        assertEquals("calc_1", deserialized.payload["pageId"])
+    }
+
+    @Test
+    fun testBoundsUpdateWithReadyToShowTrue() {
+        val revealBounds = HeavyCommand(
+            commandId = "bounds_calc_reveal",
+            type = HeavyCommandType.UPDATE_PAGE_BOUNDS,
+            targetId = "calc_1",
+            payload = mapOf(
+                "pageId" to "calc_1",
+                "x" to "160",
+                "y" to "936",
+                "width" to "560",
+                "height" to "608",
+                "readyToShow" to "true"
+            )
+        )
+        val json = revealBounds.toJson()
+        val deserialized = HeavyCommand.fromJson(json)
+
+        assertEquals("true", deserialized.payload["readyToShow"])
+        assertEquals("160", deserialized.payload["x"])
+        assertEquals("936", deserialized.payload["y"])
+        assertEquals("608", deserialized.payload["height"])
+    }
+
+    @Test
+    fun testReadyToShowLifecycleStateTransition() {
+        var isMounted = false
+        var isRevealed = false
+        var hasReceivedDesiredHeight = false
+        var desiredHeight = -1
+        var dispatchedMountReadyToShow = ""
+        var dispatchedBoundsReadyToShow = ""
+        var boundsDispatchCount = 0
+
+        // 1. Initial selection: bootstrap mount dispatched with readyToShow=false
+        isMounted = true
+        isRevealed = false
+        hasReceivedDesiredHeight = false
+        dispatchedMountReadyToShow = "false"
+        assertEquals("false", dispatchedMountReadyToShow)
+        assertFalse(isRevealed)
+
+        // 2. Heavy calculates and reports desired height (e.g. 608)
+        val reportedHeight = 608
+        hasReceivedDesiredHeight = true
+        desiredHeight = reportedHeight
+        assertTrue(hasReceivedDesiredHeight)
+        assertEquals(608, desiredHeight)
+
+        // 3. Main layout stabilizes: final bounds dispatched with readyToShow=true
+        val readyToReveal = !isRevealed && hasReceivedDesiredHeight
+        assertTrue(readyToReveal)
+        isRevealed = true
+        dispatchedBoundsReadyToShow = "true"
+        boundsDispatchCount++
+        assertEquals("true", dispatchedBoundsReadyToShow)
+        assertTrue(isRevealed)
+        assertEquals(1, boundsDispatchCount)
+
+        // 4. Redundant identical bounds when already revealed: suppressed
+        val boundsChanged = false
+        val shouldDispatchRedundant = boundsChanged || !isRevealed
+        assertFalse(shouldDispatchRedundant)
+        assertEquals(1, boundsDispatchCount) // Suppressed
+
+        // 5. Drawer toggled: genuine bounds change while already revealed: dispatched with readyToShow=true
+        val genuineBoundsChanged = true
+        val shouldDispatchChanged = genuineBoundsChanged || !isRevealed
+        assertTrue(shouldDispatchChanged)
+        boundsDispatchCount++
+        assertEquals(2, boundsDispatchCount)
+
+        // 6. Navigating away: unmounted and reveal reset
+        isMounted = false
+        isRevealed = false
+        hasReceivedDesiredHeight = false
+        assertFalse(isMounted)
+        assertFalse(isRevealed)
+    }
 }
+

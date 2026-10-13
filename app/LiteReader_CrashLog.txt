@@ -1629,7 +1629,7 @@ java.lang.IllegalStateException: Hardware engine crashed unexpectedly
 	at worker.org.gradle.process.internal.worker.GradleWorkerMain.run(GradleWorkerMain.java:69)
 	at worker.org.gradle.process.internal.worker.GradleWorkerMain.main(GradleWorkerMain.java:74)
 
-[2026-10-12 22:18:50.743] [pid-0] [Test worker] [ERROR:HeavyModuleManager] Error executing operation 'crash_test' on 'faulty_module'
+[2026-10-12 22:40:39.459] [pid-0] [Test worker] [ERROR:HeavyModuleManager] Error executing operation 'crash_test' on 'faulty_module'
 java.lang.IllegalStateException: Hardware engine crashed unexpectedly
 	at com.example.feature.heavy.module.HeavyModuleManagerTest$testOperationFailure$1$1.onUse(HeavyModuleManagerTest.kt:403)
 	at com.example.feature.heavy.module.HeavyModuleManager.use(HeavyModuleManager.kt:343)

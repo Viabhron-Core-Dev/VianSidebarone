@@ -6,7 +6,6 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.ViewTreeObserver
 import android.widget.FrameLayout
-import android.view.ViewParent
 import androidx.viewpager2.widget.ViewPager2
 import com.example.core.LogKeeper
 import com.example.core.SidebarPage
@@ -16,7 +15,6 @@ import com.example.core.ipc.HeavyConnectionListener
 import com.example.core.ipc.HeavyEvent
 import com.example.core.ipc.HeavyProcessConnectionManager
 import java.util.UUID
-import java.util.concurrent.ConcurrentHashMap
 
 /**
  * HeavyPagePlaceholderView: Lightweight Main-process placeholder for pages hosted in :heavy (e.g. Calculator).
@@ -45,13 +43,17 @@ class HeavyPagePlaceholderView(
     private var isSelected = false
     private var isMountRequested = false
     private var isMounted = false
+    private var isRevealed = false
+    private var hasReceivedDesiredHeight = false
     private var isScrollIdle = true
 
-    private var desiredHeightPx = cachedDesiredHeights[config.id] ?: -1
+    private var desiredHeightPx = -1
     private val lastDispatchedRect = Rect()
 
     private var layoutListener: ViewTreeObserver.OnGlobalLayoutListener? = null
     private var pendingStableUpdateRunnable: Runnable? = null
+    private var isFallbackRevealTriggered = false
+    private var fallbackRevealRunnable: Runnable? = null
 
     init {
         layoutParams = ViewGroup.LayoutParams(
@@ -75,22 +77,6 @@ class HeavyPagePlaceholderView(
         }
     }
 
-    fun getBootstrapHeightPx(): Int {
-        val cached = cachedDesiredHeights[config.id]
-        if (cached != null && cached > 0) return cached
-        if (config.useCustomSettings && config.height > 0) {
-            return (config.height * context.resources.displayMetrics.density).toInt()
-        }
-        val defaultDp = when (config.type) {
-            "calculator" -> 260
-            "compass" -> 270
-            else -> 260
-        }
-        return (defaultDp * context.resources.displayMetrics.density).toInt()
-    }
-
-    fun getCurrentHeightPx(): Int = if (desiredHeightPx > 0) desiredHeightPx else getBootstrapHeightPx()
-
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         val width = MeasureSpec.getSize(widthMeasureSpec)
         val height = if (desiredHeightPx > 0) {
@@ -98,7 +84,10 @@ class HeavyPagePlaceholderView(
         } else if (layoutParams.height > 0) {
             layoutParams.height
         } else {
-            getBootstrapHeightPx()
+            // Generic bootstrap strategy: derive available content height from host container geometry
+            // If parent has valid height, adopt it; otherwise derive a comfortable fraction (45%) of screen height
+            val parentH = (parent as? View)?.height?.takeIf { it > 0 } ?: (parent as? View)?.measuredHeight?.takeIf { it > 0 }
+            parentH ?: ((context.resources.displayMetrics.heightPixels * 0.45f).toInt())
         }
         setMeasuredDimension(width, height)
     }
@@ -110,13 +99,16 @@ class HeavyPagePlaceholderView(
         }
         isSelected = true
         isMountRequested = true
+        isRevealed = false
+        hasReceivedDesiredHeight = false
+        isFallbackRevealTriggered = false
         LogKeeper.log(context, TAG, "Placeholder onPageSelected for '${config.id}' in Main (mount requested)")
 
         // Acquire connection to Heavy on demand
         connectionManager.acquireConsumer(consumerTag)
 
         if (isScrollIdle) {
-            scheduleStableMountOrUpdate(debounceMs = 50L)
+            scheduleStableMountOrUpdate(debounceMs = 0L)
         }
     }
 
@@ -126,9 +118,13 @@ class HeavyPagePlaceholderView(
         isMountRequested = false
         val wasMounted = isMounted
         isMounted = false
+        isRevealed = false
+        hasReceivedDesiredHeight = false
+        isFallbackRevealTriggered = false
         LogKeeper.log(context, TAG, "Placeholder onPageUnselected for '${config.id}' in Main (wasMounted=$wasMounted)")
 
         cancelPendingStableUpdate()
+        cancelFallbackReveal()
         removeLayoutMonitoring()
         if (wasMounted) {
             dispatchUnmountCommand()
@@ -151,8 +147,7 @@ class HeavyPagePlaceholderView(
         val targetPageId = event.payload["pageId"] ?: event.sourceId
         if (action == "page_height_changed" && targetPageId == config.id) {
             val reportedH = event.payload["height"]?.toIntOrNull() ?: return
-            if (reportedH > 0 && reportedH != desiredHeightPx) {
-                cachedDesiredHeights[config.id] = reportedH
+            if (reportedH > 0) {
                 post {
                     applyDesiredHeight(reportedH)
                 }
@@ -161,13 +156,19 @@ class HeavyPagePlaceholderView(
     }
 
     private fun applyDesiredHeight(newHeight: Int) {
-        if (newHeight <= 0 || newHeight == desiredHeightPx) return
-        LogKeeper.log(context, TAG, "Applying desired height $newHeight for '${config.id}' in Main")
-        desiredHeightPx = newHeight
-        requestLayout()
-        onHeightChanged?.invoke(newHeight)
-        // Check for bounds adjustment once Main layout stabilizes
-        scheduleStableMountOrUpdate(debounceMs = 50L)
+        if (newHeight <= 0) return
+        hasReceivedDesiredHeight = true
+        val changed = (newHeight != desiredHeightPx)
+        if (changed) {
+            LogKeeper.log(context, TAG, "Applying desired height $newHeight for '${config.id}' in Main")
+            desiredHeightPx = newHeight
+            requestLayout()
+            onHeightChanged?.invoke(newHeight)
+        } else {
+            LogKeeper.log(context, TAG, "Desired height $newHeight confirmed unchanged for '${config.id}' in Main")
+        }
+        // Layout shift triggered or confirmed; schedule stable bounds update and reveal
+        scheduleStableMountOrUpdate(debounceMs = if (changed) 50L else 0L)
     }
 
     // --- Geometry Synchronization ---
@@ -177,46 +178,29 @@ class HeavyPagePlaceholderView(
         pendingStableUpdateRunnable = null
     }
 
-    private fun isHostAnimating(): Boolean {
-        var p: ViewParent? = parent
-        while (p != null) {
-            if (p is View && (p.translationX != 0f || p.translationY != 0f)) {
-                return true
+    private fun scheduleFallbackReveal() {
+        cancelFallbackReveal()
+        val r = Runnable {
+            if (isSelected && isMounted && !isRevealed) {
+                LogKeeper.log(context, TAG, "Fallback reveal triggered for '${config.id}' in Main after timeout")
+                isFallbackRevealTriggered = true
+                scheduleStableMountOrUpdate(debounceMs = 0L)
             }
-            p = p.parent
         }
-        return false
+        fallbackRevealRunnable = r
+        postDelayed(r, 350L)
     }
 
-    private fun findParentViewPager(): ViewPager2? {
-        var p: ViewParent? = parent
-        while (p != null) {
-            if (p is ViewPager2) return p
-            p = p.parent
-        }
-        return null
+    private fun cancelFallbackReveal() {
+        fallbackRevealRunnable?.let { removeCallbacks(it) }
+        fallbackRevealRunnable = null
+        isFallbackRevealTriggered = false
     }
 
     private fun scheduleStableMountOrUpdate(debounceMs: Long = 40L) {
         cancelPendingStableUpdate()
         val r = Runnable {
-            if (!isSelected) return@Runnable
-
-            // If ViewPager2 is still dragging or settling, wait for SCROLL_STATE_IDLE
-            val vp = findParentViewPager()
-            if (vp != null && vp.scrollState != ViewPager2.SCROLL_STATE_IDLE) {
-                isScrollIdle = false
-                return@Runnable
-            }
-            if (!isScrollIdle) return@Runnable
-
-            // If host sidebar is in the middle of sliding in (animateIn), defer until settled
-            if (isHostAnimating()) {
-                LogKeeper.log(context, TAG, "Host animating for '${config.id}'; deferring geometry synchronization")
-                scheduleStableMountOrUpdate(debounceMs = 50L)
-                return@Runnable
-            }
-
+            if (!isSelected || !isScrollIdle) return@Runnable
             val rect = getCurrentScreenRect() ?: run {
                 // If not yet measured, retry shortly once
                 if (isSelected && isScrollIdle) {
@@ -227,17 +211,29 @@ class HeavyPagePlaceholderView(
             if (rect.width() <= 0 || rect.height() <= 0) return@Runnable
 
             if (!isMounted) {
+                // Initial bootstrap mount: always hidden (readyToShow=false)
                 dispatchMountCommand(rect)
                 setupLayoutMonitoring()
+                scheduleFallbackReveal()
             } else {
-                if (rect.left == lastDispatchedRect.left &&
-                    rect.top == lastDispatchedRect.top &&
-                    rect.width() == lastDispatchedRect.width() &&
-                    rect.height() == lastDispatchedRect.height()) {
-                    LogKeeper.log(context, TAG, "Bounds unchanged for '${config.id}' $rect; update suppressed")
+                // Stable bounds update: reveal when desired height is received, already known, or on fallback timeout
+                val readyToReveal = !isRevealed && (hasReceivedDesiredHeight || desiredHeightPx > 0 || isFallbackRevealTriggered)
+                val boundsChanged = (rect.left != lastDispatchedRect.left ||
+                        rect.top != lastDispatchedRect.top ||
+                        rect.width() != lastDispatchedRect.width() ||
+                        rect.height() != lastDispatchedRect.height())
+
+                if (!boundsChanged && isRevealed) {
+                    LogKeeper.log(context, TAG, "Bounds unchanged for '${config.id}' $rect and already revealed; update suppressed")
                     return@Runnable
                 }
-                dispatchBoundsUpdate(rect)
+
+                val willBeRevealed = readyToReveal || isRevealed
+                dispatchBoundsUpdate(rect, readyToShow = willBeRevealed)
+                if (readyToReveal) {
+                    isRevealed = true
+                    cancelFallbackReveal()
+                }
             }
         }
         pendingStableUpdateRunnable = r
@@ -253,7 +249,7 @@ class HeavyPagePlaceholderView(
         val observer = viewTreeObserver
         if (observer.isAlive) {
             val listener = ViewTreeObserver.OnGlobalLayoutListener {
-                if (isSelected && isScrollIdle && !isHostAnimating()) {
+                if (isSelected && isScrollIdle) {
                     // Debounce layout shifts (orientation, keyboard, sidebar height adjustments)
                     scheduleStableMountOrUpdate(debounceMs = 60L)
                 }
@@ -286,6 +282,7 @@ class HeavyPagePlaceholderView(
     private fun dispatchMountCommand(rect: Rect) {
         lastDispatchedRect.set(rect)
         isMounted = true
+        isRevealed = false
 
         val command = HeavyCommand(
             commandId = "mount_${config.id}_${System.currentTimeMillis()}",
@@ -298,15 +295,16 @@ class HeavyPagePlaceholderView(
                 "x" to rect.left.toString(),
                 "y" to rect.top.toString(),
                 "width" to rect.width().toString(),
-                "height" to rect.height().toString()
+                "height" to rect.height().toString(),
+                "readyToShow" to "false"
             )
         )
 
         val result = connectionManager.sendCommand(command, autoConnect = true)
-        LogKeeper.log(context, TAG, "Dispatched MOUNT_PAGE for '${config.id}' at $rect to :heavy. Result: ${result.success}")
+        LogKeeper.log(context, TAG, "Dispatched bootstrap MOUNT_PAGE for '${config.id}' at $rect (readyToShow=false) to :heavy. Result: ${result.success}")
     }
 
-    private fun dispatchBoundsUpdate(rect: Rect) {
+    private fun dispatchBoundsUpdate(rect: Rect, readyToShow: Boolean) {
         lastDispatchedRect.set(rect)
 
         val command = HeavyCommand(
@@ -318,12 +316,13 @@ class HeavyPagePlaceholderView(
                 "x" to rect.left.toString(),
                 "y" to rect.top.toString(),
                 "width" to rect.width().toString(),
-                "height" to rect.height().toString()
+                "height" to rect.height().toString(),
+                "readyToShow" to if (readyToShow) "true" else "false"
             )
         )
 
         connectionManager.sendCommand(command, autoConnect = false)
-        LogKeeper.log(context, TAG, "Dispatched stable UPDATE_PAGE_BOUNDS for '${config.id}' to $rect in :heavy")
+        LogKeeper.log(context, TAG, "Dispatched stable UPDATE_PAGE_BOUNDS for '${config.id}' to $rect (readyToShow=$readyToShow) in :heavy")
     }
 
     private fun dispatchUnmountCommand() {
@@ -343,18 +342,11 @@ class HeavyPagePlaceholderView(
     internal fun getDesiredHeightPx(): Int = desiredHeightPx
     internal fun isMountedState(): Boolean = isMounted
     internal fun isMountRequestedState(): Boolean = isMountRequested
+    internal fun isRevealedState(): Boolean = isRevealed
+    internal fun hasReceivedDesiredHeightState(): Boolean = hasReceivedDesiredHeight
     internal fun getLastDispatchedRect(): Rect = Rect(lastDispatchedRect)
 
     companion object {
         private const val TAG = "HeavyPagePlaceholder"
-        private val cachedDesiredHeights = ConcurrentHashMap<String, Int>()
-
-        internal fun getCachedDesiredHeight(pageId: String): Int? = cachedDesiredHeights[pageId]
-        internal fun setCachedDesiredHeight(pageId: String, height: Int) {
-            cachedDesiredHeights[pageId] = height
-        }
-        internal fun clearCachedDesiredHeights() {
-            cachedDesiredHeights.clear()
-        }
     }
 }

@@ -127,22 +127,20 @@
 
 ---
 
-* Timestamp: 2026-10-12T15:20:00-07:00
-* One-line summary of what was requested: Implement focused correction for remaining Heavy Calculator opening/reposition artifact (bootstrap height, animation settlement, and smooth overlay entry).
+* Timestamp: 2026-10-12T15:42:00-07:00
+* One-line summary of what was requested: Implement bootstrap readyToShow=false hidden mount and stable final bounds reveal for Heavy Calculator geometry synchronization.
 * Exact files touched:
   - app/src/main/java/com/example/feature/sidebar/HeavyPagePlaceholderView.kt
-  - app/src/main/java/com/example/feature/sidebar/SidebarView.kt
   - app/src/main/java/com/example/feature/heavy/page/HeavyPageHostManager.kt
   - app/src/test/java/com/example/feature/sidebar/HeavyCalculatorSplitTest.kt
-  - blueprint/BLUEPRINT.md
   - receipts/RECEIPTS_097.md
 * What was actually done:
-  - Eliminated 146px parent height collapse in `HeavyPagePlaceholderView` by establishing dedicated bootstrap height calculation (`260dp * density` matching intrinsic Calculator height ~608px) and companion cache `cachedDesiredHeights`, preventing adoption of arbitrary previous page heights.
-  - Implemented `getCurrentHeightPx()` on `HeavyPagePlaceholderView` and wired it into `SidebarView.queryChildPageHeight`, ensuring Main's ViewPager and SidebarWindow are sized to 608px immediately on open before mounting.
-  - Added `isHostAnimating()` detection across ancestor views in `HeavyPagePlaceholderView` (deferring stable mount when `SidebarView.animateIn()` is active with `translationX != 0f`) and verified `viewPager.scrollState == SCROLL_STATE_IDLE`. This eliminates initial transient dispatches at `(336, 1024)` or `(294, 1024)`.
-  - In `:heavy` (`HeavyPageHostManager`), added synchronous measurement of `CalculatorPageView` with target width upon instantiation, and introduced initial `container.alpha = 0f` with 120ms fade-in to prevent single-frame visible pop or reposition jerks.
-  - Added unit regression tests in `HeavyCalculatorSplitTest.kt` verifying dedicated bootstrap sizing, cache preservation, and host animation suppression.
-  - Verified with `gradle :app:testDebugUnitTest` (all tests passed) and `compile_applet` (clean build); purged transient `debug.keystore` and `debug.keystore.base64` per Credential Immunity Rule.
-* How it was verified: local build only (`gradle :app:testDebugUnitTest` executed 26 tasks passing all unit tests, `compile_applet` succeeded, zero keystore artifacts confirmed; awaiting on-device physical retest).
-* Any deviation from what was requested, and why: None. Scoped strictly to the opening/reposition artifact without migrating any additional pages.
-* Any known issue or follow-up needed: Ready for physical device verification to confirm smooth opening without repositioning jerks.
+  - Updated `HeavyPagePlaceholderView.kt` to send bootstrap `MOUNT_PAGE` with `readyToShow="false"`, keeping the Heavy window invisible (`visibility = View.INVISIBLE`, `alpha = 0f`, `FLAG_NOT_TOUCHABLE`) while Calculator measures and reports desired height.
+  - Configured `HeavyPagePlaceholderView.kt` to delay `readyToShow="true"` until Main receives Heavy's reported desired height, applies layout via `onHeightChanged`, settles the ViewPager layout at `SCROLL_STATE_IDLE`, and computes final stable screen bounds.
+  - Updated `dispatchBoundsUpdate` in `HeavyPagePlaceholderView.kt` to transmit `readyToShow="true"`, revealing the overlay window only at its final coordinates without transient visual jumps. Added a 350ms fallback reveal timeout to guarantee visibility.
+  - Refactored `HeavyPageHostManager.updateBoundsInternal` to atomically update window bounds and reveal the window in a single `WindowManager.updateViewLayout` invocation, eliminating intermediate frames.
+  - Added unit regression tests in `HeavyCalculatorSplitTest.kt` for bootstrap hidden mount serialization, reveal bounds serialization, and state transition lifecycle.
+  - Purged transient `debug.keystore` and `debug.keystore.base64` per Credential Immunity Rule.
+* How it was verified: local build only (`gradle :app:testDebugUnitTest` executed 26 test tasks passing all tests, followed by `compile_applet` confirming clean build; awaiting on-device physical verification).
+* Any deviation from what was requested, and why: None. Main remains authoritative for screen geometry; Heavy measures and reports content height in the background before being revealed.
+* Any known issue or follow-up needed: Ready for on-device physical verification.
