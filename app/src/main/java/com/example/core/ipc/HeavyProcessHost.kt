@@ -245,6 +245,21 @@ open class HeavyProcessHost internal constructor(private val context: Context? =
         safeLog("HeavyProcessHost", "Main callback proxy unregistered")
     }
 
+    override fun onCreateSurfacePackage(params: android.os.Bundle): android.os.Bundle? {
+        val ctx = context ?: return null
+        return com.example.feature.heavy.page.HeavyPageHostManager.getInstance(ctx).createSurfacePackage(params)
+    }
+
+    override fun onRelayoutSurfaceHost(pageId: String, width: Int, height: Int): Boolean {
+        val ctx = context ?: return false
+        return com.example.feature.heavy.page.HeavyPageHostManager.getInstance(ctx).relayoutSurfaceHost(pageId, width, height)
+    }
+
+    override fun onReleaseSurfaceHost(pageId: String): Boolean {
+        val ctx = context ?: return false
+        return com.example.feature.heavy.page.HeavyPageHostManager.getInstance(ctx).releaseSurfaceHost(pageId)
+    }
+
     companion object {
         @Volatile
         private var instance: HeavyProcessHost? = null

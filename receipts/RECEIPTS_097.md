@@ -183,3 +183,30 @@
 * How it was verified: local build only (`gradle assembleDebug` passed, `gradle :app:testDebugUnitTest` passed 27/27, zero keystore artifacts).
 * Any deviation from what was requested, and why: None. No speculative geometry offsets or hardcoded numbers added; Internet Speed Monitor untouched.
 * Any known issue or follow-up needed: Ready for physical device test to harvest the exact geometry diagnostics log.
+
+---
+
+* Timestamp: 2026-10-14T00:08:00-07:00
+* One-line summary of what was requested: Implement Calculator cross-process embedded-surface vertical slice (SurfaceControlViewHost / SurfaceView) gated on API 30+ with legacy API 26-29 fallback.
+* Exact files touched:
+  - app/src/main/java/com/example/core/ipc/IpcContracts.kt
+  - app/src/main/java/com/example/core/ipc/HeavyHostBinder.kt
+  - app/src/main/java/com/example/core/ipc/HeavyProcessHost.kt
+  - app/src/main/java/com/example/core/ipc/HeavyProcessConnectionManager.kt
+  - app/src/main/java/com/example/feature/heavy/page/HeavyPageHostManager.kt
+  - app/src/main/java/com/example/feature/sidebar/HeavyPagePlaceholderView.kt
+  - app/src/test/java/com/example/feature/sidebar/HeavyCalculatorSplitTest.kt
+  - receipts/RECEIPTS_097.md
+* What was actually done:
+  - Extended Binder IPC contract in `IpcContracts.kt` with typed transactions `TRANSACTION_CREATE_SURFACE_PACKAGE`, `TRANSACTION_RELAYOUT_SURFACE_HOST`, and `TRANSACTION_RELEASE_SURFACE_HOST`, passing `Bundle` with `hostToken: IBinder` and `SurfacePackage: Parcelable` over Binder without string serialization.
+  - Implemented `createSurfacePackage`, `relayoutSurfaceHost`, and `releaseSurfaceHost` in `HeavyHostBinder.kt` (proxy and stub), `HeavyProcessHost.kt`, and `HeavyProcessConnectionManager.kt`.
+  - In `HeavyPageHostManager.kt`, on API 30+, implemented `createSurfacePackage` creating a `SurfaceControlViewHost` with `CalculatorPageView`, returning the `SurfacePackage` across Binder. Handled idempotent bounds relayout via `host.relayout(width, height)` and clean release via `host.release()`.
+  - In `HeavyPagePlaceholderView.kt`, on API 30+, initialized an embedded `SurfaceView` with `setZOrderMediaOverlay(true)` and `PixelFormat.TRANSLUCENT`. Hooked `SurfaceHolder.Callback` to acquire `hostToken`, display, and host dimensions, transmitting `createSurfacePackage` to `:heavy` and attaching the returned `SurfacePackage` via `setChildSurfacePackage`.
+  - On API 30+, eliminated the secondary `TYPE_APPLICATION_OVERLAY` window, screen x/y coordinate positioning, and `readyToShow` synchronization for Calculator; preserved desired-height reporting across Binder to update Main's Sidebar layout and relayout the embedded surface.
+  - Preserved isolated legacy overlay fallback for API 26–29 without modifying the application's `minSdk`.
+  - Added unit tests in `HeavyCalculatorSplitTest.kt` verifying API gating, contract parameter handling, relayout preservation without view recreation, and transaction ID stability.
+  - Executed `gradle :app:testDebugUnitTest` (passed 215/215 tests) and `gradle assembleDebug` (succeeded).
+  - Purged transient `debug.keystore` and `debug.keystore.base64` per Credential Immunity Rule.
+* How it was verified: local build only (`gradle :app:testDebugUnitTest` passed 215 tests, `gradle assembleDebug` built successfully in 10s, zero keystore artifacts).
+* Any deviation from what was requested, and why: None. Scoped strictly as a Calculator-only vertical slice; Home Grid, other pages, and Internet Speed Monitor left untouched.
+* Any known issue or follow-up needed: Ready for physical device testing on Android 15/API 35 to verify on-device rendering inside the Sidebar content slot and observe horizontal gesture behavior over the embedded SurfaceView.

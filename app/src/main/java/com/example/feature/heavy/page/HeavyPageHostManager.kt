@@ -2,6 +2,7 @@ package com.example.feature.heavy.page
 
 import android.content.Context
 import android.graphics.PixelFormat
+import android.os.Bundle
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -10,6 +11,7 @@ import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
 import android.widget.FrameLayout
+import androidx.annotation.RequiresApi
 import com.example.core.LogKeeper
 import com.example.core.ipc.HeavyCommand
 import com.example.core.ipc.HeavyEvent
@@ -19,6 +21,8 @@ import com.example.core.ipc.IpcErrorCode
 import com.example.core.ipc.IpcResult
 import com.example.feature.sidebar.CalculatorPageView
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 /**
  * HeavyPageHostManager: Heavy-process runtime manager for hosting non-home Sidebar page views.
@@ -26,15 +30,17 @@ import java.util.concurrent.ConcurrentHashMap
  * Runs exclusively in :heavy.
  * When Main selects a Heavy-owned page (e.g. Calculator), HeavyPageHostManager:
  * 1. Instantiates the real PageView (e.g. CalculatorPageView) using Heavy's Context.
- * 2. Mounts it into a dedicated TYPE_APPLICATION_OVERLAY window matching Main's placeholder bounds.
- * 3. Keeps Calculator fully interactive (touches handled in :heavy) without polluting Main process heap.
- * 4. Unmounts and tears down cleanly when navigated away or when Sidebar closes.
+ * 2. On API 30+, embeds it via SurfaceControlViewHost without any TYPE_APPLICATION_OVERLAY window.
+ * 3. On legacy API 26-29, mounts it into a dedicated TYPE_APPLICATION_OVERLAY window.
+ * 4. Keeps Calculator fully interactive (touches handled in :heavy) without polluting Main process heap.
+ * 5. Unmounts and tears down cleanly when navigated away or when Sidebar closes.
  */
 class HeavyPageHostManager private constructor(private val context: Context) {
 
     private val windowManager = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
     private val mainHandler = Handler(Looper.getMainLooper())
     private val activeWindows = ConcurrentHashMap<String, PageWindowHolder>()
+    private val activeEmbeddedHosts = ConcurrentHashMap<String, EmbeddedHostHolder>()
     private val lastReportedHeights = ConcurrentHashMap<String, Int>()
 
     private data class PageWindowHolder(
@@ -46,7 +52,16 @@ class HeavyPageHostManager private constructor(private val context: Context) {
         var isRevealed: Boolean = false
     )
 
-    fun getActivePageCount(): Int = activeWindows.size
+    private class EmbeddedHostHolder(
+        val pageId: String,
+        val pageType: String,
+        val host: Any, // SurfaceControlViewHost on API 30+
+        val pageView: View,
+        var width: Int,
+        var height: Int
+    )
+
+    fun getActivePageCount(): Int = activeWindows.size + activeEmbeddedHosts.size
 
     /**
      * Mounts a Heavy-owned page view over the given screen coordinates.
@@ -247,6 +262,144 @@ class HeavyPageHostManager private constructor(private val context: Context) {
     // Testing / internal hooks
     internal fun isPageRevealed(pageId: String): Boolean = activeWindows[pageId]?.isRevealed ?: false
     internal fun isPageAttached(pageId: String): Boolean = activeWindows[pageId]?.isAttached ?: false
+    internal fun isEmbeddedHostActive(pageId: String): Boolean = activeEmbeddedHosts.containsKey(pageId)
+
+    /**
+     * Creates a SurfaceControlViewHost in :heavy and returns a SurfacePackage in a Bundle (API 30+).
+     */
+    fun createSurfacePackage(params: Bundle): Bundle? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+            LogKeeper.log(context, TAG, "createSurfacePackage not supported on SDK < 30")
+            return null
+        }
+        return createSurfacePackageApi30(params)
+    }
+
+    @RequiresApi(Build.VERSION_CODES.R)
+    private fun createSurfacePackageApi30(params: Bundle): Bundle? {
+        val pageId = params.getString("pageId") ?: ""
+        val pageType = params.getString("pageType") ?: ""
+        val hostToken = params.getBinder("hostToken")
+        val displayId = params.getInt("displayId", android.view.Display.DEFAULT_DISPLAY)
+        val width = params.getInt("width", 0)
+        val height = params.getInt("height", 0)
+
+        if (pageId.isEmpty() || hostToken == null || width <= 0 || height <= 0) {
+            LogKeeper.log(context, TAG, "Invalid createSurfacePackage params: pageId=$pageId, token=$hostToken, w=$width, h=$height")
+            return null
+        }
+
+        // Idempotency: if already created, update bounds and return existing SurfacePackage
+        val existing = activeEmbeddedHosts[pageId]
+        if (existing != null) {
+            LogKeeper.log(context, TAG, "Embedded host for '$pageId' already exists; updating dimensions ${width}x$height")
+            mainHandler.post {
+                try {
+                    (existing.host as? android.view.SurfaceControlViewHost)?.relayout(width, height)
+                } catch (e: Throwable) {
+                    LogKeeper.logCrash(context, TAG, e)
+                }
+            }
+            val sp = (existing.host as? android.view.SurfaceControlViewHost)?.surfacePackage
+            return Bundle().apply {
+                putBoolean("success", true)
+                putParcelable("surfacePackage", sp)
+            }
+        }
+
+        val displayManager = context.getSystemService(Context.DISPLAY_SERVICE) as? android.hardware.display.DisplayManager
+        val display = displayManager?.getDisplay(displayId)
+        if (display == null) {
+            LogKeeper.log(context, TAG, "Cannot find displayId=$displayId for embedded page '$pageId'")
+            return null
+        }
+
+        var resultBundle: Bundle? = null
+        val latch = CountDownLatch(1)
+
+        mainHandler.post {
+            try {
+                LogKeeper.log(context, TAG, "Creating SurfaceControlViewHost for '$pageId' ($pageType) size ${width}x$height in :heavy")
+                val host = android.view.SurfaceControlViewHost(context, display, hostToken)
+                val pageView: View = when (pageType) {
+                    "calculator" -> {
+                        CalculatorPageView(context) { newH ->
+                            reportDesiredPageHeight(pageId, newH)
+                        }
+                    }
+                    else -> {
+                        LogKeeper.log(context, TAG, "Unsupported embedded page type '$pageType'")
+                        latch.countDown()
+                        return@post
+                    }
+                }
+
+                host.setView(pageView, width, height)
+                val surfacePackage = host.surfacePackage
+                val holder = EmbeddedHostHolder(pageId, pageType, host, pageView, width, height)
+                activeEmbeddedHosts[pageId] = holder
+
+                resultBundle = Bundle().apply {
+                    putBoolean("success", true)
+                    putParcelable("surfacePackage", surfacePackage)
+                }
+                LogKeeper.log(context, TAG, "SurfaceControlViewHost created and SurfacePackage generated for '$pageId'")
+            } catch (e: Throwable) {
+                LogKeeper.logCrash(context, TAG, e)
+            } finally {
+                latch.countDown()
+            }
+        }
+
+        try {
+            latch.await(1500L, TimeUnit.MILLISECONDS)
+        } catch (e: InterruptedException) {
+            LogKeeper.logCrash(context, TAG, e)
+        }
+
+        return resultBundle
+    }
+
+    /**
+     * Updates dimensions of an active SurfaceControlViewHost without destroying/recreating the view.
+     */
+    fun relayoutSurfaceHost(pageId: String, width: Int, height: Int): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return false
+        val holder = activeEmbeddedHosts[pageId] ?: return false
+        if (width <= 0 || height <= 0) return false
+        if (holder.width == width && holder.height == height) return true
+        holder.width = width
+        holder.height = height
+
+        mainHandler.post {
+            try {
+                LogKeeper.log(context, TAG, "Relayouting SurfaceControlViewHost for '$pageId' to ${width}x$height in :heavy")
+                (holder.host as? android.view.SurfaceControlViewHost)?.relayout(width, height)
+            } catch (e: Throwable) {
+                LogKeeper.logCrash(context, TAG, e)
+            }
+        }
+        return true
+    }
+
+    /**
+     * Releases an active SurfaceControlViewHost and tears down its View hierarchy.
+     */
+    fun releaseSurfaceHost(pageId: String): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return false
+        val holder = activeEmbeddedHosts.remove(pageId) ?: return false
+        lastReportedHeights.remove(pageId)
+
+        mainHandler.post {
+            try {
+                LogKeeper.log(context, TAG, "Releasing SurfaceControlViewHost for '$pageId' in :heavy")
+                (holder.host as? android.view.SurfaceControlViewHost)?.release()
+            } catch (e: Throwable) {
+                LogKeeper.logCrash(context, TAG, e)
+            }
+        }
+        return true
+    }
 
     /**
      * Unmounts and tears down an active Heavy page window.
@@ -255,6 +408,7 @@ class HeavyPageHostManager private constructor(private val context: Context) {
         val pageId = command.payload["pageId"] ?: command.targetId ?: ""
         mainHandler.post {
             unmountPageInternal(pageId)
+            releaseSurfaceHost(pageId)
         }
         return IpcResult.success("Unmounted $pageId")
     }
@@ -267,6 +421,10 @@ class HeavyPageHostManager private constructor(private val context: Context) {
             val keys = ArrayList(activeWindows.keys)
             for (key in keys) {
                 unmountPageInternal(key)
+            }
+            val embeddedKeys = ArrayList(activeEmbeddedHosts.keys)
+            for (key in embeddedKeys) {
+                releaseSurfaceHost(key)
             }
         }
     }

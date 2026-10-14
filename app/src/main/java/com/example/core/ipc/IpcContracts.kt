@@ -15,6 +15,9 @@ object IpcTransactions {
     const val TRANSACTION_PING = IBinder.FIRST_CALL_TRANSACTION + 3
     const val TRANSACTION_REGISTER_CALLBACK = IBinder.FIRST_CALL_TRANSACTION + 4
     const val TRANSACTION_UNREGISTER_CALLBACK = IBinder.FIRST_CALL_TRANSACTION + 5
+    const val TRANSACTION_CREATE_SURFACE_PACKAGE = IBinder.FIRST_CALL_TRANSACTION + 6
+    const val TRANSACTION_RELAYOUT_SURFACE_HOST = IBinder.FIRST_CALL_TRANSACTION + 7
+    const val TRANSACTION_RELEASE_SURFACE_HOST = IBinder.FIRST_CALL_TRANSACTION + 8
 
     // Heavy -> Main callback transactions
     const val TRANSACTION_ON_HEAVY_EVENT = IBinder.FIRST_CALL_TRANSACTION + 10
@@ -30,6 +33,9 @@ interface IHeavyHostContract {
     fun ping(): Boolean
     fun registerCallback(callbackBinder: IBinder): Boolean
     fun unregisterCallback(): Boolean
+    fun createSurfacePackage(params: android.os.Bundle): android.os.Bundle? = null
+    fun relayoutSurfaceHost(pageId: String, width: Int, height: Int): Boolean = false
+    fun releaseSurfaceHost(pageId: String): Boolean = false
 }
 
 /**
@@ -49,6 +55,9 @@ interface IHeavyHostHandler {
     fun onPing(): Boolean = true
     fun onCallbackRegistered(callback: IMainCallbackContract) {}
     fun onCallbackUnregistered() {}
+    fun onCreateSurfacePackage(params: android.os.Bundle): android.os.Bundle? = null
+    fun onRelayoutSurfaceHost(pageId: String, width: Int, height: Int): Boolean = false
+    fun onReleaseSurfaceHost(pageId: String): Boolean = false
 }
 
 /**

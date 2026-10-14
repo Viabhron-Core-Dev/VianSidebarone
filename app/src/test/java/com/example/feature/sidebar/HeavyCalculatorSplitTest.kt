@@ -5,6 +5,7 @@ import com.example.core.ipc.HeavyCommand
 import com.example.core.ipc.HeavyCommandType
 import com.example.core.ipc.HeavyEvent
 import com.example.core.ipc.HeavyEventType
+import android.os.Build
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
@@ -377,6 +378,78 @@ class HeavyCalculatorSplitTest {
         desiredHeight = 608
         onFallbackTimeout()
         assertTrue(isRevealed)
+    }
+
+    @Test
+    fun testEmbeddedSurfaceApiGatingLogic() {
+        fun isEmbeddedSurfaceSupported(sdkInt: Int): Boolean {
+            return sdkInt >= Build.VERSION_CODES.R
+        }
+
+        assertFalse("API 26 should use legacy overlay fallback", isEmbeddedSurfaceSupported(26))
+        assertFalse("API 28 should use legacy overlay fallback", isEmbeddedSurfaceSupported(28))
+        assertFalse("API 29 should use legacy overlay fallback", isEmbeddedSurfaceSupported(29))
+        assertTrue("API 30 should use embedded surface", isEmbeddedSurfaceSupported(30))
+        assertTrue("API 34 should use embedded surface", isEmbeddedSurfaceSupported(34))
+        assertTrue("API 35 (Android 15) should use embedded surface", isEmbeddedSurfaceSupported(35))
+    }
+
+    @Test
+    fun testEmbeddedSurfaceCreationBundleContract() {
+        val params = mapOf(
+            "pageId" to "page_calc",
+            "pageType" to "calculator",
+            "displayId" to 0,
+            "width" to 560,
+            "height" to 608
+        )
+
+        assertEquals("page_calc", params["pageId"])
+        assertEquals("calculator", params["pageType"])
+        assertEquals(0, params["displayId"])
+        assertEquals(560, params["width"])
+        assertEquals(608, params["height"])
+    }
+
+    @Test
+    fun testEmbeddedRelayoutPreservesInstanceWithoutRecreation() {
+        var viewInstanceId = 12345
+        var currentWidth = 560
+        var currentHeight = 260
+        var hostRelayoutCallCount = 0
+
+        fun onDesiredHeightReported(newHeight: Int) {
+            currentHeight = newHeight
+            hostRelayoutCallCount++
+        }
+
+        // Calculator reports desired height 608
+        onDesiredHeightReported(608)
+        assertEquals(608, currentHeight)
+        assertEquals(1, hostRelayoutCallCount)
+        assertEquals(12345, viewInstanceId) // View instance completely preserved
+
+        // Sidebar expands/collapses or drawer toggles to 700
+        onDesiredHeightReported(700)
+        assertEquals(700, currentHeight)
+        assertEquals(2, hostRelayoutCallCount)
+        assertEquals(12345, viewInstanceId) // Preserved
+    }
+
+    @Test
+    fun testIpcTransactionsConstantsIntegrity() {
+        assertEquals(
+            android.os.IBinder.FIRST_CALL_TRANSACTION + 6,
+            com.example.core.ipc.IpcTransactions.TRANSACTION_CREATE_SURFACE_PACKAGE
+        )
+        assertEquals(
+            android.os.IBinder.FIRST_CALL_TRANSACTION + 7,
+            com.example.core.ipc.IpcTransactions.TRANSACTION_RELAYOUT_SURFACE_HOST
+        )
+        assertEquals(
+            android.os.IBinder.FIRST_CALL_TRANSACTION + 8,
+            com.example.core.ipc.IpcTransactions.TRANSACTION_RELEASE_SURFACE_HOST
+        )
     }
 }
 

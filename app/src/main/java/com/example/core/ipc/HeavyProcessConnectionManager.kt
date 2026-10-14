@@ -405,6 +405,53 @@ class HeavyProcessConnectionManager internal constructor(
         }
     }
 
+    /**
+     * Obtains a SurfacePackage from Heavy for embedding in a Main SurfaceView (API 30+).
+     */
+    fun createSurfacePackage(params: android.os.Bundle): android.os.Bundle? {
+        val proxy: IHeavyHostContract?
+        synchronized(lock) {
+            if (state != ConnectionState.CONNECTED) {
+                connect(autoCreate = true)
+                return null
+            }
+            proxy = remoteProxy
+        }
+        if (proxy == null) return null
+        return try {
+            proxy.createSurfacePackage(params)
+        } catch (e: Throwable) {
+            safeLogCrash("HeavyProcessConnectionManager", e)
+            null
+        }
+    }
+
+    /**
+     * Notifies Heavy to update dimensions of an existing SurfaceControlViewHost without recreation.
+     */
+    fun relayoutSurfaceHost(pageId: String, width: Int, height: Int): Boolean {
+        val proxy = synchronized(lock) { remoteProxy } ?: return false
+        return try {
+            proxy.relayoutSurfaceHost(pageId, width, height)
+        } catch (e: Throwable) {
+            safeLogCrash("HeavyProcessConnectionManager", e)
+            false
+        }
+    }
+
+    /**
+     * Releases an active SurfaceControlViewHost in Heavy when page is unmounted.
+     */
+    fun releaseSurfaceHost(pageId: String): Boolean {
+        val proxy = synchronized(lock) { remoteProxy } ?: return false
+        return try {
+            proxy.releaseSurfaceHost(pageId)
+        } catch (e: Throwable) {
+            safeLogCrash("HeavyProcessConnectionManager", e)
+            false
+        }
+    }
+
     private fun handleDeadBinder() {
         synchronized(lock) {
             state = ConnectionState.DEAD

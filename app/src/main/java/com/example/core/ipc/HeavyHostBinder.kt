@@ -40,6 +40,18 @@ class HeavyHostBinder(
         return true
     }
 
+    override fun createSurfacePackage(params: android.os.Bundle): android.os.Bundle? {
+        return handler.onCreateSurfacePackage(params)
+    }
+
+    override fun relayoutSurfaceHost(pageId: String, width: Int, height: Int): Boolean {
+        return handler.onRelayoutSurfaceHost(pageId, width, height)
+    }
+
+    override fun releaseSurfaceHost(pageId: String): Boolean {
+        return handler.onReleaseSurfaceHost(pageId)
+    }
+
     override fun onTransact(code: Int, data: Parcel, reply: Parcel?, flags: Int): Boolean {
         return when (code) {
             IBinder.INTERFACE_TRANSACTION -> {
@@ -84,6 +96,32 @@ class HeavyHostBinder(
                 handler.onCallbackUnregistered()
                 reply?.writeNoException()
                 reply?.writeInt(1)
+                true
+            }
+            IpcTransactions.TRANSACTION_CREATE_SURFACE_PACKAGE -> {
+                data.enforceInterface(IpcTransactions.DESCRIPTOR)
+                val params = data.readBundle(javaClass.classLoader) ?: android.os.Bundle()
+                val replyBundle = handler.onCreateSurfacePackage(params)
+                reply?.writeNoException()
+                reply?.writeBundle(replyBundle)
+                true
+            }
+            IpcTransactions.TRANSACTION_RELAYOUT_SURFACE_HOST -> {
+                data.enforceInterface(IpcTransactions.DESCRIPTOR)
+                val pageId = data.readString() ?: ""
+                val width = data.readInt()
+                val height = data.readInt()
+                val success = handler.onRelayoutSurfaceHost(pageId, width, height)
+                reply?.writeNoException()
+                reply?.writeInt(if (success) 1 else 0)
+                true
+            }
+            IpcTransactions.TRANSACTION_RELEASE_SURFACE_HOST -> {
+                data.enforceInterface(IpcTransactions.DESCRIPTOR)
+                val pageId = data.readString() ?: ""
+                val success = handler.onReleaseSurfaceHost(pageId)
+                reply?.writeNoException()
+                reply?.writeInt(if (success) 1 else 0)
                 true
             }
             else -> super.onTransact(code, data, reply, flags)
@@ -179,6 +217,59 @@ class HeavyHostProxy(
         return try {
             data.writeInterfaceToken(IpcTransactions.DESCRIPTOR)
             remote.transact(IpcTransactions.TRANSACTION_UNREGISTER_CALLBACK, data, reply, 0)
+            reply.readException()
+            reply.readInt() == 1
+        } catch (e: Throwable) {
+            false
+        } finally {
+            data.recycle()
+            reply.recycle()
+        }
+    }
+
+    override fun createSurfacePackage(params: android.os.Bundle): android.os.Bundle? {
+        val data = Parcel.obtain()
+        val reply = Parcel.obtain()
+        return try {
+            data.writeInterfaceToken(IpcTransactions.DESCRIPTOR)
+            data.writeBundle(params)
+            remote.transact(IpcTransactions.TRANSACTION_CREATE_SURFACE_PACKAGE, data, reply, 0)
+            reply.readException()
+            reply.readBundle(javaClass.classLoader)
+        } catch (e: Throwable) {
+            null
+        } finally {
+            data.recycle()
+            reply.recycle()
+        }
+    }
+
+    override fun relayoutSurfaceHost(pageId: String, width: Int, height: Int): Boolean {
+        val data = Parcel.obtain()
+        val reply = Parcel.obtain()
+        return try {
+            data.writeInterfaceToken(IpcTransactions.DESCRIPTOR)
+            data.writeString(pageId)
+            data.writeInt(width)
+            data.writeInt(height)
+            remote.transact(IpcTransactions.TRANSACTION_RELAYOUT_SURFACE_HOST, data, reply, 0)
+            reply.readException()
+            reply.readInt() == 1
+        } catch (e: Throwable) {
+            false
+        } finally {
+            data.recycle()
+            reply.recycle()
+        }
+    }
+
+    override fun releaseSurfaceHost(pageId: String): Boolean {
+        val data = Parcel.obtain()
+        val reply = Parcel.obtain()
+        return try {
+            data.writeInterfaceToken(IpcTransactions.DESCRIPTOR)
+            data.writeString(pageId)
+            remote.transact(IpcTransactions.TRANSACTION_RELEASE_SURFACE_HOST, data, reply, 0)
             reply.readException()
             reply.readInt() == 1
         } catch (e: Throwable) {

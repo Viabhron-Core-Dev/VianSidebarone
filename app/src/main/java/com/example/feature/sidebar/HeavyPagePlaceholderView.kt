@@ -1,14 +1,19 @@
 package com.example.feature.sidebar
 
 import android.content.Context
+import android.graphics.PixelFormat
 import android.graphics.Rect
 import android.os.Build
+import android.os.Bundle
+import android.view.SurfaceHolder
+import android.view.SurfaceView
 import android.view.View
 import android.view.ViewGroup
 import android.view.ViewTreeObserver
 import android.view.WindowInsets
 import android.view.WindowManager
 import android.widget.FrameLayout
+import androidx.annotation.RequiresApi
 import androidx.viewpager2.widget.ViewPager2
 import com.example.core.LogKeeper
 import com.example.core.SidebarPage
@@ -24,14 +29,13 @@ import java.util.UUID
  *
  * Runs exclusively in the Main process (com.example).
  * Responsibilities:
- * 1. Occupies the ViewPager2 page slot with generic bootstrap height derived from host geometry,
- *    never collapsing to an empty TextView's intrinsic font padding.
- * 2. Emits zero heavy allocations (no calculator evaluation engine, no heavy views).
- * 3. Idempotently tracks page selection and mounts Heavy only when ViewPager scroll state settles at IDLE.
+ * 1. On API 30+, embeds Calculator directly via SurfaceView and SurfaceControlViewHost,
+ *    eliminating the need for a secondary TYPE_APPLICATION_OVERLAY window.
+ * 2. On API 26-29, falls back to the legacy overlay placeholder window.
+ * 3. Occupies the ViewPager2 page slot with generic bootstrap height derived from host geometry.
  * 4. Listens for Heavy page-height events across Binder (HeavyProcessConnectionManager), applying the
- *    real desired height to Main's Sidebar layout without measurement loops.
- * 5. Stabilizes geometry dispatch, suppressing transient per-frame coordinates during ViewPager settling.
- * 6. On unselection or detachment, cleanly unmounts the Heavy window and releases its Heavy consumer.
+ *    real desired height to Main's Sidebar layout and relayouting the embedded surface.
+ * 5. On unselection or detachment, cleanly detaches the SurfacePackage and releases its Heavy host.
  */
 class HeavyPagePlaceholderView(
     context: Context,
@@ -50,6 +54,14 @@ class HeavyPagePlaceholderView(
     private var hasReceivedDesiredHeight = false
     private var isScrollIdle = true
 
+    // Embedded surface state for API 30+
+    private var embeddedSurfaceView: SurfaceView? = null
+    private var isSurfaceReady = false
+    private var isEmbeddedAttached = false
+    private var currentSurfacePackage: Any? = null
+    private var currentHostWidth = 0
+    private var currentHostHeight = 0
+
     private var desiredHeightPx = -1
     private val lastDispatchedRect = Rect()
 
@@ -63,8 +75,112 @@ class HeavyPagePlaceholderView(
             ViewGroup.LayoutParams.MATCH_PARENT,
             ViewGroup.LayoutParams.WRAP_CONTENT
         )
-        // Clean transparent placeholder view; no dummy text view child to prevent intrinsic collapse
         connectionManager.addListener(this)
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            initEmbeddedSurfaceApi30()
+        }
+    }
+
+    @RequiresApi(Build.VERSION_CODES.R)
+    private fun initEmbeddedSurfaceApi30() {
+        val sv = SurfaceView(context).apply {
+            layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
+            setZOrderMediaOverlay(true)
+            holder.setFormat(PixelFormat.TRANSLUCENT)
+        }
+        sv.holder.addCallback(object : SurfaceHolder.Callback {
+            override fun surfaceCreated(holder: SurfaceHolder) {
+                LogKeeper.log(context, TAG, "Embedded SurfaceView created for '${config.id}'")
+                isSurfaceReady = true
+                if (isSelected) {
+                    requestEmbeddedSurfaceCreation()
+                }
+            }
+
+            override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
+                LogKeeper.log(context, TAG, "Embedded SurfaceView changed for '${config.id}' size ${width}x$height")
+                currentHostWidth = width
+                currentHostHeight = height
+                if (isSelected) {
+                    if (isEmbeddedAttached) {
+                        connectionManager.relayoutSurfaceHost(config.id, width, height)
+                    } else if (isSurfaceReady) {
+                        requestEmbeddedSurfaceCreation()
+                    }
+                }
+            }
+
+            override fun surfaceDestroyed(holder: SurfaceHolder) {
+                LogKeeper.log(context, TAG, "Embedded SurfaceView destroyed for '${config.id}'")
+                isSurfaceReady = false
+                detachEmbeddedSurface()
+            }
+        })
+        embeddedSurfaceView = sv
+        addView(sv)
+    }
+
+    private fun requestEmbeddedSurfaceCreation() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
+        val sv = embeddedSurfaceView ?: return
+        val hostToken = sv.hostToken
+        if (hostToken == null) {
+            LogKeeper.log(context, TAG, "SurfaceView hostToken not ready yet for '${config.id}'")
+            return
+        }
+        val width = sv.width.takeIf { it > 0 } ?: measuredWidth.takeIf { it > 0 } ?: return
+        val height = sv.height.takeIf { it > 0 } ?: measuredHeight.takeIf { it > 0 } ?: return
+        val displayId = sv.display?.displayId ?: android.view.Display.DEFAULT_DISPLAY
+
+        if (isEmbeddedAttached) {
+            connectionManager.relayoutSurfaceHost(config.id, width, height)
+            return
+        }
+
+        post {
+            try {
+                val params = Bundle().apply {
+                    putString("pageId", config.id)
+                    putString("pageType", config.type)
+                    putBinder("hostToken", hostToken)
+                    putInt("displayId", displayId)
+                    putInt("width", width)
+                    putInt("height", height)
+                }
+                LogKeeper.log(context, TAG, "Requesting createSurfacePackage for '${config.id}' size ${width}x$height")
+                val reply = connectionManager.createSurfacePackage(params)
+                if (reply != null && reply.getBoolean("success")) {
+                    @Suppress("DEPRECATION")
+                    val surfacePackage = reply.getParcelable<android.view.SurfaceControlViewHost.SurfacePackage>("surfacePackage")
+                    if (surfacePackage != null && isSelected) {
+                        try {
+                            (currentSurfacePackage as? android.view.SurfaceControlViewHost.SurfacePackage)?.release()
+                        } catch (_: Throwable) {}
+                        currentSurfacePackage = surfacePackage
+                        sv.setChildSurfacePackage(surfacePackage)
+                        isEmbeddedAttached = true
+                        LogKeeper.log(context, TAG, "Successfully embedded SurfacePackage for '${config.id}' in Main SurfaceView")
+                    } else {
+                        LogKeeper.log(context, TAG, "SurfacePackage received but null or unselected (isSelected=$isSelected)")
+                    }
+                } else {
+                    LogKeeper.log(context, TAG, "createSurfacePackage reply unsuccessful for '${config.id}'")
+                }
+            } catch (e: Throwable) {
+                LogKeeper.logCrash(context, TAG, e)
+            }
+        }
+    }
+
+    private fun detachEmbeddedSurface() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            try {
+                (currentSurfacePackage as? android.view.SurfaceControlViewHost.SurfacePackage)?.release()
+            } catch (_: Throwable) {}
+            currentSurfacePackage = null
+            isEmbeddedAttached = false
+        }
     }
 
     override fun onAttachedToWindow() {
@@ -93,6 +209,14 @@ class HeavyPagePlaceholderView(
             parentH ?: ((context.resources.displayMetrics.heightPixels * 0.45f).toInt())
         }
         setMeasuredDimension(width, height)
+        // Measure children (including embedded SurfaceView if present)
+        for (i in 0 until childCount) {
+            val child = getChildAt(i)
+            child.measure(
+                MeasureSpec.makeMeasureSpec(width, MeasureSpec.EXACTLY),
+                MeasureSpec.makeMeasureSpec(height, MeasureSpec.EXACTLY)
+            )
+        }
     }
 
     override fun onPageSelected() {
@@ -110,8 +234,14 @@ class HeavyPagePlaceholderView(
         // Acquire connection to Heavy on demand
         connectionManager.acquireConsumer(consumerTag)
 
-        if (isScrollIdle) {
-            scheduleStableMountOrUpdate(debounceMs = 0L)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            if (isSurfaceReady) {
+                requestEmbeddedSurfaceCreation()
+            }
+        } else {
+            if (isScrollIdle) {
+                scheduleStableMountOrUpdate(debounceMs = 0L)
+            }
         }
     }
 
@@ -129,8 +259,14 @@ class HeavyPagePlaceholderView(
         cancelPendingStableUpdate()
         cancelFallbackReveal()
         removeLayoutMonitoring()
-        if (wasMounted) {
-            dispatchUnmountCommand()
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            detachEmbeddedSurface()
+            connectionManager.releaseSurfaceHost(config.id)
+        } else {
+            if (wasMounted) {
+                dispatchUnmountCommand()
+            }
         }
         connectionManager.releaseConsumer(consumerTag)
     }
@@ -138,12 +274,30 @@ class HeavyPagePlaceholderView(
     override fun onPageScrollStateChanged(state: Int) {
         val idle = (state == ViewPager2.SCROLL_STATE_IDLE)
         isScrollIdle = idle
-        if (idle && isSelected) {
-            scheduleStableMountOrUpdate(debounceMs = 40L)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            // Embedded surface moves with ViewPager2 natively via SurfaceControl
+        } else {
+            if (idle && isSelected) {
+                scheduleStableMountOrUpdate(debounceMs = 40L)
+            }
         }
     }
 
     // --- IpcConnectionListener implementation ---
+
+    override fun onConnected() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            if (isSelected && isSurfaceReady && !isEmbeddedAttached) {
+                post { requestEmbeddedSurfaceCreation() }
+            }
+        }
+    }
+
+    override fun onHeavyProcessDied() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            detachEmbeddedSurface()
+        }
+    }
 
     override fun onHeavyEvent(event: HeavyEvent) {
         val action = event.payload["action"]
@@ -170,8 +324,14 @@ class HeavyPagePlaceholderView(
         } else {
             LogKeeper.log(context, TAG, "Desired height $newHeight confirmed unchanged for '${config.id}' in Main")
         }
-        // Layout shift triggered or confirmed; schedule stable bounds update and reveal
-        scheduleStableMountOrUpdate(debounceMs = if (changed) 50L else 0L)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            if (isEmbeddedAttached && currentHostWidth > 0) {
+                connectionManager.relayoutSurfaceHost(config.id, currentHostWidth, newHeight)
+            }
+        } else {
+            // Layout shift triggered or confirmed; schedule stable bounds update and reveal
+            scheduleStableMountOrUpdate(debounceMs = if (changed) 50L else 0L)
+        }
     }
 
     // --- Geometry Synchronization ---
@@ -425,6 +585,8 @@ class HeavyPagePlaceholderView(
     internal fun isRevealedState(): Boolean = isRevealed
     internal fun hasReceivedDesiredHeightState(): Boolean = hasReceivedDesiredHeight
     internal fun getLastDispatchedRect(): Rect = Rect(lastDispatchedRect)
+    internal fun isEmbeddedAttachedState(): Boolean = isEmbeddedAttached
+    internal fun isSurfaceReadyState(): Boolean = isSurfaceReady
 
     companion object {
         private const val TAG = "HeavyPagePlaceholder"
