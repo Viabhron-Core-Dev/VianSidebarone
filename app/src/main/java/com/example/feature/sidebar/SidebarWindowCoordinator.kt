@@ -113,6 +113,15 @@ class SidebarWindowCoordinator private constructor(context: Context) {
     }
 
     /**
+     * Dims or undims the active Sidebar window.
+     */
+    fun setSidebarDimmed(dimmed: Boolean) {
+        runOnMain {
+            activeSidebarWindow?.sidebarView?.setDimmed(dimmed)
+        }
+    }
+
+    /**
      * Immediately unregisters and detaches the active view via FloatingWindowManager without animation.
      */
     fun detachSidebarImmediate() {

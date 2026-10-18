@@ -189,6 +189,16 @@
 - [x] **Isolated Legacy Fallback**: Preserved legacy overlay fallback for API 26-29 without bumping application `minSdk`.
 - [ ] **Physical On-Device Verification**: Calculator cross-process embedded-surface vertical slice implemented — awaiting physical verification on Android 15/API 35.
 
+### 12.13 — Main → Heavy Sidebar Page-Runtime Split: Step 1 (Home Grid Residency & Heavy-to-Main Action IPC) (Implemented — Awaiting Physical Verification)
+- [x] **Step 1A — Home Grid Residency Rule (`SidebarPageFactory.isResidentDefaultHybrid`)**:
+  - Restricts Main-process residency to exactly ONE page: `config.id == "default_hybrid"` belonging to Handle 1's primary gesture/container (`handle_1_swipe_left`, `sidebar`, `handle_1`, or `handleManager.getFirstHandlePrimaryContainerId()`).
+  - All secondary Home Grids, generated `hybrid_grid_*` instances, Home Grids on Handle 2+, and Home Grids on non-primary gestures now route to `HeavyPagePlaceholderView` without modifying Calculator or other page types.
+- [x] **Step 1B — Heavy → Main Action Callback IPC**:
+  - Extended `MainActionType` enum with `SET_DIMMED`.
+  - Added typed convenience helpers on `HeavyProcessHost` (`requestCloseSidebar`, `requestSetDimmed`, `requestTriggerAction`).
+  - Implemented Main execution in `HeavyProcessConnectionManager.dispatchMainAction` dispatching `CLOSE_WINDOW` (via `SidebarWindowCoordinator.closeSidebar()`), `SET_DIMMED` (via `SidebarWindowCoordinator.setSidebarDimmed()`), `TRIGGER_ACTION` (via `ElementActionDispatcher.handleSystemAction()`), and `OPEN_CONTAINER` (via `SidebarManager.openContainerById()`).
+- [ ] **Physical On-Device Verification**: Awaiting physical testing of Handle 1 resident Home Grid, secondary grid placeholder routing, and Heavy-to-Main action dispatching.
+
 ---
 
 ## Phase 14: PWA Engine & External AI App Integration (Tier 5 - Highest Complexity)

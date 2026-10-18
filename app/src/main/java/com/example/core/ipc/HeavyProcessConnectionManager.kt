@@ -4,7 +4,9 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import com.example.core.LogKeeper
 import java.util.concurrent.CopyOnWriteArrayList
 
@@ -66,6 +68,7 @@ class HeavyProcessConnectionManager internal constructor(
     private val activeConsumers = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
 
     private var latestSnapshot: MainStateSnapshot? = null
+    private val mainHandler = Handler(Looper.getMainLooper())
 
     private fun safeLog(tag: String, msg: String) {
         context?.let { LogKeeper.log(it, tag, msg) }
@@ -503,10 +506,49 @@ class HeavyProcessConnectionManager internal constructor(
                 return IpcResult.error(IpcErrorCode.UNKNOWN_ERROR, e.message ?: "Handler failed")
             }
         }
+
+        context?.let { ctx ->
+            mainHandler.post {
+                try {
+                    when (request.action) {
+                        MainActionType.CLOSE_WINDOW -> {
+                            safeLog("HeavyProcessConnectionManager", "Executing CLOSE_WINDOW from Heavy")
+                            com.example.feature.sidebar.SidebarWindowCoordinator.getInstance(ctx).closeSidebar()
+                        }
+                        MainActionType.SET_DIMMED -> {
+                            val dimmed = request.parameters["dimmed"]?.toBoolean() ?: false
+                            safeLog("HeavyProcessConnectionManager", "Executing SET_DIMMED($dimmed) from Heavy")
+                            com.example.feature.sidebar.SidebarWindowCoordinator.getInstance(ctx).setSidebarDimmed(dimmed)
+                        }
+                        MainActionType.TRIGGER_ACTION -> {
+                            val actionName = request.targetId ?: request.parameters["action"] ?: ""
+                            val containerId = request.parameters["containerId"] ?: "sidebar"
+                            safeLog("HeavyProcessConnectionManager", "Executing TRIGGER_ACTION '$actionName' from Heavy (container=$containerId)")
+                            if (actionName.isNotEmpty()) {
+                                com.example.feature.element.ElementActionDispatcher.handleSystemAction(ctx, actionName, containerId)
+                            }
+                        }
+                        MainActionType.OPEN_CONTAINER -> {
+                            val targetId = request.targetId ?: request.parameters["containerId"]
+                            if (!targetId.isNullOrEmpty()) {
+                                safeLog("HeavyProcessConnectionManager", "Executing OPEN_CONTAINER '$targetId' from Heavy")
+                                com.example.feature.sidebar.SidebarManager.getInstance(ctx).openContainerById(targetId)
+                            }
+                        }
+                        else -> {
+                            // Handled by listeners or unhandled
+                        }
+                    }
+                } catch (e: Throwable) {
+                    safeLogCrash("HeavyProcessConnectionManager", e)
+                }
+            }
+        }
         return finalResult
     }
 
     // Testing / internal hooks
+    internal fun dispatchMainActionForTesting(request: MainCommandRequest): IpcResult = dispatchMainAction(request)
     internal fun setMockProxyForTesting(proxy: IHeavyHostContract?, testState: ConnectionState = ConnectionState.CONNECTED) {
         synchronized(lock) {
             remoteProxy = proxy

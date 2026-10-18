@@ -180,6 +180,48 @@ open class HeavyProcessHost internal constructor(private val context: Context? =
         }
     }
 
+    /**
+     * Requests the Main process to close the active Sidebar window.
+     */
+    fun requestCloseSidebar(containerId: String? = null): IpcResult {
+        return requestMainAction(
+            MainCommandRequest(
+                action = MainActionType.CLOSE_WINDOW,
+                targetId = containerId
+            )
+        )
+    }
+
+    /**
+     * Requests the Main process to dim or undim the Sidebar window.
+     */
+    fun requestSetDimmed(dimmed: Boolean, containerId: String? = null): IpcResult {
+        return requestMainAction(
+            MainCommandRequest(
+                action = MainActionType.SET_DIMMED,
+                targetId = containerId,
+                parameters = mapOf("dimmed" to dimmed.toString())
+            )
+        )
+    }
+
+    /**
+     * Requests the Main process to execute an action (system action or accessibility action).
+     */
+    fun requestTriggerAction(
+        actionName: String,
+        containerId: String = "sidebar",
+        parameters: Map<String, String> = emptyMap()
+    ): IpcResult {
+        return requestMainAction(
+            MainCommandRequest(
+                action = MainActionType.TRIGGER_ACTION,
+                targetId = actionName,
+                parameters = parameters + ("containerId" to containerId)
+            )
+        )
+    }
+
     // --- IHeavyHostHandler Implementation ---
 
     private fun isModuleCommand(cmd: HeavyCommand): Boolean {

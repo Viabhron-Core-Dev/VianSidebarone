@@ -675,5 +675,166 @@ class HeavyCalculatorSplitTest {
         assertTrue("Back from Settings must finish normally to return to Settings", settingsNav.finishedNormally)
         assertFalse("Back from Settings must not remove the Settings task", settingsNav.taskRemoved)
     }
+
+    @Test
+    fun testStep1HomeGridResidencyRule() {
+        val fakePrefs = com.example.core.FakeSharedPreferences()
+        val context = com.example.core.FakeContext(fakePrefs)
+        com.example.core.HandleManager.resetForTesting()
+        val handleManager = com.example.core.HandleManager.getInstance(context)
+
+        // 1. Primary resident Home Grid on Handle 1 (Swipe Left / sidebar default)
+        val residentPage = com.example.core.SidebarPage.createDefault(
+            id = "default_hybrid",
+            type = "default_hybrid",
+            title = "Home Grid",
+            order = 0
+        )
+        val isResident = com.example.feature.sidebar.DefaultSidebarPageFactory.isResidentDefaultHybrid(
+            context = context,
+            config = residentPage,
+            physicalHandleId = "handle_1",
+            containerId = "handle_1_swipe_left"
+        )
+        assertTrue("Handle 1 primary container default_hybrid must be resident in Main", isResident)
+
+        // Legacy compatibility container IDs
+        assertTrue(
+            "Legacy 'sidebar' container default_hybrid must be resident",
+            com.example.feature.sidebar.DefaultSidebarPageFactory.isResidentDefaultHybrid(
+                context, residentPage, "handle_1", "sidebar"
+            )
+        )
+        assertTrue(
+            "Legacy 'handle_1' container default_hybrid must be resident",
+            com.example.feature.sidebar.DefaultSidebarPageFactory.isResidentDefaultHybrid(
+                context, residentPage, "handle_1", "handle_1"
+            )
+        )
+
+        // 2. Secondary generated Home Grid on Handle 1 -> must NOT be resident
+        val secondaryGrid = com.example.core.SidebarPage.createDefault(
+            id = "hybrid_grid_12345",
+            type = "hybrid_grid",
+            title = "Secondary Grid",
+            order = 1
+        )
+        assertFalse(
+            "Secondary grid on Handle 1 must NOT be Main resident",
+            com.example.feature.sidebar.DefaultSidebarPageFactory.isResidentDefaultHybrid(
+                context, secondaryGrid, "handle_1", "handle_1_swipe_left"
+            )
+        )
+
+        // 3. Home Grid on Handle 2+ -> must NOT be resident
+        val handle2Page = com.example.core.SidebarPage.createDefault(
+            id = "default_hybrid_handle_2_swipe_left",
+            type = "default_hybrid",
+            title = "Home Grid",
+            order = 0
+        )
+        assertFalse(
+            "Handle 2 default_hybrid must NOT be Main resident",
+            com.example.feature.sidebar.DefaultSidebarPageFactory.isResidentDefaultHybrid(
+                context, handle2Page, "handle_2", "handle_2_swipe_left"
+            )
+        )
+        assertFalse(
+            "default_hybrid ID on Handle 2 must NOT be Main resident",
+            com.example.feature.sidebar.DefaultSidebarPageFactory.isResidentDefaultHybrid(
+                context, residentPage, "handle_2", "handle_2_swipe_left"
+            )
+        )
+
+        // 4. Home Grid on non-primary gesture (e.g. swipe_right when primary is swipe_left)
+        assertFalse(
+            "Non-primary gesture container must NOT be Main resident",
+            com.example.feature.sidebar.DefaultSidebarPageFactory.isResidentDefaultHybrid(
+                context, residentPage, "handle_1", "handle_1_swipe_right"
+            )
+        )
+    }
+
+    @Test
+    fun testStep1HeavyToMainActionCallbacksIpc() {
+        // 1. Serialization / Deserialization of MainCommandRequest with SET_DIMMED
+        val dimRequest = com.example.core.ipc.MainCommandRequest(
+            action = com.example.core.ipc.MainActionType.SET_DIMMED,
+            targetId = "handle_1_swipe_left",
+            parameters = mapOf("dimmed" to "true")
+        )
+        val dimJson = dimRequest.toJson()
+        val parsedDim = com.example.core.ipc.MainCommandRequest.fromJson(dimJson)
+        assertEquals(com.example.core.ipc.MainActionType.SET_DIMMED, parsedDim.action)
+        assertEquals("handle_1_swipe_left", parsedDim.targetId)
+        assertEquals("true", parsedDim.parameters["dimmed"])
+
+        // 2. Serialization / Deserialization of CLOSE_WINDOW
+        val closeRequest = com.example.core.ipc.MainCommandRequest(
+            action = com.example.core.ipc.MainActionType.CLOSE_WINDOW,
+            targetId = "sidebar"
+        )
+        val closeJson = closeRequest.toJson()
+        val parsedClose = com.example.core.ipc.MainCommandRequest.fromJson(closeJson)
+        assertEquals(com.example.core.ipc.MainActionType.CLOSE_WINDOW, parsedClose.action)
+        assertEquals("sidebar", parsedClose.targetId)
+
+        // 3. Serialization / Deserialization of TRIGGER_ACTION
+        val triggerRequest = com.example.core.ipc.MainCommandRequest(
+            action = com.example.core.ipc.MainActionType.TRIGGER_ACTION,
+            targetId = "log_keeper",
+            parameters = mapOf("containerId" to "handle_1_swipe_left")
+        )
+        val triggerJson = triggerRequest.toJson()
+        val parsedTrigger = com.example.core.ipc.MainCommandRequest.fromJson(triggerJson)
+        assertEquals(com.example.core.ipc.MainActionType.TRIGGER_ACTION, parsedTrigger.action)
+        assertEquals("log_keeper", parsedTrigger.targetId)
+        assertEquals("handle_1_swipe_left", parsedTrigger.parameters["containerId"])
+
+        // 4. HeavyProcessHost convenience helpers
+        val host = com.example.core.ipc.HeavyProcessHost(null)
+        var receivedRequestJson: String? = null
+        host.onCallbackRegistered(object : com.example.core.ipc.IMainCallbackContract {
+            override fun onHeavyEvent(eventJson: String): String = ""
+            override fun requestMainAction(requestJson: String): String {
+                receivedRequestJson = requestJson
+                return com.example.core.ipc.IpcResult.success().toJson()
+            }
+        })
+
+        // Test requestCloseSidebar helper
+        host.requestCloseSidebar("handle_1_swipe_left")
+        assertNotNull(receivedRequestJson)
+        var parsed = com.example.core.ipc.MainCommandRequest.fromJson(receivedRequestJson!!)
+        assertEquals(com.example.core.ipc.MainActionType.CLOSE_WINDOW, parsed.action)
+        assertEquals("handle_1_swipe_left", parsed.targetId)
+
+        // Test requestSetDimmed helper
+        host.requestSetDimmed(true, "handle_1_swipe_left")
+        parsed = com.example.core.ipc.MainCommandRequest.fromJson(receivedRequestJson!!)
+        assertEquals(com.example.core.ipc.MainActionType.SET_DIMMED, parsed.action)
+        assertEquals("true", parsed.parameters["dimmed"])
+
+        // Test requestTriggerAction helper
+        host.requestTriggerAction("force_stop_running_apps", "handle_1_swipe_left")
+        parsed = com.example.core.ipc.MainCommandRequest.fromJson(receivedRequestJson!!)
+        assertEquals(com.example.core.ipc.MainActionType.TRIGGER_ACTION, parsed.action)
+        assertEquals("force_stop_running_apps", parsed.targetId)
+        assertEquals("handle_1_swipe_left", parsed.parameters["containerId"])
+
+        // 5. HeavyProcessConnectionManager dispatch to listener
+        val connMgr = com.example.core.ipc.HeavyProcessConnectionManager(null)
+        var listenerReceivedAction: com.example.core.ipc.MainActionType? = null
+        connMgr.addListener(object : com.example.core.ipc.HeavyConnectionListener {
+            override fun onMainActionRequested(request: com.example.core.ipc.MainCommandRequest): com.example.core.ipc.IpcResult {
+                listenerReceivedAction = request.action
+                return com.example.core.ipc.IpcResult.success()
+            }
+        })
+
+        val result = connMgr.dispatchMainActionForTesting(dimRequest)
+        assertTrue(result.success)
+        assertEquals(com.example.core.ipc.MainActionType.SET_DIMMED, listenerReceivedAction)
+    }
 }
 

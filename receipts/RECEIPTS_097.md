@@ -275,3 +275,25 @@
 * How it was verified: local build only (`gradle :app:testDebugUnitTest` passed all test suites, `gradle assembleDebug` built successfully).
 * Any deviation from what was requested, and why: None. No Heavy linger or prewarming was added, SVCH architecture was untouched, and Internet Speed Monitor was untouched.
 * Any known issue or follow-up needed: Awaiting physical-device verification for both items.
+
+---
+
+* Timestamp: 2026-10-18T15:22:00-07:00
+* One-line summary of what was requested: Implement Step 1 of Main/Heavy Sidebar split (Home Grid residency and Heavy-to-Main action callbacks).
+* Exact files touched:
+  - app/src/main/java/com/example/feature/sidebar/SidebarPageFactory.kt
+  - app/src/main/java/com/example/core/ipc/IpcModels.kt
+  - app/src/main/java/com/example/core/ipc/HeavyProcessHost.kt
+  - app/src/main/java/com/example/core/ipc/HeavyProcessConnectionManager.kt
+  - app/src/main/java/com/example/feature/sidebar/SidebarWindowCoordinator.kt
+  - app/src/test/java/com/example/feature/sidebar/HeavyCalculatorSplitTest.kt
+  - blueprint/BLUEPRINT.md
+  - receipts/RECEIPTS_097.md
+* What was actually done:
+  - Step 1A (Home Grid Residency): Updated `SidebarPageFactory` to enforce the exact ownership rule: `config.id == "default_hybrid"` belonging to Handle 1's primary gesture/container (`handle_1_swipe_left`, `sidebar`, `handle_1`, or `handleManager.getFirstHandlePrimaryContainerId()`) creates resident `HybridGridPageView` in Main. Any other `hybrid_grid`, any other `default_hybrid`, secondary generated Home Grids, Home Grids on Handle 2+, and Home Grids on non-primary gestures now return `HeavyPagePlaceholderView`.
+  - Step 1B (Heavy -> Main Action Callbacks): Extended `MainActionType` enum with `SET_DIMMED` and added typed convenience helpers in `HeavyProcessHost` (`requestCloseSidebar`, `requestSetDimmed`, `requestTriggerAction`). Implemented Main execution in `HeavyProcessConnectionManager.dispatchMainAction` dispatching `CLOSE_WINDOW` (via `SidebarWindowCoordinator.closeSidebar()`), `SET_DIMMED` (via `SidebarWindowCoordinator.setSidebarDimmed()`), `TRIGGER_ACTION` (via `ElementActionDispatcher.handleSystemAction()`), and `OPEN_CONTAINER` (via `SidebarManager.openContainerById()`).
+  - Unit Tests: Added test suites in `HeavyCalculatorSplitTest.kt` verifying residency evaluation (`testStep1HomeGridResidencyRule`) and action IPC serialization/routing (`testStep1HeavyToMainActionCallbacksIpc`).
+  - Verification: Verified compilation and test pass via `gradle :app:testDebugUnitTest` and `compile_applet` (all succeeded). Deleted transient `debug.keystore.base64`.
+* How it was verified: local build only (`gradle :app:testDebugUnitTest` passed all test suites, `compile_applet` succeeded cleanly).
+* Any deviation from what was requested, and why: None. Remaining page types, Calculator architecture, and Internet Speed Monitor were untouched.
+* Any known issue or follow-up needed: Awaiting physical-device verification of resident Home Grid on Handle 1 vs secondary grid placeholder routing and Heavy-to-Main action dispatching.

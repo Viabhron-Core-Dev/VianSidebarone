@@ -176,6 +176,7 @@ enum class MainActionType {
     TRIGGER_ACTION,
     OPEN_CONTAINER,
     DISMISS_ALL,
+    SET_DIMMED,
     CUSTOM
 }
 
@@ -183,7 +184,7 @@ enum class MainActionType {
  * Immutable request from Heavy asking Main to perform a scoped action.
  */
 data class MainCommandRequest(
-    val requestId: String,
+    val requestId: String = java.util.UUID.randomUUID().toString(),
     val action: MainActionType,
     val targetId: String? = null,
     val parameters: Map<String, String> = emptyMap(),

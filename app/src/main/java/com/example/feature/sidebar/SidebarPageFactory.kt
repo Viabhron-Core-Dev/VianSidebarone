@@ -8,6 +8,8 @@ import android.view.Gravity
 import android.view.View
 import android.widget.FrameLayout
 import android.widget.TextView
+import com.example.core.HandleManager
+import com.example.core.PageManager
 import com.example.core.SidebarPage
 import kotlinx.coroutines.CoroutineScope
 
@@ -84,13 +86,18 @@ class DefaultSidebarPageFactory(
                 p
             }
             "hybrid_grid", "default_hybrid", "tools" -> {
-                val pageId = if (config.type == "default_hybrid" && !config.id.startsWith("default_hybrid")) "default_hybrid" else config.id
-                HybridGridPageView(
-                    context, pageId, viewScope, containerId,
-                    onClose = { onClose() },
-                    onDimSidebar = { dimmed -> setDimmed(dimmed) }
-                ) { newHeight ->
-                    onHeightChanged(newHeight)
+                if (isResidentDefaultHybrid(context, config, physicalHandleId, containerId)) {
+                    HybridGridPageView(
+                        context, "default_hybrid", viewScope, containerId,
+                        onClose = { onClose() },
+                        onDimSidebar = { dimmed -> setDimmed(dimmed) }
+                    ) { newHeight ->
+                        onHeightChanged(newHeight)
+                    }
+                } else {
+                    HeavyPagePlaceholderView(context, config, containerId) { newHeight ->
+                        onHeightChanged(newHeight)
+                    }
                 }
             }
             "widgets_grid", "widgets" -> {
@@ -164,5 +171,38 @@ class DefaultSidebarPageFactory(
     override fun destroy() {
         appsManagers.values.forEach { it.destroy() }
         appsManagers.clear()
+    }
+
+    companion object {
+        /**
+         * Enforces the Main/Heavy Sidebar split residency rule for Home Grid:
+         *
+         * MAIN owns exactly ONE resident page:
+         * Handle 1 -> primary/default gesture (Swipe Left) -> first/default container -> default_hybrid.
+         *
+         * Every other Home Grid (any secondary Home Grid, generated hybrid_grid_*,
+         * Home Grid on Handle 2+, Home Grid on another gesture, Home Grid on another container)
+         * belongs to :heavy and is represented by HeavyPagePlaceholderView.
+         */
+        fun isResidentDefaultHybrid(
+            context: Context,
+            config: SidebarPage,
+            physicalHandleId: String,
+            containerId: String
+        ): Boolean {
+            if (config.id != "default_hybrid") return false
+            val cleanHandleId = PageManager.getCleanHandleId(
+                if (physicalHandleId.isNotBlank()) physicalHandleId else containerId
+            )
+            if (cleanHandleId != "handle_1" && cleanHandleId != "sidebar") {
+                return false
+            }
+            val handleManager = HandleManager.getInstance(context)
+            val primaryContainerId = handleManager.getFirstHandlePrimaryContainerId()
+            return containerId == "sidebar" ||
+                    containerId == "handle_1" ||
+                    containerId == "handle_1_swipe_left" ||
+                    containerId == primaryContainerId
+        }
     }
 }
