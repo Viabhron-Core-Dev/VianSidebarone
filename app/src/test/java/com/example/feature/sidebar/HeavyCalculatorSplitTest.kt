@@ -401,7 +401,9 @@ class HeavyCalculatorSplitTest {
             "pageType" to "calculator",
             "displayId" to 0,
             "width" to 560,
-            "height" to 608
+            "height" to 608,
+            "backgroundColor" to -14737634, // 0xFF1E1E2E
+            "isRight" to true
         )
 
         assertEquals("page_calc", params["pageId"])
@@ -409,6 +411,8 @@ class HeavyCalculatorSplitTest {
         assertEquals(0, params["displayId"])
         assertEquals(560, params["width"])
         assertEquals(608, params["height"])
+        assertEquals(-14737634, params["backgroundColor"])
+        assertEquals(true, params["isRight"])
     }
 
     @Test

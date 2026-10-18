@@ -3,7 +3,9 @@ package com.example.feature.sidebar
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.graphics.Color
 import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
 import android.text.SpannableStringBuilder
 import android.text.Spanned
 import android.text.style.ForegroundColorSpan
@@ -44,7 +46,7 @@ class CalculatorPageView(
     init {
         layoutParams = ViewGroup.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT,
-            ViewGroup.LayoutParams.WRAP_CONTENT
+            ViewGroup.LayoutParams.MATCH_PARENT
         )
         LayoutInflater.from(context).inflate(R.layout.page_calculator, this, true)
         tvExpression = findViewById(R.id.tv_expression)
@@ -54,6 +56,18 @@ class CalculatorPageView(
         layoutExtendedDrawer = findViewById(R.id.layout_extended_drawer)
         ivDrawerArrow = findViewById(R.id.iv_drawer_arrow)
         btnCopyResult = findViewById(R.id.btn_copy_result)
+
+        // Ensure display elements cannot hold focus or display any cursor
+        tvExpression.isCursorVisible = false
+        tvExpression.isFocusable = false
+        tvExpression.isFocusableInTouchMode = false
+        tvResult.isCursorVisible = false
+        tvResult.isFocusable = false
+        tvResult.isFocusableInTouchMode = false
+        scrollExpression.isFocusable = false
+        scrollExpression.isFocusableInTouchMode = false
+        scrollResult.isFocusable = false
+        scrollResult.isFocusableInTouchMode = false
 
         btnCopyResult?.setOnClickListener {
             copyResultToClipboard()
@@ -90,8 +104,46 @@ class CalculatorPageView(
                 }
             }
         }
+        applyThemeBackground()
         updateUI()
         notifyHeight()
+    }
+
+    /**
+     * Applies the Sidebar container background styling (color, opacity, stroke, corner radii)
+     * so that the embedded surface does not appear transparent over wallpaper.
+     */
+    fun applyThemeBackground(
+        bgColor: Int = 0,
+        isRight: Boolean = true
+    ) {
+        val finalColor = if (bgColor != 0) {
+            bgColor
+        } else {
+            val prefs = context.getSharedPreferences("FloatingReaderPrefs", Context.MODE_PRIVATE)
+            val opacity = prefs.getFloat("sidebar_transparency", 0.9f)
+            val alphaInt = (opacity * 255).toInt().coerceIn(0, 255)
+            val colorHex = prefs.getString("sidebar_color", "#1E1E2E") ?: "#1E1E2E"
+            val baseColor = try { Color.parseColor(colorHex) } catch (e: Exception) { Color.parseColor("#1E1E2E") }
+            val r = Color.red(baseColor)
+            val g = Color.green(baseColor)
+            val b = Color.blue(baseColor)
+            Color.argb(alphaInt, r, g, b)
+        }
+
+        val density = resources.displayMetrics.density
+        val radius = 16f * density
+        val bgDrawable = GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            setColor(finalColor)
+            setStroke((1 * density).toInt(), Color.argb(80, 255, 255, 255))
+            cornerRadii = if (isRight) {
+                floatArrayOf(0f, 0f, 0f, 0f, 0f, 0f, radius, radius)
+            } else {
+                floatArrayOf(0f, 0f, 0f, 0f, radius, radius, 0f, 0f)
+            }
+        }
+        background = bgDrawable
     }
 
     private fun notifyHeight() {
@@ -234,38 +286,8 @@ class CalculatorPageView(
         }
         tvResult.textSize = dynamicResultSize
 
-        // Top expression: format with a sharp vertical cursor line (caret) at the insertion point
-        if (expression.isEmpty()) {
-            val ssb = SpannableStringBuilder()
-            if (!expressionCompleted) {
-                val start = ssb.length
-                ssb.append("▏")
-                val end = ssb.length
-                ssb.setSpan(ForegroundColorSpan(0xFF80D8FF.toInt()), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-                ssb.setSpan(StyleSpan(Typeface.BOLD), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-            }
-            tvExpression.text = ssb
-        } else {
-            val ssb = SpannableStringBuilder()
-            for (i in expression.indices) {
-                if (i == cursorIndex && !expressionCompleted) {
-                    val start = ssb.length
-                    ssb.append("▏")
-                    val end = ssb.length
-                    ssb.setSpan(ForegroundColorSpan(0xFF80D8FF.toInt()), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-                    ssb.setSpan(StyleSpan(Typeface.BOLD), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-                }
-                ssb.append(expression[i])
-            }
-            if (cursorIndex == expression.length && !expressionCompleted) {
-                val start = ssb.length
-                ssb.append("▏")
-                val end = ssb.length
-                ssb.setSpan(ForegroundColorSpan(0xFF80D8FF.toInt()), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-                ssb.setSpan(StyleSpan(Typeface.BOLD), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-            }
-            tvExpression.text = ssb
-        }
+        // Top expression: display expression cleanly without synthetic caret characters
+        tvExpression.text = expression
 
         // Bottom display: standard default Android calculator display
         val bottomDisplay = when {
@@ -275,10 +297,10 @@ class CalculatorPageView(
         }
         tvResult.text = bottomDisplay
 
-        // Auto-scroll to end to follow cursor/input
+        // Auto-scroll to end to follow input without requesting/stealing focus
         post {
-            scrollExpression.fullScroll(HorizontalScrollView.FOCUS_RIGHT)
-            scrollResult.fullScroll(HorizontalScrollView.FOCUS_RIGHT)
+            scrollExpression.fullScroll(View.FOCUS_RIGHT)
+            scrollResult.fullScroll(View.FOCUS_RIGHT)
         }
     }
 

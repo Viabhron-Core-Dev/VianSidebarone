@@ -210,3 +210,23 @@
 * How it was verified: local build only (`gradle :app:testDebugUnitTest` passed 215 tests, `gradle assembleDebug` built successfully in 10s, zero keystore artifacts).
 * Any deviation from what was requested, and why: None. Scoped strictly as a Calculator-only vertical slice; Home Grid, other pages, and Internet Speed Monitor left untouched.
 * Any known issue or follow-up needed: Ready for physical device testing on Android 15/API 35 to verify on-device rendering inside the Sidebar content slot and observe horizontal gesture behavior over the embedded SurfaceView.
+
+---
+
+* Timestamp: 2026-10-18T00:33:00-07:00
+* One-line summary of what was requested: Calculator embedded-surface visual cleanup (transparency elimination and stray text caret removal) preserving working Main ↔ Heavy architecture.
+* Exact files touched:
+  - app/src/main/java/com/example/feature/sidebar/HeavyPagePlaceholderView.kt
+  - app/src/main/java/com/example/feature/sidebar/CalculatorPageView.kt
+  - app/src/main/res/layout/page_calculator.xml
+  - app/src/main/res/values/styles_calc.xml
+  - app/src/test/java/com/example/feature/sidebar/HeavyCalculatorSplitTest.kt
+  - receipts/RECEIPTS_097.md
+* What was actually done:
+  - Addressed Issue 1 (Transparent Background): Identified that Main's `HeavyPagePlaceholderView` was omitting `backgroundColor` and `isRight` in the Binder parameters bundle sent to `:heavy`, leaving `applyThemeBackground` uncalled with container settings and exposing wallpaper through the translucent `SurfaceView` punch-hole. Added container-specific theme background extraction (reading `handle_${containerId}_sidebar_color`, `handle_${containerId}_sidebar_transparency`, and handle alignment) in `HeavyPagePlaceholderView.kt` and transmitted them via IPC to `:heavy`. Set `layoutParams` in `CalculatorPageView` to `MATCH_PARENT, MATCH_PARENT` to guarantee full-surface background coverage with themed color, stroke, and rounded corner radii.
+  - Addressed Issue 2 (Stray Text Caret): Discovered that `CalculatorPageView.kt` was dynamically rendering a synthetic unicode caret character (`▏`) with bold style and cyan color span via `SpannableStringBuilder` into `tv_expression`, producing a persistent vertical caret on the left side. Removed the synthetic caret injection from `updateUI()` and set `tv_expression.text = expression`. Added explicit `isCursorVisible = false`, `isFocusable = false`, and `isFocusableInTouchMode = false` to `tvExpression`, `tvResult`, `scrollExpression`, and `scrollResult` in `CalculatorPageView.kt` and `page_calculator.xml`. Removed `android:focusable="true"` from touch-only buttons and styles in `styles_calc.xml`. Replaced focus-requesting `HorizontalScrollView.fullScroll` calls with safe non-focus scrolling.
+  - Updated unit test contract in `HeavyCalculatorSplitTest.kt` verifying `backgroundColor` and `isRight` parameter propagation.
+  - Verified compilation via `compile_applet` (succeeded cleanly). Confirmed workspace remains completely free of any `.keystore`, `.jks`, `.p12`, or base64 credential files per Credential Immunity Rule.
+* How it was verified: local build only (`compile_applet` succeeded, zero keystore artifacts).
+* Any deviation from what was requested, and why: None. Scoped strictly to the two visual items; architecture, desired-height negotiation, and other pages left untouched.
+* Any known issue or follow-up needed: Ready for on-device manual visual verification of Calculator background solidity and caret suppression.

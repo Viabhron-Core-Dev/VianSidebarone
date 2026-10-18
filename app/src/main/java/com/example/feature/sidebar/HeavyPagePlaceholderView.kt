@@ -1,8 +1,10 @@
 package com.example.feature.sidebar
 
 import android.content.Context
+import android.graphics.Color
 import android.graphics.PixelFormat
 import android.graphics.Rect
+import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.Bundle
 import android.view.SurfaceHolder
@@ -140,6 +142,19 @@ class HeavyPagePlaceholderView(
 
         post {
             try {
+                val prefs = context.getSharedPreferences("FloatingReaderPrefs", Context.MODE_PRIVATE)
+                val opacity = if (config.useCustomSettings) config.transparency else prefs.getFloat("handle_${containerId}_sidebar_transparency", prefs.getFloat("sidebar_transparency", 0.9f))
+                val alphaInt = (opacity * 255).toInt().coerceIn(0, 255)
+                val colorHex = prefs.getString("handle_${containerId}_sidebar_color", prefs.getString("sidebar_color", "#1E1E2E")) ?: "#1E1E2E"
+                val baseColor = try { Color.parseColor(colorHex) } catch (e: Exception) { Color.parseColor("#1E1E2E") }
+                val r = Color.red(baseColor)
+                val g = Color.green(baseColor)
+                val b = Color.blue(baseColor)
+                val backgroundColor = Color.argb(alphaInt, r, g, b)
+
+                val legacyEdge = if (prefs.getBoolean("sidebar_position_left", false)) "left" else "right"
+                val isRight = prefs.getString("handle_${containerId}_edge", if (containerId == "sidebar") legacyEdge else "right") == "right"
+
                 val params = Bundle().apply {
                     putString("pageId", config.id)
                     putString("pageType", config.type)
@@ -147,8 +162,10 @@ class HeavyPagePlaceholderView(
                     putInt("displayId", displayId)
                     putInt("width", width)
                     putInt("height", height)
+                    putInt("backgroundColor", backgroundColor)
+                    putBoolean("isRight", isRight)
                 }
-                LogKeeper.log(context, TAG, "Requesting createSurfacePackage for '${config.id}' size ${width}x$height")
+                LogKeeper.log(context, TAG, "Requesting createSurfacePackage for '${config.id}' size ${width}x$height with theme color #$colorHex (alpha=$alphaInt, isRight=$isRight)")
                 val reply = connectionManager.createSurfacePackage(params)
                 if (reply != null && reply.getBoolean("success")) {
                     @Suppress("DEPRECATION")

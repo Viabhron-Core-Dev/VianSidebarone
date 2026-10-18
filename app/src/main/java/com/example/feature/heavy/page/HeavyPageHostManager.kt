@@ -283,6 +283,8 @@ class HeavyPageHostManager private constructor(private val context: Context) {
         val displayId = params.getInt("displayId", android.view.Display.DEFAULT_DISPLAY)
         val width = params.getInt("width", 0)
         val height = params.getInt("height", 0)
+        val backgroundColor = params.getInt("backgroundColor", 0)
+        val isRight = params.getBoolean("isRight", true)
 
         if (pageId.isEmpty() || hostToken == null || width <= 0 || height <= 0) {
             LogKeeper.log(context, TAG, "Invalid createSurfacePackage params: pageId=$pageId, token=$hostToken, w=$width, h=$height")
@@ -296,6 +298,9 @@ class HeavyPageHostManager private constructor(private val context: Context) {
             mainHandler.post {
                 try {
                     (existing.host as? android.view.SurfaceControlViewHost)?.relayout(width, height)
+                    if (backgroundColor != 0) {
+                        (existing.pageView as? CalculatorPageView)?.applyThemeBackground(backgroundColor, isRight)
+                    }
                 } catch (e: Throwable) {
                     LogKeeper.logCrash(context, TAG, e)
                 }
@@ -325,6 +330,10 @@ class HeavyPageHostManager private constructor(private val context: Context) {
                     "calculator" -> {
                         CalculatorPageView(context) { newH ->
                             reportDesiredPageHeight(pageId, newH)
+                        }.apply {
+                            if (backgroundColor != 0) {
+                                applyThemeBackground(backgroundColor, isRight)
+                            }
                         }
                     }
                     else -> {

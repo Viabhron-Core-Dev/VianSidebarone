@@ -17,12 +17,14 @@
         android:paddingTop="1dp"
         android:paddingBottom="2dp">
 
-        <!-- Top Display (Full calculation expression with cursor) -->
+        <!-- Top Display (Full calculation expression) -->
         <HorizontalScrollView
             android:id="@+id/scroll_expression"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:scrollbars="none"
+            android:focusable="false"
+            android:focusableInTouchMode="false"
             android:fillViewport="true">
 
             <TextView
@@ -30,6 +32,10 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_gravity="end"
+                android:gravity="end"
+                android:cursorVisible="false"
+                android:focusable="false"
+                android:focusableInTouchMode="false"
                 android:textColor="#9E9E9E"
                 android:textSize="15sp"
                 android:fontFamily="sans-serif-light"
@@ -52,7 +58,6 @@
                 android:padding="6dp"
                 android:background="?android:attr/selectableItemBackgroundBorderless"
                 android:clickable="true"
-                android:focusable="true"
                 android:src="@android:drawable/ic_menu_save"
                 android:tint="#80D8FF"
                 android:contentDescription="@string/calculator_copy_result" />
@@ -63,6 +68,8 @@
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
                 android:scrollbars="none"
+                android:focusable="false"
+                android:focusableInTouchMode="false"
                 android:fillViewport="true">
 
                 <TextView
@@ -70,6 +77,10 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_gravity="end"
+                    android:gravity="end"
+                    android:cursorVisible="false"
+                    android:focusable="false"
+                    android:focusableInTouchMode="false"
                     android:text="0"
                     android:textColor="#FFFFFF"
                     android:textSize="26sp"
@@ -88,7 +99,6 @@
         android:layout_height="18dp"
         android:gravity="center"
         android:clickable="true"
-        android:focusable="true"
         android:background="?android:attr/selectableItemBackground"
         android:orientation="horizontal">
 
