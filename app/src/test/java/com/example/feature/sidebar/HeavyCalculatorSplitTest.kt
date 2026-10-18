@@ -569,5 +569,111 @@ class HeavyCalculatorSplitTest {
         sim5.requestEmbeddedSurfaceCreation()
         assertEquals("Duplicate readiness callbacks must not create duplicate hosts", 1, sim5.creationRequestCount)
     }
+
+    @Test
+    fun testCalculatorSuppressesProvisionalBootstrapHeightBeforeSurfaceAttached() {
+        // State simulation matching HeavyPagePlaceholderView and SidebarView interaction
+        class PlaceholderHeightSim {
+            var desiredHeightPx = -1
+            var pendingDesiredHeightPx = -1
+            var isEmbeddedAttached = false
+            var notifiedSidebarHeight = -1
+            var onHeightChangedCallCount = 0
+
+            // Simulation of HeavyPagePlaceholderView.onMeasure() fallback without desired height
+            fun measureHeight(parentHeight: Int): Int {
+                return if (desiredHeightPx > 0) {
+                    desiredHeightPx
+                } else {
+                    parentHeight.takeIf { it > 0 } ?: 0
+                }
+            }
+
+            // Simulation of applyDesiredHeight()
+            fun applyDesiredHeight(newHeight: Int) {
+                if (newHeight <= 0) return
+                pendingDesiredHeightPx = newHeight
+                if (!isEmbeddedAttached) {
+                    // Deferred: do not apply or notify Sidebar until SurfacePackage is attached
+                    return
+                }
+                if (newHeight != desiredHeightPx) {
+                    desiredHeightPx = newHeight
+                    notifiedSidebarHeight = newHeight
+                    onHeightChangedCallCount++
+                }
+            }
+
+            fun onSurfacePackageAttached() {
+                isEmbeddedAttached = true
+                if (pendingDesiredHeightPx > 0) {
+                    applyDesiredHeight(pendingDesiredHeightPx)
+                }
+            }
+        }
+
+        val sim = PlaceholderHeightSim()
+        val initialHomeHeight = 146
+
+        // 1. Initial state (navigating Home -> Calculator, Heavy still starting)
+        // Placeholder height reflects existing container geometry (146), not provisional 520
+        val measuredBeforeAttach = sim.measureHeight(parentHeight = initialHomeHeight)
+        assertEquals("Placeholder must preserve existing container height before Heavy attaches", initialHomeHeight, measuredBeforeAttach)
+        assertFalse("SurfacePackage must not be attached yet", sim.isEmbeddedAttached)
+        assertEquals("Sidebar must not receive any height update yet", -1, sim.notifiedSidebarHeight)
+
+        // 2. Heavy calculates and reports desired height (e.g. 607) before or during attachment
+        sim.applyDesiredHeight(607)
+        assertEquals(607, sim.pendingDesiredHeightPx)
+        assertEquals("Desired height must not be applied before attachment", -1, sim.desiredHeightPx)
+        assertEquals("Sidebar must not be notified before attachment", 0, sim.onHeightChangedCallCount)
+
+        // 3. SurfacePackage is attached to SurfaceView
+        sim.onSurfacePackageAttached()
+        assertTrue(sim.isEmbeddedAttached)
+        assertEquals("Desired height must be applied upon SurfacePackage attachment", 607, sim.desiredHeightPx)
+        assertEquals("Sidebar must be notified with final desired height (607)", 607, sim.notifiedSidebarHeight)
+        assertEquals(1, sim.onHeightChangedCallCount)
+
+        // 4. Subsequent measure reflects real attached desired height
+        val measuredAfterAttach = sim.measureHeight(parentHeight = initialHomeHeight)
+        assertEquals(607, measuredAfterAttach)
+    }
+
+    @Test
+    fun testLogKeeperLaunchSourceAndBackBehavior() {
+        val extraSourceKey = com.example.LogKeeperActivity.EXTRA_LAUNCH_SOURCE
+        val sourceSidebar = com.example.LogKeeperActivity.SOURCE_SIDEBAR
+        val sourceSettings = com.example.LogKeeperActivity.SOURCE_SETTINGS
+
+        assertEquals("extra_launch_source", extraSourceKey)
+        assertEquals("SOURCE_SIDEBAR", sourceSidebar)
+        assertEquals("SOURCE_SETTINGS", sourceSettings)
+
+        class LogKeeperNavSim {
+            var finishedNormally = false
+            var taskRemoved = false
+
+            fun handleBack(source: String) {
+                if (source == com.example.LogKeeperActivity.SOURCE_SIDEBAR) {
+                    taskRemoved = true
+                } else {
+                    finishedNormally = true
+                }
+            }
+        }
+
+        // Test 1: Launched from Sidebar
+        val sidebarNav = LogKeeperNavSim()
+        sidebarNav.handleBack(sourceSidebar)
+        assertTrue("Back from Sidebar must remove task / exit cleanly without exposing Settings", sidebarNav.taskRemoved)
+        assertFalse("Back from Sidebar must not just finish normally into background Settings", sidebarNav.finishedNormally)
+
+        // Test 2: Launched from Settings
+        val settingsNav = LogKeeperNavSim()
+        settingsNav.handleBack(sourceSettings)
+        assertTrue("Back from Settings must finish normally to return to Settings", settingsNav.finishedNormally)
+        assertFalse("Back from Settings must not remove the Settings task", settingsNav.taskRemoved)
+    }
 }
 

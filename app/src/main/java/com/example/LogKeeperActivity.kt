@@ -76,14 +76,40 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+import androidx.activity.OnBackPressedCallback
+
 class LogKeeperActivity : ComponentActivity() {
+
+    companion object {
+        const val EXTRA_LAUNCH_SOURCE = "extra_launch_source"
+        const val SOURCE_SIDEBAR = "SOURCE_SIDEBAR"
+        const val SOURCE_SETTINGS = "SOURCE_SETTINGS"
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        val source = intent.getStringExtra(EXTRA_LAUNCH_SOURCE) ?: SOURCE_SIDEBAR
+
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                handleBack(source)
+            }
+        })
+
         setContent {
             MaterialTheme(colorScheme = lightColorScheme()) {
-                LogKeeperScreen(onBack = { finish() })
+                LogKeeperScreen(onBack = { handleBack(source) })
             }
+        }
+    }
+
+    private fun handleBack(source: String) {
+        if (source == SOURCE_SIDEBAR) {
+            // When opened from Sidebar/app UI, exit and remove task so it does not reveal unrelated background Settings
+            finishAndRemoveTask()
+        } else {
+            // When opened from Settings, return normally to preserve the Settings navigation stack
+            finish()
         }
     }
 }

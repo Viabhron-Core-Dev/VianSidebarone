@@ -436,17 +436,23 @@ class SidebarView(
                                     val page = pageConfigs.getOrNull(actualPos)
                                     val isPageWrap = if (page?.useCustomSettings == true) page.wrapContentHeight else true
                                     if (isPageWrap) {
-                                        val density = context.resources.displayMetrics.density
-                                        val targetW = layoutParams.width.takeIf { it > 0 } ?: (320 * density).toInt()
-                                        pv.measure(
-                                            View.MeasureSpec.makeMeasureSpec(targetW, View.MeasureSpec.EXACTLY),
-                                            View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
-                                        )
-                                        val measuredH = pv.measuredHeight
-                                        if (measuredH > 0) {
-                                            handleChildHeightChange(position, measuredH)
-                                        } else if (pv.height > 0) {
-                                            handleChildHeightChange(position, pv.height)
+                                        if (pv is HeavyPagePlaceholderView) {
+                                            // HeavyPagePlaceholderView reports its desired height asynchronously via onHeightChanged
+                                            // once the SurfacePackage is attached. Do not measure with UNSPECIFIED
+                                            // or force an unattached provisional bootstrap height on SidebarView.
+                                        } else {
+                                            val density = context.resources.displayMetrics.density
+                                            val targetW = layoutParams.width.takeIf { it > 0 } ?: (320 * density).toInt()
+                                            pv.measure(
+                                                View.MeasureSpec.makeMeasureSpec(targetW, View.MeasureSpec.EXACTLY),
+                                                View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
+                                            )
+                                            val measuredH = pv.measuredHeight
+                                            if (measuredH > 0) {
+                                                handleChildHeightChange(position, measuredH)
+                                            } else if (pv.height > 0) {
+                                                handleChildHeightChange(position, pv.height)
+                                            }
                                         }
                                     } else {
                                         updateWindowForPage(actualPos)

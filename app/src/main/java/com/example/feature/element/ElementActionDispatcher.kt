@@ -141,7 +141,8 @@ object ElementActionDispatcher {
             }
             "log_keeper" -> {
                 val intent = Intent(context, com.example.LogKeeperActivity::class.java).apply {
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    putExtra(com.example.LogKeeperActivity.EXTRA_LAUNCH_SOURCE, com.example.LogKeeperActivity.SOURCE_SIDEBAR)
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_MULTIPLE_TASK)
                 }
                 context.startActivity(intent)
                 true

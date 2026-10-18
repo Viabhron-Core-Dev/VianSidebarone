@@ -228,7 +228,9 @@ fun MainSettingsScreen(
                     supportingContent = { Text("View diagnostic running events and crash reports") },
                     modifier = Modifier
                         .clickable {
-                            val intent = Intent(context, LogKeeperActivity::class.java)
+                            val intent = Intent(context, LogKeeperActivity::class.java).apply {
+                                putExtra(LogKeeperActivity.EXTRA_LAUNCH_SOURCE, LogKeeperActivity.SOURCE_SETTINGS)
+                            }
                             context.startActivity(intent)
                         }
                         .testTag("settings_item_log_keeper")

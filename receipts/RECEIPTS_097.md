@@ -250,3 +250,28 @@
 * How it was verified: local build only (`gradle :app:testDebugUnitTest` passed all test suites, `gradle assembleDebug` built successfully).
 * Any deviation from what was requested, and why: None. Scoped strictly to the startup race fix; no linger, prewarming, watchdog, or architecture changes were added, and Internet Speed Monitor was untouched.
 * Any known issue or follow-up needed: Awaiting physical-device verification of single `createSurfacePackage` log on cold start and clean immediate unbind on release.
+
+---
+
+* Timestamp: 2026-10-18T14:07:00-07:00
+* One-line summary of what was requested: Suppress provisional blank Calculator startup expansion and fix Log Keeper Back button navigation between Sidebar and Settings.
+* Exact files touched:
+  - app/src/main/java/com/example/feature/sidebar/SidebarView.kt
+  - app/src/main/java/com/example/feature/sidebar/HeavyPagePlaceholderView.kt
+  - app/src/main/java/com/example/LogKeeperActivity.kt
+  - app/src/main/java/com/example/feature/element/ElementActionDispatcher.kt
+  - app/src/main/java/com/example/SettingsActivity.kt
+  - app/src/test/java/com/example/feature/sidebar/HeavyCalculatorSplitTest.kt
+  - receipts/RECEIPTS_097.md
+* What was actually done:
+  - Issue 1 (Blank/Pale Startup Region Removal):
+    * Identified root cause: When navigating Home -> Calculator, `SidebarView` posted a measure with `MeasureSpec.UNSPECIFIED` on `HeavyPagePlaceholderView`. With `desiredHeightPx = -1`, `HeavyPagePlaceholderView.onMeasure()` fabricated a 45% screen height (~520px) bootstrap, and `SidebarView` immediately called `handleChildHeightChange(position, 520)`, expanding the Sidebar window over a blank, unattached `SurfaceView` before `:heavy` finished connecting.
+    * Fix: In `SidebarView.kt`, gated `onPageSelected` measurement to skip `HeavyPagePlaceholderView` since Heavy pages asynchronously report desired height via `onHeightChanged`. In `HeavyPagePlaceholderView.kt`, updated `onMeasure` to adopt existing container/parent height rather than fabricating 520px. Set `SurfaceView.alpha = 0f` initially so no punch-hole artifact renders while unattached. In `applyDesiredHeight`, deferred height reporting until `isEmbeddedAttached = true`. Upon `SurfacePackage` attachment, set `SurfaceView.alpha = 1f` and applied the real desired height (e.g. 607px), allowing the Sidebar to transition smoothly from existing compact Home height to final Calculator geometry with zero blank pause.
+  - Issue 2 (Log Keeper Back Navigation):
+    * Identified root cause: Both `LogKeeperActivity` and `SettingsActivity` run in `:heavy` with shared task affinity. Opening Log Keeper from Sidebar via `FLAG_ACTIVITY_NEW_TASK` placed `LogKeeperActivity` in the existing task atop any background `SettingsActivity`, causing Back's default `finish()` to reveal Settings instead of exiting to the underlying app/home.
+    * Fix: Introduced explicit `EXTRA_LAUNCH_SOURCE` constants (`SOURCE_SIDEBAR`, `SOURCE_SETTINGS`) in `LogKeeperActivity`. In `ElementActionDispatcher.kt`, passed `SOURCE_SIDEBAR` and `FLAG_ACTIVITY_NEW_TASK or FLAG_ACTIVITY_MULTIPLE_TASK`. In `SettingsActivity.kt`, passed `SOURCE_SETTINGS`. In `LogKeeperActivity`, wired `onBack` and `onBackPressedDispatcher` to call `finishAndRemoveTask()` when `SOURCE_SIDEBAR` (cleanly exiting without exposing background Settings), and `finish()` when `SOURCE_SETTINGS` (normally popping to Settings, preserving stack).
+  - Added unit tests in `HeavyCalculatorSplitTest.kt` verifying provisional height suppression, deferred desired height application until surface attachment, and launch source back-navigation branching.
+  - Verified local build via `gradle assembleDebug` (succeeded in 2s) and `gradle :app:testDebugUnitTest` (all tests passed).
+* How it was verified: local build only (`gradle :app:testDebugUnitTest` passed all test suites, `gradle assembleDebug` built successfully).
+* Any deviation from what was requested, and why: None. No Heavy linger or prewarming was added, SVCH architecture was untouched, and Internet Speed Monitor was untouched.
+* Any known issue or follow-up needed: Awaiting physical-device verification for both items.

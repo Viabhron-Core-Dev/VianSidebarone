@@ -64,6 +64,7 @@ class HeavyPagePlaceholderView(
     private var currentSurfacePackage: Any? = null
     private var currentHostWidth = 0
     private var currentHostHeight = 0
+    private var pendingDesiredHeightPx = -1
 
     private var desiredHeightPx = -1
     private val lastDispatchedRect = Rect()
@@ -91,6 +92,7 @@ class HeavyPagePlaceholderView(
             layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
             setZOrderMediaOverlay(true)
             holder.setFormat(PixelFormat.TRANSLUCENT)
+            alpha = 0f
         }
         sv.holder.addCallback(object : SurfaceHolder.Callback {
             override fun surfaceCreated(holder: SurfaceHolder) {
@@ -188,7 +190,11 @@ class HeavyPagePlaceholderView(
                         currentSurfacePackage = surfacePackage
                         sv.setChildSurfacePackage(surfacePackage)
                         isEmbeddedAttached = true
+                        sv.alpha = 1f
                         LogKeeper.log(context, TAG, "Successfully embedded SurfacePackage for '${config.id}' in Main SurfaceView")
+                        if (pendingDesiredHeightPx > 0) {
+                            applyDesiredHeight(pendingDesiredHeightPx)
+                        }
                     } else {
                         LogKeeper.log(context, TAG, "SurfacePackage received but null or unselected (isSelected=$isSelected)")
                         try {
@@ -209,6 +215,7 @@ class HeavyPagePlaceholderView(
     private fun detachEmbeddedSurface() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             isSurfaceCreationPending = false
+            embeddedSurfaceView?.alpha = 0f
             try {
                 (currentSurfacePackage as? android.view.SurfaceControlViewHost.SurfacePackage)?.release()
             } catch (_: Throwable) {}
@@ -237,10 +244,9 @@ class HeavyPagePlaceholderView(
         } else if (layoutParams.height > 0) {
             layoutParams.height
         } else {
-            // Generic bootstrap strategy: derive available content height from host container geometry
-            // If parent has valid height, adopt it; otherwise derive a comfortable fraction (45%) of screen height
+            // Keep placeholder at existing container/parent height until real desired height is applied from Heavy
             val parentH = (parent as? View)?.height?.takeIf { it > 0 } ?: (parent as? View)?.measuredHeight?.takeIf { it > 0 }
-            parentH ?: ((context.resources.displayMetrics.heightPixels * 0.45f).toInt())
+            parentH ?: ((parent?.parent as? View)?.height?.takeIf { it > 0 }) ?: 0
         }
         setMeasuredDimension(width, height)
         // Measure children (including embedded SurfaceView if present)
@@ -288,6 +294,8 @@ class HeavyPagePlaceholderView(
         isRevealed = false
         hasReceivedDesiredHeight = false
         isFallbackRevealTriggered = false
+        desiredHeightPx = -1
+        pendingDesiredHeightPx = -1
         LogKeeper.log(context, TAG, "Placeholder onPageUnselected for '${config.id}' in Main (wasMounted=$wasMounted)")
 
         cancelPendingStableUpdate()
@@ -352,6 +360,11 @@ class HeavyPagePlaceholderView(
 
     private fun applyDesiredHeight(newHeight: Int) {
         if (newHeight <= 0) return
+        pendingDesiredHeightPx = newHeight
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && !isEmbeddedAttached) {
+            LogKeeper.log(context, TAG, "Deferring desired height $newHeight for '${config.id}' until SurfacePackage is attached")
+            return
+        }
         hasReceivedDesiredHeight = true
         val changed = (newHeight != desiredHeightPx)
         if (changed) {
