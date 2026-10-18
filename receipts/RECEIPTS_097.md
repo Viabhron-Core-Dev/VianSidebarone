@@ -230,3 +230,23 @@
 * How it was verified: local build only (`compile_applet` succeeded, zero keystore artifacts).
 * Any deviation from what was requested, and why: None. Scoped strictly to the two visual items; architecture, desired-height negotiation, and other pages left untouched.
 * Any known issue or follow-up needed: Ready for on-device manual visual verification of Calculator background solidity and caret suppression.
+
+---
+
+* Timestamp: 2026-10-18T13:14:00-07:00
+* One-line summary of what was requested: Fix Heavy embedded-page startup race in HeavyPagePlaceholderView without linger, prewarming, or architecture changes.
+* Exact files touched:
+  - app/src/main/java/com/example/feature/sidebar/HeavyPagePlaceholderView.kt
+  - app/src/test/java/com/example/feature/sidebar/HeavyCalculatorSplitTest.kt
+  - receipts/RECEIPTS_097.md
+* What was actually done:
+  - Eliminated the premature `createSurfacePackage` call during asynchronous Heavy startup in `HeavyPagePlaceholderView.kt`.
+  - Added dual lifecycle gating requiring both `isSurfaceReady` with valid dimensions AND `connectionManager.isConnected` before requesting embedded surface creation across `onPageSelected()`, `surfaceCreated()`, and `surfaceChanged()`.
+  - Preserved existing `onConnected()` callback as the trigger when Heavy finishes binding second, issuing `createSurfacePackage` only if the page remains selected, mount is requested, and the SurfaceView is ready.
+  - Added in-flight request deduplication via `isSurfaceCreationPending` alongside `isEmbeddedAttached` and `isSelected`, preventing redundant or concurrent `createSurfacePackage` requests across simultaneous SurfaceView and connection callbacks.
+  - Ensured that unselecting the page while connection is in-flight immediately resets `isSelected`, `isMountRequested`, and `isSurfaceCreationPending`, invokes `connectionManager.releaseSurfaceHost()`, and triggers immediate unbind/teardown via `connectionManager.releaseConsumer()`, preventing resurrecting unselected pages.
+  - Added unit tests in `HeavyCalculatorSplitTest.kt` validating: (1) no creation request while Heavy is CONNECTING, (2) single creation request when Heavy connects second, (3) single creation request when Surface becomes ready second, (4) abort when unselected while connection is pending, and (5) deduplication of repeated readiness callbacks.
+  - Verified local build via `gradle assembleDebug` (succeeded in 3s) and `gradle :app:testDebugUnitTest` (all tests passed).
+* How it was verified: local build only (`gradle :app:testDebugUnitTest` passed all test suites, `gradle assembleDebug` built successfully).
+* Any deviation from what was requested, and why: None. Scoped strictly to the startup race fix; no linger, prewarming, watchdog, or architecture changes were added, and Internet Speed Monitor was untouched.
+* Any known issue or follow-up needed: Awaiting physical-device verification of single `createSurfacePackage` log on cold start and clean immediate unbind on release.

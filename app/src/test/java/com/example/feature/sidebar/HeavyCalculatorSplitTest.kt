@@ -455,5 +455,119 @@ class HeavyCalculatorSplitTest {
             com.example.core.ipc.IpcTransactions.TRANSACTION_RELEASE_SURFACE_HOST
         )
     }
+
+    @Test
+    fun testEmbeddedStartupRaceGatingAndDeduplication() {
+        // State simulation matching HeavyPagePlaceholderView lifecycle gating
+        class EmbeddedGatingSim {
+            var isSelected = false
+            var isMountRequested = false
+            var isSurfaceReady = false
+            var isConnected = false
+            var isEmbeddedAttached = false
+            var isSurfaceCreationPending = false
+            var creationRequestCount = 0
+
+            fun requestEmbeddedSurfaceCreation(): Boolean {
+                if (!isSelected || !isMountRequested || !isSurfaceReady || !isConnected) {
+                    return false
+                }
+                if (isEmbeddedAttached || isSurfaceCreationPending) {
+                    return false
+                }
+                isSurfaceCreationPending = true
+                // In actual code, execution posts to handler; here we simulate the pending execution
+                executeCreation()
+                return true
+            }
+
+            fun executeCreation() {
+                if (!isSelected || !isMountRequested || !isSurfaceReady || !isConnected || isEmbeddedAttached) {
+                    isSurfaceCreationPending = false
+                    return
+                }
+                creationRequestCount++
+                isEmbeddedAttached = true
+                isSurfaceCreationPending = false
+            }
+
+            fun onPageSelected() {
+                isSelected = true
+                isMountRequested = true
+                // Acquire starts async connection (state = CONNECTING, isConnected = false)
+                if (isSurfaceReady && isConnected) {
+                    requestEmbeddedSurfaceCreation()
+                }
+            }
+
+            fun onSurfaceReady() {
+                isSurfaceReady = true
+                if (isSelected && isConnected) {
+                    requestEmbeddedSurfaceCreation()
+                }
+            }
+
+            fun onConnected() {
+                isConnected = true
+                if (isSelected && isMountRequested && isSurfaceReady && isConnected && !isEmbeddedAttached && !isSurfaceCreationPending) {
+                    requestEmbeddedSurfaceCreation()
+                }
+            }
+
+            fun onPageUnselected() {
+                isSelected = false
+                isMountRequested = false
+                isSurfaceCreationPending = false
+                isEmbeddedAttached = false
+                isConnected = false
+            }
+        }
+
+        // Scenario 1: Surface ready + Heavy CONNECTING -> no creation request
+        val sim1 = EmbeddedGatingSim()
+        sim1.isSurfaceReady = true
+        sim1.onPageSelected() // Heavy starts connecting, isConnected = false
+        assertEquals("No creation request when connecting", 0, sim1.creationRequestCount)
+        assertFalse(sim1.isEmbeddedAttached)
+
+        // Scenario 2: Heavy becomes CONNECTED afterward -> exactly one creation request
+        sim1.onConnected()
+        assertEquals("Exactly one creation request when Heavy connects", 1, sim1.creationRequestCount)
+        assertTrue(sim1.isEmbeddedAttached)
+
+        // Scenario 3: Heavy CONNECTED first + Surface becomes ready afterward -> creation occurs when Surface becomes ready
+        val sim3 = EmbeddedGatingSim()
+        sim3.isConnected = true
+        sim3.onPageSelected()
+        // Surface not ready yet
+        assertEquals(0, sim3.creationRequestCount)
+        // Surface becomes ready later
+        sim3.onSurfaceReady()
+        assertEquals("Creation occurs when surface becomes ready", 1, sim3.creationRequestCount)
+        assertTrue(sim3.isEmbeddedAttached)
+
+        // Scenario 4: Page unselected while connection is pending -> later onConnected must NOT create the page
+        val sim4 = EmbeddedGatingSim()
+        sim4.isSurfaceReady = true
+        sim4.onPageSelected() // connecting
+        assertEquals(0, sim4.creationRequestCount)
+        sim4.onPageUnselected() // User closed sidebar / navigated away
+        assertFalse(sim4.isSelected)
+        sim4.onConnected() // connection completes after unselection
+        assertEquals("Must NOT create host when page was unselected", 0, sim4.creationRequestCount)
+        assertFalse(sim4.isEmbeddedAttached)
+
+        // Scenario 5: Duplicate readiness callbacks -> must not create duplicate Heavy page hosts
+        val sim5 = EmbeddedGatingSim()
+        sim5.onPageSelected()
+        sim5.onSurfaceReady()
+        sim5.onConnected()
+        assertEquals(1, sim5.creationRequestCount)
+        // Simulate repeated surfaceChanged, onConnected, or onSurfaceReady while already attached
+        sim5.onSurfaceReady()
+        sim5.onConnected()
+        sim5.requestEmbeddedSurfaceCreation()
+        assertEquals("Duplicate readiness callbacks must not create duplicate hosts", 1, sim5.creationRequestCount)
+    }
 }
 

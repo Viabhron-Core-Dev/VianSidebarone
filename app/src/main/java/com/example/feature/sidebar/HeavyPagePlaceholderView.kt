@@ -60,6 +60,7 @@ class HeavyPagePlaceholderView(
     private var embeddedSurfaceView: SurfaceView? = null
     private var isSurfaceReady = false
     private var isEmbeddedAttached = false
+    private var isSurfaceCreationPending = false
     private var currentSurfacePackage: Any? = null
     private var currentHostWidth = 0
     private var currentHostHeight = 0
@@ -95,7 +96,7 @@ class HeavyPagePlaceholderView(
             override fun surfaceCreated(holder: SurfaceHolder) {
                 LogKeeper.log(context, TAG, "Embedded SurfaceView created for '${config.id}'")
                 isSurfaceReady = true
-                if (isSelected) {
+                if (isSelected && connectionManager.isConnected) {
                     requestEmbeddedSurfaceCreation()
                 }
             }
@@ -107,7 +108,7 @@ class HeavyPagePlaceholderView(
                 if (isSelected) {
                     if (isEmbeddedAttached) {
                         connectionManager.relayoutSurfaceHost(config.id, width, height)
-                    } else if (isSurfaceReady) {
+                    } else if (isSurfaceReady && connectionManager.isConnected) {
                         requestEmbeddedSurfaceCreation()
                     }
                 }
@@ -116,6 +117,7 @@ class HeavyPagePlaceholderView(
             override fun surfaceDestroyed(holder: SurfaceHolder) {
                 LogKeeper.log(context, TAG, "Embedded SurfaceView destroyed for '${config.id}'")
                 isSurfaceReady = false
+                isSurfaceCreationPending = false
                 detachEmbeddedSurface()
             }
         })
@@ -125,6 +127,9 @@ class HeavyPagePlaceholderView(
 
     private fun requestEmbeddedSurfaceCreation() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
+        if (!isSelected || !isMountRequested || !isSurfaceReady || !connectionManager.isConnected) return
+        if (isEmbeddedAttached || isSurfaceCreationPending) return
+
         val sv = embeddedSurfaceView ?: return
         val hostToken = sv.hostToken
         if (hostToken == null) {
@@ -140,8 +145,14 @@ class HeavyPagePlaceholderView(
             return
         }
 
+        isSurfaceCreationPending = true
         post {
             try {
+                if (!isSelected || !isMountRequested || !isSurfaceReady || !connectionManager.isConnected || isEmbeddedAttached) {
+                    LogKeeper.log(context, TAG, "Aborting createSurfacePackage: state changed before execution (isSelected=$isSelected, isSurfaceReady=$isSurfaceReady, isConnected=${connectionManager.isConnected}, isEmbeddedAttached=$isEmbeddedAttached)")
+                    isSurfaceCreationPending = false
+                    return@post
+                }
                 val prefs = context.getSharedPreferences("FloatingReaderPrefs", Context.MODE_PRIVATE)
                 val opacity = if (config.useCustomSettings) config.transparency else prefs.getFloat("handle_${containerId}_sidebar_transparency", prefs.getFloat("sidebar_transparency", 0.9f))
                 val alphaInt = (opacity * 255).toInt().coerceIn(0, 255)
@@ -170,7 +181,7 @@ class HeavyPagePlaceholderView(
                 if (reply != null && reply.getBoolean("success")) {
                     @Suppress("DEPRECATION")
                     val surfacePackage = reply.getParcelable<android.view.SurfaceControlViewHost.SurfacePackage>("surfacePackage")
-                    if (surfacePackage != null && isSelected) {
+                    if (surfacePackage != null && isSelected && isMountRequested) {
                         try {
                             (currentSurfacePackage as? android.view.SurfaceControlViewHost.SurfacePackage)?.release()
                         } catch (_: Throwable) {}
@@ -180,18 +191,24 @@ class HeavyPagePlaceholderView(
                         LogKeeper.log(context, TAG, "Successfully embedded SurfacePackage for '${config.id}' in Main SurfaceView")
                     } else {
                         LogKeeper.log(context, TAG, "SurfacePackage received but null or unselected (isSelected=$isSelected)")
+                        try {
+                            surfacePackage?.release()
+                        } catch (_: Throwable) {}
                     }
                 } else {
                     LogKeeper.log(context, TAG, "createSurfacePackage reply unsuccessful for '${config.id}'")
                 }
             } catch (e: Throwable) {
                 LogKeeper.logCrash(context, TAG, e)
+            } finally {
+                isSurfaceCreationPending = false
             }
         }
     }
 
     private fun detachEmbeddedSurface() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            isSurfaceCreationPending = false
             try {
                 (currentSurfacePackage as? android.view.SurfaceControlViewHost.SurfacePackage)?.release()
             } catch (_: Throwable) {}
@@ -252,7 +269,7 @@ class HeavyPagePlaceholderView(
         connectionManager.acquireConsumer(consumerTag)
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            if (isSurfaceReady) {
+            if (isSurfaceReady && connectionManager.isConnected) {
                 requestEmbeddedSurfaceCreation()
             }
         } else {
@@ -278,6 +295,7 @@ class HeavyPagePlaceholderView(
         removeLayoutMonitoring()
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            isSurfaceCreationPending = false
             detachEmbeddedSurface()
             connectionManager.releaseSurfaceHost(config.id)
         } else {
@@ -304,14 +322,17 @@ class HeavyPagePlaceholderView(
 
     override fun onConnected() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            if (isSelected && isSurfaceReady && !isEmbeddedAttached) {
-                post { requestEmbeddedSurfaceCreation() }
+            post {
+                if (isSelected && isMountRequested && isSurfaceReady && connectionManager.isConnected && !isEmbeddedAttached && !isSurfaceCreationPending) {
+                    requestEmbeddedSurfaceCreation()
+                }
             }
         }
     }
 
     override fun onHeavyProcessDied() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            isSurfaceCreationPending = false
             detachEmbeddedSurface()
         }
     }

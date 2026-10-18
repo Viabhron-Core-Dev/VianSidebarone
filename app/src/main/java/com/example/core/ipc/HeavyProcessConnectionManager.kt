@@ -50,6 +50,9 @@ class HeavyProcessConnectionManager internal constructor(
     var state: ConnectionState = ConnectionState.DISCONNECTED
         private set
 
+    val isConnected: Boolean
+        get() = state == ConnectionState.CONNECTED
+
     @Volatile
     private var remoteProxy: IHeavyHostContract? = null
 
