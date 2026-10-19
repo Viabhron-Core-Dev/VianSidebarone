@@ -171,6 +171,7 @@ class HeavyPagePlaceholderView(
                 val params = Bundle().apply {
                     putString("pageId", config.id)
                     putString("pageType", config.type)
+                    putString("containerId", containerId)
                     putBinder("hostToken", hostToken)
                     putInt("displayId", displayId)
                     putInt("width", width)

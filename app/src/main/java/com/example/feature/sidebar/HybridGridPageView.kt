@@ -126,9 +126,43 @@ class HybridGridPageView(
     }
 
     override fun onPageSelected() {
-        if (gridLayout.childCount == 0 && width > 0) {
+        if (gridLayout.childCount == 0) {
             loadWidgets()
+        } else {
+            val h = getCurrentHeightPx()
+            if (h > 0) {
+                onHeightChanged(h)
+            }
         }
+    }
+
+    fun applyThemeBackground(bgColor: Int = 0, isRight: Boolean = true) {
+        val finalColor = if (bgColor != 0) {
+            bgColor
+        } else {
+            val opacity = prefs.getFloat("handle_${containerId}_sidebar_transparency", prefs.getFloat("sidebar_transparency", 0.9f))
+            val alphaInt = (opacity * 255).toInt().coerceIn(0, 255)
+            val colorHex = prefs.getString("handle_${containerId}_sidebar_color", prefs.getString("sidebar_color", "#1E1E2E")) ?: "#1E1E2E"
+            val baseColor = try { Color.parseColor(colorHex) } catch (e: Exception) { Color.parseColor("#1E1E2E") }
+            val r = Color.red(baseColor)
+            val g = Color.green(baseColor)
+            val b = Color.blue(baseColor)
+            Color.argb(alphaInt, r, g, b)
+        }
+
+        val density = resources.displayMetrics.density
+        val radius = 16f * density
+        val bgDrawable = android.graphics.drawable.GradientDrawable().apply {
+            shape = android.graphics.drawable.GradientDrawable.RECTANGLE
+            setColor(finalColor)
+            setStroke((1 * density).toInt(), Color.argb(80, 255, 255, 255))
+            cornerRadii = if (isRight) {
+                floatArrayOf(0f, 0f, 0f, 0f, 0f, 0f, radius, radius)
+            } else {
+                floatArrayOf(0f, 0f, 0f, 0f, radius, radius, 0f, 0f)
+            }
+        }
+        background = bgDrawable
     }
 
     override fun onPageUnselected() {
@@ -204,8 +238,8 @@ class HybridGridPageView(
         val modKey = getGridModifiedPrefKey()
         var jsonStr = prefs.getString(gridKey, null)
         val isModified = prefs.getBoolean(modKey, false)
-        if (jsonStr == null || (jsonStr == "[]" && pageId.startsWith("default_hybrid") && !isModified)) {
-            if (pageId.startsWith("default_hybrid")) {
+        if (jsonStr == null || (jsonStr == "[]" && pageId == "default_hybrid" && !isModified)) {
+            if (pageId == "default_hybrid") {
                 jsonStr = """[{"id": "system:ebook_reader", "cols": 1, "rows": 1, "x": 0, "y": 0}, {"id": "system:log_keeper", "cols": 1, "rows": 1, "x": 1, "y": 0}]"""
             } else {
                 jsonStr = "[]"
@@ -333,13 +367,15 @@ class HybridGridPageView(
     }
 
     fun loadWidgets() {
-        if (width == 0) {
+        val effectiveWidth = if (width > 0) width else layoutParams?.width?.takeIf { it > 0 } ?: measuredWidth.takeIf { it > 0 } ?: 0
+        if (effectiveWidth <= 0) {
+            post { loadWidgets() }
             return
         }
         gridLayout.removeAllViews()
         val totalCols = prefs.getInt(getGridColsPrefKey(), 4)
         
-        val gridWidth = width
+        val gridWidth = effectiveWidth
         val cellWidth = gridWidth / totalCols
         val cellHeight = cellWidth 
         
@@ -353,7 +389,7 @@ class HybridGridPageView(
                 val pad = (16 * density).toInt()
                 setPadding(pad, pad, pad, pad)
                 val tv = TextView(context).apply {
-                    text = if (pageId.startsWith("default_hybrid")) {
+                    text = if (pageId == "default_hybrid") {
                         "Empty Home Grid\nTap to add widgets & apps"
                     } else {
                         "Empty Hybrid Grid\nTap to add widgets & apps"
@@ -1173,9 +1209,11 @@ class HybridGridPageView(
     override fun onEditClicked() {
         val intent = android.content.Intent(context, com.example.HybridGridEditActivity::class.java).apply {
             putExtra("PAGE_ID", pageId)
+            putExtra("CONTAINER_ID", containerId)
             addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
         }
         context.startActivity(intent)
+        onClose?.invoke() ?: com.example.feature.sidebar.SidebarManager.getInstance(context).closeSidebar()
         context.sendBroadcast(android.content.Intent("com.example.CLOSE_SIDEBAR"))
     }
 }

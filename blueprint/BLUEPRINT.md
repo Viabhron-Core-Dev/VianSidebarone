@@ -199,6 +199,25 @@
   - Implemented Main execution in `HeavyProcessConnectionManager.dispatchMainAction` dispatching `CLOSE_WINDOW` (via `SidebarWindowCoordinator.closeSidebar()`), `SET_DIMMED` (via `SidebarWindowCoordinator.setSidebarDimmed()`), `TRIGGER_ACTION` (via `ElementActionDispatcher.handleSystemAction()`), and `OPEN_CONTAINER` (via `SidebarManager.openContainerById()`).
 - [ ] **Physical On-Device Verification**: Awaiting physical testing of Handle 1 resident Home Grid, secondary grid placeholder routing, and Heavy-to-Main action dispatching.
 
+### 12.14 — Main → Heavy Sidebar Split: Hybrid Grid (Implemented — Awaiting Physical Verification)
+- [x] **Heavy Hybrid Grid Instantiation (`HeavyPageHostManager`)**:
+  - Extended `HeavyPageHostManager` on both `createSurfacePackage` (API 30+ SurfaceControlViewHost) and `mountPage` (API 26-29 overlay fallback) to support `"hybrid_grid"`, `"default_hybrid"`, and `"tools"` page types.
+  - Instantiates real `HybridGridPageView` in `:heavy` with `pageId`, `containerId`, `hostScope`, and wires action callbacks:
+    - `onClose` -> `HeavyProcessHost.getInstance(context).requestCloseSidebar(containerId)`
+    - `onDimSidebar` -> `HeavyProcessHost.getInstance(context).requestSetDimmed(dimmed, containerId)`
+    - `onHeightChanged` -> `reportDesiredPageHeight(pageId, newH)`
+  - Applies theme background (`applyThemeBackground`) with configured color, transparency, and corner radii matching the Sidebar theme.
+- [x] **Home Grid Main-Residency Preservation**:
+  - Preserved `SidebarPageFactory.isResidentDefaultHybrid` ensuring ONLY the original `default_hybrid` on Handle 1's primary gesture (`handle_1_swipe_left`, `sidebar`, `handle_1`, or `getFirstHandlePrimaryContainerId()`) is instantiated in Main.
+  - All other Hybrid Grids (other handles, other gestures, user-created grids, secondary grids) route to `HeavyPagePlaceholderView` and run in `:heavy`.
+- [x] **Empty Hybrid Grid Behavior & Geometry**:
+  - Gated default tiles (`ebook_reader`, `log_keeper`) strictly to `pageId == "default_hybrid"`. Newly created Hybrid Grids start with empty item list `[]`.
+  - Empty Hybrid Grids mount cleanly, render the Sidebar theme background and rounded bottom corner, display the "Empty Hybrid Grid\nTap to add widgets & apps" prompt, and report valid geometry (`120dp`) without exposing transparent/broken punch-holes.
+  - Tapping the empty prompt launches `HybridGridEditActivity` with `PAGE_ID` and `CONTAINER_ID` and closes the Sidebar via `onClose` IPC callback.
+- [x] **Heavy Action Dispatching & Accessibility Forwarding**:
+  - In `ElementActionDispatcher.handleSystemAction`, detected `:heavy` process execution (`LogKeeper.getProcessName(context).endsWith(":heavy")`) and routed accessibility actions and `force_stop_running_apps` across IPC to Main via `HeavyProcessHost.requestTriggerAction`, where `VianSideAccessibilityService.instance` is active.
+- [ ] **Physical On-Device Verification**: Awaiting physical testing of newly created Hybrid Grids on secondary gestures/handles running in `:heavy` via SurfaceControlViewHost.
+
 ---
 
 ## Phase 14: PWA Engine & External AI App Integration (Tier 5 - Highest Complexity)

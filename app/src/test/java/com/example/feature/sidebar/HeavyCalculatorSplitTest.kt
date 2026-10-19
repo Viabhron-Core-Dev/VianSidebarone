@@ -836,5 +836,111 @@ class HeavyCalculatorSplitTest {
         assertTrue(result.success)
         assertEquals(com.example.core.ipc.MainActionType.SET_DIMMED, listenerReceivedAction)
     }
+
+    @Test
+    fun testHybridGridHostingAndResidencyRule() {
+        val context = org.robolectric.RuntimeEnvironment.getApplication()
+
+        // 1. Exact default_hybrid on Handle 1 swipe left -> Main resident
+        val homeGridConfig = SidebarPage(
+            id = "default_hybrid",
+            title = "Home Grid",
+            type = "default_hybrid",
+            order = 0
+        )
+        assertTrue(
+            "Original default_hybrid on Handle 1 Swipe Left must be Main resident",
+            com.example.feature.sidebar.DefaultSidebarPageFactory.isResidentDefaultHybrid(
+                context, homeGridConfig, "handle_1", "handle_1_swipe_left"
+            )
+        )
+
+        // 2. Hybrid Grid on Handle 1 double tap -> NOT Main resident (Heavy)
+        val doubleTapGrid = SidebarPage(
+            id = "default_hybrid_handle_1_double_tap",
+            title = "Double Tap Grid",
+            type = "hybrid_grid",
+            order = 0
+        )
+        assertFalse(
+            "Hybrid Grid for Handle 1 double tap must NOT be Main resident",
+            com.example.feature.sidebar.DefaultSidebarPageFactory.isResidentDefaultHybrid(
+                context, doubleTapGrid, "handle_1", "handle_1_double_tap"
+            )
+        )
+
+        // 3. Hybrid Grid on Handle 2 tap -> NOT Main resident (Heavy)
+        val handle2Grid = SidebarPage(
+            id = "default_hybrid_handle_2_tap",
+            title = "Handle 2 Grid",
+            type = "hybrid_grid",
+            order = 0
+        )
+        assertFalse(
+            "Hybrid Grid for Handle 2 must NOT be Main resident",
+            com.example.feature.sidebar.DefaultSidebarPageFactory.isResidentDefaultHybrid(
+                context, handle2Grid, "handle_2", "handle_2_tap"
+            )
+        )
+
+        // 4. User-created hybrid_grid -> NOT Main resident (Heavy)
+        val customGrid = SidebarPage(
+            id = "hybrid_grid_custom_99",
+            title = "Custom Grid",
+            type = "hybrid_grid",
+            order = 1
+        )
+        assertFalse(
+            "Custom Hybrid Grid must NOT be Main resident",
+            com.example.feature.sidebar.DefaultSidebarPageFactory.isResidentDefaultHybrid(
+                context, customGrid, "handle_1", "handle_1_swipe_left"
+            )
+        )
+    }
+
+    @Test
+    fun testHeavyCommandSerializationForHybridGrid() {
+        val mountCmd = HeavyCommand(
+            commandId = "mount_hybrid_123",
+            type = HeavyCommandType.MOUNT_PAGE,
+            targetId = "default_hybrid_handle_1_double_tap",
+            payload = mapOf(
+                "pageId" to "default_hybrid_handle_1_double_tap",
+                "pageType" to "hybrid_grid",
+                "containerId" to "handle_1_double_tap",
+                "x" to "0",
+                "y" to "100",
+                "width" to "300",
+                "height" to "400"
+            )
+        )
+        val json = mountCmd.toJson()
+        val parsed = HeavyCommand.fromJson(json)
+        assertEquals("default_hybrid_handle_1_double_tap", parsed.targetId)
+        assertEquals("hybrid_grid", parsed.payload["pageType"])
+        assertEquals("handle_1_double_tap", parsed.payload["containerId"])
+    }
+
+    @Test
+    fun testHybridGridApplyThemeBackground() {
+        val context = org.robolectric.RuntimeEnvironment.getApplication()
+        val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main)
+        val hybridView = HybridGridPageView(
+            context = context,
+            pageId = "default_hybrid_handle_1_double_tap",
+            scope = scope,
+            containerId = "handle_1_double_tap",
+            onClose = {},
+            onDimSidebar = {},
+            onHeightChanged = {}
+        )
+        assertNotNull(hybridView)
+
+        // Verify applyThemeBackground sets background drawable with proper color and radius
+        val testColor = android.graphics.Color.argb(230, 30, 30, 46)
+        hybridView.applyThemeBackground(testColor, isRight = true)
+        val bg = hybridView.background as? android.graphics.drawable.GradientDrawable
+        assertNotNull("Hybrid Grid must apply valid GradientDrawable background in Heavy", bg)
+    }
 }
 

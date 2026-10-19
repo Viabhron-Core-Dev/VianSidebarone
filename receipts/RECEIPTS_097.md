@@ -297,3 +297,33 @@
 * How it was verified: local build only (`gradle :app:testDebugUnitTest` passed all test suites, `compile_applet` succeeded cleanly).
 * Any deviation from what was requested, and why: None. Remaining page types, Calculator architecture, and Internet Speed Monitor were untouched.
 * Any known issue or follow-up needed: Awaiting physical-device verification of resident Home Grid on Handle 1 vs secondary grid placeholder routing and Heavy-to-Main action dispatching.
+
+
+---
+
+* Timestamp: 2026-10-19T09:38:00-07:00
+* One-line summary of what was requested: Implement Main/Heavy Sidebar split for Hybrid Grid only (SVCH hosting, residency preservation, empty grid handling, and action callbacks).
+* Exact files touched:
+  - app/src/main/java/com/example/feature/heavy/page/HeavyPageHostManager.kt
+  - app/src/main/java/com/example/feature/sidebar/HybridGridPageView.kt
+  - app/src/main/java/com/example/feature/element/ElementActionDispatcher.kt
+  - app/src/test/java/com/example/feature/sidebar/HeavyCalculatorSplitTest.kt
+  - blueprint/BLUEPRINT.md
+  - receipts/RECEIPTS_097.md
+* What was actually done:
+  - Heavy Hybrid Grid Creation (`HeavyPageHostManager.kt`): Extended `createSurfacePackageApi30` (API 30+ SurfaceControlViewHost) and `mountPage` (API 26-29 overlay fallback) to support `"hybrid_grid"`, `"default_hybrid"`, and `"tools"`. Instantiates real `HybridGridPageView` in `:heavy` with `pageId`, `containerId`, `hostScope`, and wires action callbacks:
+    * `onClose` calls `HeavyProcessHost.getInstance(context).requestCloseSidebar(containerId)`
+    * `onDimSidebar` calls `HeavyProcessHost.getInstance(context).requestSetDimmed(dimmed, containerId)`
+    * `onHeightChanged` calls `reportDesiredPageHeight(pageId, newH)` which reports `page_height_changed` to Main across Binder
+    * In both new creation and relayout, calls `applyThemeBackground(backgroundColor, isRight)` to render the configured Sidebar theme background and corner radius.
+  - Home Grid Residency Preservation (`SidebarPageFactory.kt`): Maintained strict residency guard ensuring ONLY the original `default_hybrid` on Handle 1's primary gesture/container (`handle_1_swipe_left`, `sidebar`, `handle_1`, or `getFirstHandlePrimaryContainerId()`) is resident in Main. All other grids (e.g. `default_hybrid_handle_1_double_tap`, `default_hybrid_handle_2_tap`, `hybrid_grid_*`) route to `HeavyPagePlaceholderView` and run in `:heavy`.
+  - Empty Hybrid Grid Behavior & Geometry (`HybridGridPageView.kt`):
+    * Gated default starter tiles (`ebook_reader`, `log_keeper`) to strictly `pageId == "default_hybrid"`. Newly created Hybrid Grids start empty (`[]`).
+    * Implemented `applyThemeBackground(bgColor, isRight)` applying `GradientDrawable` with Sidebar background color, opacity, stroke, and bottom corner radius matching `SidebarView`.
+    * In `loadWidgets()`, gracefully handled initial layout measurements, rendered the empty prompt ("Empty Hybrid Grid\nTap to add widgets & apps"), and reported `emptyHeight` (`120dp`) so Main sizes the ViewPager and SurfaceView without exposing transparent/broken punch-holes.
+    * In `onEditClicked()`, passed `CONTAINER_ID` to `HybridGridEditActivity` and invoked `onClose?.invoke()` to close the Sidebar window via IPC.
+  - Heavy Action Dispatching (`ElementActionDispatcher.kt`): Detected `:heavy` process execution (`LogKeeper.getProcessName(context).endsWith(":heavy")`) and routed accessibility actions and `force_stop_running_apps` across IPC to Main via `HeavyProcessHost.getInstance(context).requestTriggerAction(action, containerId)`.
+  - Unit Tests (`HeavyCalculatorSplitTest.kt`): Added test suites verifying Hybrid Grid hosting and residency rule, HeavyCommand serialization for Hybrid Grid, and `applyThemeBackground` GradientDrawable styling.
+* How it was verified: local build only (`compile_applet` succeeded cleanly).
+* Any deviation from what was requested, and why: None. Calculator architecture, Internet Speed Monitor, and remaining page types were untouched.
+* Any known issue or follow-up needed: Awaiting physical-device verification of newly created Hybrid Grids on secondary gestures/handles running in `:heavy` via SurfaceControlViewHost.

@@ -20,6 +20,10 @@ import com.example.core.ipc.HeavyProcessHost
 import com.example.core.ipc.IpcErrorCode
 import com.example.core.ipc.IpcResult
 import com.example.feature.sidebar.CalculatorPageView
+import com.example.feature.sidebar.HybridGridPageView
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -28,17 +32,18 @@ import java.util.concurrent.TimeUnit
  * HeavyPageHostManager: Heavy-process runtime manager for hosting non-home Sidebar page views.
  *
  * Runs exclusively in :heavy.
- * When Main selects a Heavy-owned page (e.g. Calculator), HeavyPageHostManager:
- * 1. Instantiates the real PageView (e.g. CalculatorPageView) using Heavy's Context.
+ * When Main selects a Heavy-owned page (e.g. Calculator, Hybrid Grid), HeavyPageHostManager:
+ * 1. Instantiates the real PageView (e.g. CalculatorPageView, HybridGridPageView) using Heavy's Context.
  * 2. On API 30+, embeds it via SurfaceControlViewHost without any TYPE_APPLICATION_OVERLAY window.
  * 3. On legacy API 26-29, mounts it into a dedicated TYPE_APPLICATION_OVERLAY window.
- * 4. Keeps Calculator fully interactive (touches handled in :heavy) without polluting Main process heap.
+ * 4. Keeps Calculator and Hybrid Grids fully interactive (touches handled in :heavy) without polluting Main process heap.
  * 5. Unmounts and tears down cleanly when navigated away or when Sidebar closes.
  */
 class HeavyPageHostManager private constructor(private val context: Context) {
 
     private val windowManager = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
     private val mainHandler = Handler(Looper.getMainLooper())
+    private val hostScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private val activeWindows = ConcurrentHashMap<String, PageWindowHolder>()
     private val activeEmbeddedHosts = ConcurrentHashMap<String, EmbeddedHostHolder>()
     private val lastReportedHeights = ConcurrentHashMap<String, Int>()
@@ -113,6 +118,27 @@ class HeavyPageHostManager private constructor(private val context: Context) {
                         CalculatorPageView(context) { newH ->
                             reportDesiredPageHeight(pageId, newH)
                         }
+                    }
+                    "hybrid_grid", "default_hybrid", "tools" -> {
+                        val containerId = command.payload["containerId"] ?: "sidebar"
+                        LogKeeper.log(context, TAG, "Instantiating HybridGridPageView in :heavy for pageId='$pageId', containerId='$containerId'")
+                        HybridGridPageView(
+                            context = context,
+                            pageId = pageId,
+                            scope = hostScope,
+                            containerId = containerId,
+                            onClose = {
+                                LogKeeper.log(context, TAG, "HybridGrid requested onClose from :heavy")
+                                HeavyProcessHost.getInstance(context).requestCloseSidebar(containerId)
+                            },
+                            onDimSidebar = { dimmed ->
+                                LogKeeper.log(context, TAG, "HybridGrid requested onDimSidebar($dimmed) from :heavy")
+                                HeavyProcessHost.getInstance(context).requestSetDimmed(dimmed, containerId)
+                            },
+                            onHeightChanged = { newH ->
+                                reportDesiredPageHeight(pageId, newH)
+                            }
+                        )
                     }
                     else -> {
                         LogKeeper.log(context, TAG, "Unsupported Heavy page type '$pageType'")
@@ -300,6 +326,7 @@ class HeavyPageHostManager private constructor(private val context: Context) {
                     (existing.host as? android.view.SurfaceControlViewHost)?.relayout(width, height)
                     if (backgroundColor != 0) {
                         (existing.pageView as? CalculatorPageView)?.applyThemeBackground(backgroundColor, isRight)
+                        (existing.pageView as? HybridGridPageView)?.applyThemeBackground(backgroundColor, isRight)
                     }
                 } catch (e: Throwable) {
                     LogKeeper.logCrash(context, TAG, e)
@@ -331,6 +358,31 @@ class HeavyPageHostManager private constructor(private val context: Context) {
                         CalculatorPageView(context) { newH ->
                             reportDesiredPageHeight(pageId, newH)
                         }.apply {
+                            if (backgroundColor != 0) {
+                                applyThemeBackground(backgroundColor, isRight)
+                            }
+                        }
+                    }
+                    "hybrid_grid", "default_hybrid", "tools" -> {
+                        val containerId = params.getString("containerId") ?: "sidebar"
+                        LogKeeper.log(context, TAG, "Instantiating HybridGridPageView in :heavy for pageId='$pageId', containerId='$containerId'")
+                        HybridGridPageView(
+                            context = context,
+                            pageId = pageId,
+                            scope = hostScope,
+                            containerId = containerId,
+                            onClose = {
+                                LogKeeper.log(context, TAG, "HybridGrid requested onClose from :heavy")
+                                HeavyProcessHost.getInstance(context).requestCloseSidebar(containerId)
+                            },
+                            onDimSidebar = { dimmed ->
+                                LogKeeper.log(context, TAG, "HybridGrid requested onDimSidebar($dimmed) from :heavy")
+                                HeavyProcessHost.getInstance(context).requestSetDimmed(dimmed, containerId)
+                            },
+                            onHeightChanged = { newH ->
+                                reportDesiredPageHeight(pageId, newH)
+                            }
+                        ).apply {
                             if (backgroundColor != 0) {
                                 applyThemeBackground(backgroundColor, isRight)
                             }

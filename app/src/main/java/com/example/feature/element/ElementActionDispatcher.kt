@@ -136,6 +136,11 @@ object ElementActionDispatcher {
         LogKeeper.log(context, TAG, "Handling system action: $action (container=$containerId)")
         return when (action) {
             "force_stop_running_apps" -> {
+                if (LogKeeper.getProcessName(context).endsWith(":heavy")) {
+                    LogKeeper.log(context, TAG, "Routing force_stop_running_apps from :heavy to Main via IPC")
+                    val res = com.example.core.ipc.HeavyProcessHost.getInstance(context).requestTriggerAction(action, containerId)
+                    return res.success
+                }
                 AppTrackerHelper.startForceStopSequence(context, containerId)
                 true
             }
@@ -210,6 +215,11 @@ object ElementActionDispatcher {
             else -> {
                 val service = com.example.feature.system_hub.VianSideAccessibilityService.instance
                 if (service == null) {
+                    if (LogKeeper.getProcessName(context).endsWith(":heavy")) {
+                        LogKeeper.log(context, TAG, "Routing accessibility action '$action' from :heavy to Main via IPC")
+                        val res = com.example.core.ipc.HeavyProcessHost.getInstance(context).requestTriggerAction(action, containerId)
+                        return res.success
+                    }
                     LogKeeper.log(context, TAG, "Accessibility service not running/enabled for action: $action")
                     try {
                         android.widget.Toast.makeText(context, "Please enable VianSide Accessibility Service", android.widget.Toast.LENGTH_SHORT).show()
