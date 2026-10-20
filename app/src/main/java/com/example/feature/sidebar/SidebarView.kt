@@ -300,6 +300,13 @@ class SidebarView(
                             onClose = onClose
                         )
                     }
+                } else {
+                    val intent = Intent(context, com.example.SettingsActivity::class.java).apply {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                        putExtra("start_route", "pages_${containerId}")
+                    }
+                    context.startActivity(intent)
+                    onClose()
                 }
             }
         }
@@ -371,6 +378,32 @@ class SidebarView(
         
         setupDots(pageConfigs.size)
 
+        if (pageConfigs.isEmpty()) {
+            val emptyH = (120 * density).toInt()
+            val emptyContainerView = LinearLayout(context).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER
+                val pad = (16 * density).toInt()
+                setPadding(pad, pad, pad, pad)
+                val tv = TextView(context).apply {
+                    text = "No pages added\nTap to add pages"
+                    setTextColor(Color.LTGRAY)
+                    textSize = 13f
+                    gravity = Gravity.CENTER
+                }
+                addView(tv)
+                layoutParams = FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, emptyH)
+                setOnClickListener {
+                    val intent = Intent(context, com.example.SettingsActivity::class.java).apply {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                        putExtra("start_route", "pages_${containerId}")
+                    }
+                    context.startActivity(intent)
+                    onClose()
+                }
+            }
+            container.addView(emptyContainerView)
+        }
         container.addView(viewPager)
         header.addView(dotsScrollView)
 
@@ -396,7 +429,9 @@ class SidebarView(
         }
         addView(dimOverlay)
 
-        viewPager.setCurrentItem(startingIndex, false)
+        if (pageConfigs.isNotEmpty()) {
+            viewPager.setCurrentItem(startingIndex, false)
+        }
 
         val callback = object : ViewPager2.OnPageChangeCallback() {
             override fun onPageSelected(position: Int) {
@@ -550,8 +585,10 @@ class SidebarView(
 
         val targetContentHeightPx = if (page.useCustomSettings && page.height > 0) {
             (page.height * density).toInt()
-        } else if (isPageWrap) {
             val lastMeasured = pageHeights[page.id]
+                ?: if (page.type == "hybrid_grid" || page.type == "default_hybrid") {
+                    prefs.getInt("handle_${containerId}_hybrid_grid_height_${page.id}", -1).takeIf { it > 0 }
+                } else null
             if (lastMeasured != null && lastMeasured > 0) {
                 lastMeasured.coerceIn((60 * density).toInt(), maxAllowedHeight)
             } else {
@@ -649,6 +686,7 @@ class SidebarView(
                     is HybridGridPageView -> pv.getCurrentHeightPx()
                     is WidgetsGridPageView -> pv.getCurrentHeightPx()
                     is WidgetPageView -> pv.getCurrentHeightPx()
+                    is HeavyPagePlaceholderView -> pv.getReportedDesiredHeightPx()
                     else -> pv.height
                 }
             }

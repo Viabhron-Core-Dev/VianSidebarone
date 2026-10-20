@@ -86,14 +86,18 @@ class HandleBehaviorFixesTest {
             )
         }
 
-        // Verify that only when a gesture is explicitly configured, sidebar content is created
+        // Verify that explicitly configuring gesture sets ACTION_OPEN_SIDEBAR and container starts with zero pages
         manager.configureGesture(newHandle.id, HandleGestures.SWIPE_RIGHT, HandleManager.ACTION_OPEN_SIDEBAR)
+        val handleAfterConfig = manager.getHandle(newHandle.id)
+        assertEquals(HandleManager.ACTION_OPEN_SIDEBAR, handleAfterConfig?.getActionForGesture(HandleGestures.SWIPE_RIGHT))
         val containerId = HandleManager.getContainerId(newHandle.id, HandleGestures.SWIPE_RIGHT)
         val pagesKey = HandleManager.getContainerPagesKey(containerId)
-        assertTrue(
-            "Container pages key must be created only after explicitly configuring gesture",
+        assertFalse(
+            "New container must not auto-clone default_hybrid under Phase 12.14 invariant",
             fakePrefs.contains(pagesKey)
         )
+        val stack = PageManager(fakeContext).getPageStack(containerId)
+        assertEquals(0, stack.size)
     }
 
     @Test

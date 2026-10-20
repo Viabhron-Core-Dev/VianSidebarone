@@ -327,3 +327,25 @@
 * How it was verified: local build only (`compile_applet` succeeded cleanly).
 * Any deviation from what was requested, and why: None. Calculator architecture, Internet Speed Monitor, and remaining page types were untouched.
 * Any known issue or follow-up needed: Awaiting physical-device verification of newly created Hybrid Grids on secondary gestures/handles running in `:heavy` via SurfaceControlViewHost.
+
+---
+
+* Timestamp: 2026-10-20T13:09:00-07:00
+* One-line summary of what was requested: Resolve unexpected build/test failure and complete Phase 12.14 verification across the test suite.
+* Exact files touched:
+  - app/src/main/java/com/example/core/HandleManager.kt
+  - app/src/main/java/com/example/feature/sidebar/HybridGridPageView.kt
+  - app/src/test/java/com/example/feature/sidebar/HeavyCalculatorSplitTest.kt
+  - app/src/test/java/com/example/core/HandleBehaviorFixesTest.kt
+  - app/src/test/java/com/example/feature/welcome/HandleStartupFlowTest.kt
+  - app/src/test/java/com/example/core/HandleGestureContainerTest.kt
+  - receipts/RECEIPTS_097.md
+* What was actually done:
+  - Handled Handle 1 Horizontal Swipe Migration (`HandleManager.kt`): Added `isSwipeReassignment` condition in `configureGesture` so when `handle_1` reassigns its primary sidebar gesture from `SWIPE_LEFT` to `SWIPE_RIGHT` (or vice versa), existing container state is seamlessly migrated via `migrateContainerData` and the old opposing swipe gesture is retired to `ACTION_NONE`, while strictly preserving multi-gesture coexistence for non-conflicting gestures (`LONG_PRESS`, `TAP`, `SWIPE_DOWN`, `SWIPE_UP`).
+  - Exposed Theme Background Drawable for JVM Unit Testing (`HybridGridPageView.kt`, `HeavyCalculatorSplitTest.kt`): Exposed `themeBackgroundDrawable: GradientDrawable?` on `HybridGridPageView` set during `applyThemeBackground(bgColor, isRight)` to enable JVM unit tests without Robolectric to assert background drawable shape and corner styling without stub `View.getBackground()` limitations.
+  - Aligned Legacy Test Suites with Phase 12.14 Zero-Page Invariant (`HandleBehaviorFixesTest.kt`, `HandleStartupFlowTest.kt`, `HandleGestureContainerTest.kt`): Updated older Phase 12.6 test assertions to match the Phase 12.14 specification where newly configured sidebar containers (secondary gestures on Handle 1, Handle 2+ containers) start with ZERO pages and do not automatically seed `default_hybrid_<containerId>`.
+  - Full Test Suite Execution: Ran `gradle :app:testDebugUnitTest` (all 223 tests passed cleanly in 10s) and verified `compile_applet` (succeeded).
+* How it was verified: local build only (`gradle :app:testDebugUnitTest` executed and passed all 223/223 tests; `compile_applet` succeeded cleanly).
+* Any deviation from what was requested, and why: None. Scoped strictly to resolving the test suite failures and stabilizing the Phase 12.14 implementation.
+* Any known issue or follow-up needed: Ready for on-device manual QA verification.
+

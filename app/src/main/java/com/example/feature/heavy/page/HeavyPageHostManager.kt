@@ -386,6 +386,7 @@ class HeavyPageHostManager private constructor(private val context: Context) {
                             if (backgroundColor != 0) {
                                 applyThemeBackground(backgroundColor, isRight)
                             }
+                            loadWidgets()
                         }
                     }
                     else -> {
@@ -395,14 +396,25 @@ class HeavyPageHostManager private constructor(private val context: Context) {
                     }
                 }
 
-                host.setView(pageView, width, height)
+                pageView.measure(
+                    View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
+                    View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
+                )
+                val desiredH = when (pageView) {
+                    is HybridGridPageView -> pageView.getCurrentHeightPx().takeIf { it > 0 } ?: pageView.measuredHeight
+                    else -> pageView.measuredHeight
+                }
+                val finalHostHeight = if (desiredH > 0) desiredH else height
+
+                host.setView(pageView, width, finalHostHeight)
                 val surfacePackage = host.surfacePackage
-                val holder = EmbeddedHostHolder(pageId, pageType, host, pageView, width, height)
+                val holder = EmbeddedHostHolder(pageId, pageType, host, pageView, width, finalHostHeight)
                 activeEmbeddedHosts[pageId] = holder
 
                 resultBundle = Bundle().apply {
                     putBoolean("success", true)
                     putParcelable("surfacePackage", surfacePackage)
+                    putInt("desiredHeight", finalHostHeight)
                 }
                 LogKeeper.log(context, TAG, "SurfaceControlViewHost created and SurfacePackage generated for '$pageId'")
             } catch (e: Throwable) {

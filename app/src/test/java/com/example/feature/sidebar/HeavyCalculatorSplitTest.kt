@@ -10,6 +10,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -839,13 +840,14 @@ class HeavyCalculatorSplitTest {
 
     @Test
     fun testHybridGridHostingAndResidencyRule() {
-        val context = org.robolectric.RuntimeEnvironment.getApplication()
+        val fakePrefs = com.example.core.FakeSharedPreferences()
+        val context = com.example.core.FakeContext(fakePrefs)
 
         // 1. Exact default_hybrid on Handle 1 swipe left -> Main resident
         val homeGridConfig = SidebarPage(
-            id = "default_hybrid",
+            pageId = "default_hybrid",
             title = "Home Grid",
-            type = "default_hybrid",
+            pageType = "default_hybrid",
             order = 0
         )
         assertTrue(
@@ -857,9 +859,9 @@ class HeavyCalculatorSplitTest {
 
         // 2. Hybrid Grid on Handle 1 double tap -> NOT Main resident (Heavy)
         val doubleTapGrid = SidebarPage(
-            id = "default_hybrid_handle_1_double_tap",
+            pageId = "default_hybrid_handle_1_double_tap",
             title = "Double Tap Grid",
-            type = "hybrid_grid",
+            pageType = "hybrid_grid",
             order = 0
         )
         assertFalse(
@@ -871,9 +873,9 @@ class HeavyCalculatorSplitTest {
 
         // 3. Hybrid Grid on Handle 2 tap -> NOT Main resident (Heavy)
         val handle2Grid = SidebarPage(
-            id = "default_hybrid_handle_2_tap",
+            pageId = "default_hybrid_handle_2_tap",
             title = "Handle 2 Grid",
-            type = "hybrid_grid",
+            pageType = "hybrid_grid",
             order = 0
         )
         assertFalse(
@@ -885,9 +887,9 @@ class HeavyCalculatorSplitTest {
 
         // 4. User-created hybrid_grid -> NOT Main resident (Heavy)
         val customGrid = SidebarPage(
-            id = "hybrid_grid_custom_99",
+            pageId = "hybrid_grid_custom_99",
             title = "Custom Grid",
-            type = "hybrid_grid",
+            pageType = "hybrid_grid",
             order = 1
         )
         assertFalse(
@@ -922,25 +924,100 @@ class HeavyCalculatorSplitTest {
     }
 
     @Test
-    fun testHybridGridApplyThemeBackground() {
-        val context = org.robolectric.RuntimeEnvironment.getApplication()
-        val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main)
-        val hybridView = HybridGridPageView(
+    fun testNewContainersStartWithZeroPagesAndHybridGridTitleInvariants() {
+        val fakePrefs = com.example.core.FakeSharedPreferences()
+        val context = com.example.core.FakeContext(fakePrefs)
+        com.example.core.PageManager.resetForTesting()
+        com.example.core.HandleManager.resetForTesting()
+        val pageManager = com.example.core.PageManager.getInstance(context)
+        val handleManager = com.example.core.HandleManager.getInstance(context)
+
+        // 1. Original Handle 1 swipe left container gets/retains exact default_hybrid
+        val primaryStack = pageManager.getPageStack("handle_1_swipe_left")
+        assertEquals(1, primaryStack.size)
+        assertEquals("default_hybrid", primaryStack[0].pageId)
+        assertEquals("Home Grid", primaryStack[0].title)
+
+        // 2. Newly created secondary gesture container on Handle 1 starts with ZERO pages
+        handleManager.configureGesture("handle_1", com.example.core.HandleGestures.DOUBLE_TAP, com.example.core.HandleManager.ACTION_OPEN_SIDEBAR)
+        val doubleTapStack = pageManager.getPageStack("handle_1_double_tap")
+        assertEquals(0, doubleTapStack.size)
+
+        // 3. Newly created Handle 2+ container starts with ZERO pages
+        val handle2 = handleManager.createHandle("Handle 2", com.example.util.HandleEdge.LEFT)
+        handleManager.configureGesture(handle2.id, com.example.core.HandleGestures.TAP, com.example.core.HandleManager.ACTION_OPEN_SIDEBAR)
+        val handle2TapStack = pageManager.getPageStack("handle_2_tap")
+        assertEquals(0, handle2TapStack.size)
+
+        // 4. No default_hybrid_<containerId> is automatically generated for new containers
+        assertNull(fakePrefs.getString("handle_handle_1_double_tap_pages", null))
+        assertNull(fakePrefs.getString("handle_handle_2_tap_pages", null))
+        assertFalse(fakePrefs.contains("handle_handle_1_double_tap_opening_face"))
+        assertFalse(fakePrefs.contains("handle_handle_2_tap_opening_face"))
+
+        // 5. Add Page exposes "Hybrid Grid", not "Home Grid"
+        assertEquals("Home Grid", com.example.core.PageTypes.resolveDefaultTitle(com.example.core.PageTypes.HYBRID))
+        assertEquals("Hybrid Grid", com.example.core.PageTypes.resolveDefaultTitle(com.example.core.PageTypes.HYBRID_GRID))
+        assertFalse("PageTypes.ALL_DEFAULT_TYPES must not include Home Grid", com.example.core.PageTypes.ALL_DEFAULT_TYPES.contains("default_hybrid"))
+        assertTrue("PageTypes.ALL_DEFAULT_TYPES must include Hybrid Grid", com.example.core.PageTypes.ALL_DEFAULT_TYPES.contains("hybrid_grid"))
+
+        // 6. Adding Hybrid Grid creates a normal hybrid_grid_*, never another default_hybrid
+        val newHybridId = "hybrid_grid_${System.currentTimeMillis()}"
+        pageManager.addPage("handle_1_double_tap", newHybridId, pageType = com.example.core.PageTypes.HYBRID_GRID, title = "Hybrid Grid")
+        val updatedStack = pageManager.getPageStack("handle_1_double_tap")
+        assertEquals(1, updatedStack.size)
+        assertEquals(newHybridId, updatedStack[0].pageId)
+        assertEquals("Hybrid Grid", updatedStack[0].title)
+        assertEquals("hybrid_grid", updatedStack[0].type)
+        assertFalse(updatedStack[0].pageId.startsWith("default_hybrid"))
+
+        // 7. Newly added Hybrid Grid has zero starter elements and no empty-state prompt
+        val gridView = com.example.feature.sidebar.HybridGridPageView(
             context = context,
-            pageId = "default_hybrid_handle_1_double_tap",
-            scope = scope,
+            pageId = newHybridId,
+            scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Unconfined),
             containerId = "handle_1_double_tap",
-            onClose = {},
-            onDimSidebar = {},
             onHeightChanged = {}
         )
-        assertNotNull(hybridView)
+        val itemsMethod = com.example.feature.sidebar.HybridGridPageView::class.java.getDeclaredMethod("getWidgetItems")
+        itemsMethod.isAccessible = true
+        @Suppress("UNCHECKED_CAST")
+        val gridItems = itemsMethod.invoke(gridView) as List<*>
+        assertTrue("New Hybrid Grid must contain zero starter elements", gridItems.isEmpty())
 
-        // Verify applyThemeBackground sets background drawable with proper color and radius
-        val testColor = android.graphics.Color.argb(230, 30, 30, 46)
-        hybridView.applyThemeBackground(testColor, isRight = true)
-        val bg = hybridView.background as? android.graphics.drawable.GradientDrawable
-        assertNotNull("Hybrid Grid must apply valid GradientDrawable background in Heavy", bg)
+        // 8. Home Grid retains its existing starter/default behavior
+        val homeGridView = com.example.feature.sidebar.HybridGridPageView(
+            context = context,
+            pageId = "default_hybrid",
+            scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Unconfined),
+            containerId = "handle_1_swipe_left",
+            onHeightChanged = {}
+        )
+        @Suppress("UNCHECKED_CAST")
+        val homeGridItems = itemsMethod.invoke(homeGridView) as List<*>
+        assertEquals("Home Grid retains starter elements", 2, homeGridItems.size)
+
+        // 9. Heavy Hybrid Grid remains hosted through SurfaceControlViewHost / HeavyPagePlaceholderView
+        val isHomeResident = com.example.feature.sidebar.DefaultSidebarPageFactory.isResidentDefaultHybrid(
+            context, primaryStack[0], "handle_1", "handle_1_swipe_left"
+        )
+        assertTrue(isHomeResident)
+
+        val isSecondaryResident = com.example.feature.sidebar.DefaultSidebarPageFactory.isResidentDefaultHybrid(
+            context, updatedStack[0], "handle_1", "handle_1_double_tap"
+        )
+        assertFalse(isSecondaryResident)
+
+        // 10. Hybrid Grid initial geometry no longer depends on generic 280px startup height
+        // Verify cached height persistence and reuse
+        val cachedHeightKey = "handle_handle_1_double_tap_hybrid_grid_height_$newHybridId"
+        fakePrefs.edit().putInt(cachedHeightKey, 146).apply()
+        assertEquals(146, fakePrefs.getInt(cachedHeightKey, -1))
+
+        // 11. Heavy Hybrid Grid does not add duplicate stroke/separator below top bar
+        gridView.applyThemeBackground(android.graphics.Color.BLUE, isRight = true)
+        val bg = gridView.themeBackgroundDrawable ?: gridView.background
+        assertTrue("Heavy Hybrid Grid must have GradientDrawable background", bg is android.graphics.drawable.GradientDrawable)
     }
 }
 

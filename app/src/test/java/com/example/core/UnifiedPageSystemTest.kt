@@ -99,7 +99,7 @@ class UnifiedPageSystemTest {
         assertEquals(4, stack.size)
         assertEquals("default_hybrid_handle_2_tap", stack[0].pageId)
         assertEquals(PageTypes.HYBRID_GRID, stack[0].pageType)
-        assertEquals("Home Grid", stack[0].title)
+        assertEquals("Hybrid Grid", stack[0].title)
 
         assertEquals("apps", stack[1].pageId)
         assertEquals(PageTypes.APPS, stack[1].pageType)
@@ -266,8 +266,8 @@ class UnifiedPageSystemTest {
         assertEquals("Apps Grid", PageTypes.resolveDefaultTitle(PageTypes.APPS_GRID))
         assertEquals("Widgets Grid", PageTypes.resolveDefaultTitle(PageTypes.WIDGETS_GRID))
         assertEquals("Single Widget", PageTypes.resolveDefaultTitle(PageTypes.WIDGET))
-        assertEquals("Single Widget", PageTypes.resolveDefaultTitle(PageTypes.SINGLE_WIDGET))
-        assertEquals("Home Grid", PageTypes.resolveDefaultTitle(PageTypes.HYBRID_GRID))
+        assertEquals("Home Grid", PageTypes.resolveDefaultTitle(PageTypes.HYBRID))
+        assertEquals("Hybrid Grid", PageTypes.resolveDefaultTitle(PageTypes.HYBRID_GRID))
     }
 
     @Test

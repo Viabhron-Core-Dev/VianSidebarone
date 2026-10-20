@@ -6,6 +6,7 @@ import android.graphics.Color
 import com.example.core.HandleConfig
 import com.example.core.HandleGestures
 import com.example.core.HandleManager
+import com.example.core.PageManager
 import com.example.util.HandleEdge
 import com.example.util.HandleShape
 import org.junit.Assert.assertEquals
@@ -83,9 +84,11 @@ class HandleStartupFlowTest {
         val containerId = HandleManager.getContainerId("handle_2", HandleGestures.SWIPE_RIGHT)
         assertEquals("handle_2_swipe_right", containerId)
 
-        // Verify independent container pages initialized
+        // Verify independent container starts with zero pages under Phase 12.14 invariant
         val pagesKey = HandleManager.getContainerPagesKey(containerId)
-        assertTrue("Container pages must be seeded", fakePrefs.contains(pagesKey))
+        assertFalse("New container must not auto-clone default_hybrid", fakePrefs.contains(pagesKey))
+        val stack = PageManager(fakeContext).getPageStack(containerId)
+        assertEquals(0, stack.size)
 
         // Step 9 & 10: Handle is active and visible
         val activeHandles = manager.getActiveHandles()

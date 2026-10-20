@@ -197,12 +197,9 @@ class DefaultSidebarPageFactory(
             if (cleanHandleId != "handle_1" && cleanHandleId != "sidebar") {
                 return false
             }
-            val handleManager = HandleManager.getInstance(context)
-            val primaryContainerId = handleManager.getFirstHandlePrimaryContainerId()
             return containerId == "sidebar" ||
                     containerId == "handle_1" ||
-                    containerId == "handle_1_swipe_left" ||
-                    containerId == primaryContainerId
+                    containerId == "handle_1_swipe_left"
         }
     }
 }

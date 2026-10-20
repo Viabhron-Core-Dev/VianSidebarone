@@ -1,6 +1,7 @@
 package com.example.feature.sidebar
 import com.example.feature.system_hub.VianSideAccessibilityService
 import com.example.core.AppWidgetHelper
+import com.example.core.OverlaySyncManager
 import com.example.feature.system_hub.DisplayHandler
 import com.example.feature.system_hub.MediaVolumeHandler
 import com.example.feature.system_hub.QuickTileHandler
@@ -136,6 +137,9 @@ class HybridGridPageView(
         }
     }
 
+    var themeBackgroundDrawable: android.graphics.drawable.GradientDrawable? = null
+        private set
+
     fun applyThemeBackground(bgColor: Int = 0, isRight: Boolean = true) {
         val finalColor = if (bgColor != 0) {
             bgColor
@@ -150,18 +154,18 @@ class HybridGridPageView(
             Color.argb(alphaInt, r, g, b)
         }
 
-        val density = resources.displayMetrics.density
+        val density = try { resources?.displayMetrics?.density ?: 1f } catch (_: Throwable) { 1f }
         val radius = 16f * density
         val bgDrawable = android.graphics.drawable.GradientDrawable().apply {
             shape = android.graphics.drawable.GradientDrawable.RECTANGLE
             setColor(finalColor)
-            setStroke((1 * density).toInt(), Color.argb(80, 255, 255, 255))
             cornerRadii = if (isRight) {
                 floatArrayOf(0f, 0f, 0f, 0f, 0f, 0f, radius, radius)
             } else {
                 floatArrayOf(0f, 0f, 0f, 0f, radius, radius, 0f, 0f)
             }
         }
+        themeBackgroundDrawable = bgDrawable
         background = bgDrawable
     }
 
@@ -353,12 +357,12 @@ class HybridGridPageView(
     }
 
     fun getCurrentHeightPx(): Int {
-        if (gridLayout.childCount == 0) {
-            return 0
-        }
         val lpHeight = gridLayout.layoutParams?.height ?: 0
         if (lpHeight > 0) return lpHeight
-        
+        if (gridLayout.childCount == 0) {
+            val density = context.resources.displayMetrics.density
+            return (140 * density).toInt()
+        }
         gridLayout.measure(
             View.MeasureSpec.makeMeasureSpec(context.resources.displayMetrics.widthPixels, View.MeasureSpec.AT_MOST),
             View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
@@ -382,29 +386,11 @@ class HybridGridPageView(
         val items = getWidgetItems()
         if (items.isEmpty()) {
             val density = context.resources.displayMetrics.density
-            val emptyHeight = (120 * density).toInt()
-            val emptyView = LinearLayout(context).apply {
-                orientation = LinearLayout.VERTICAL
-                gravity = Gravity.CENTER
-                val pad = (16 * density).toInt()
-                setPadding(pad, pad, pad, pad)
-                val tv = TextView(context).apply {
-                    text = if (pageId == "default_hybrid") {
-                        "Empty Home Grid\nTap to add widgets & apps"
-                    } else {
-                        "Empty Hybrid Grid\nTap to add widgets & apps"
-                    }
-                    setTextColor(Color.LTGRAY)
-                    textSize = 13f
-                    gravity = Gravity.CENTER
-                }
-                addView(tv)
-                setOnClickListener {
-                    onEditClicked()
-                }
-            }
-            gridLayout.addView(emptyView, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, emptyHeight))
+            val emptyHeight = (140 * density).toInt()
             gridLayout.layoutParams = FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, emptyHeight)
+            val heightKey = "handle_${containerId}_hybrid_grid_height_$pageId"
+            prefs.edit().putInt(heightKey, emptyHeight).apply()
+            OverlaySyncManager.syncInt(context, heightKey, emptyHeight)
             onHeightChanged(emptyHeight)
             return
         }
@@ -799,8 +785,11 @@ class HybridGridPageView(
                     e.printStackTrace()
                 }
             }
-            gridLayout.layoutParams = FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, maxHeight)
-            onHeightChanged(getCurrentHeightPx())
+            val finalH = getCurrentHeightPx()
+            val heightKey = "handle_${containerId}_hybrid_grid_height_$pageId"
+            prefs.edit().putInt(heightKey, finalH).apply()
+            OverlaySyncManager.syncInt(context, heightKey, finalH)
+            onHeightChanged(finalH)
     }
 
     private fun showFolderPopup(anchor: View, folder: SidebarItem.Folder, appsManager: SidebarAppsManager) {

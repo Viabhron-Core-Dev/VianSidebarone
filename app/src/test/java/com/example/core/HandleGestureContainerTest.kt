@@ -370,9 +370,9 @@ class HandleGestureContainerTest {
         val pages1 = pageManager.getPageStack(container1)
         assertEquals("default_hybrid", pages1.first().pageId)
 
-        // Handle 2 container uses default_hybrid_handle_2_swipe_left to avoid collision
+        // Handle 2 container starts with ZERO pages (no automatic default_hybrid cloning)
         val pages2 = pageManager.getPageStack(container2)
-        assertEquals("default_hybrid_$container2", pages2.first().pageId)
+        assertTrue(pages2.isEmpty())
 
         // Verify saving apps in container 1 does not bleed to container 2
         fakePrefs.edit().putString("sidebar_apps_${container1}_apps", "[app_a,app_b]").apply()
@@ -445,17 +445,16 @@ class HandleGestureContainerTest {
         assertEquals("default_hybrid", reordered1[1].pageId)
         assertEquals("apps_page_1", reordered1[2].pageId)
 
-        // Confirm Container 2 remains completely isolated with its own default page
+        // Confirm Container 2 starts with zero pages initially
         val stack2 = pageManager.getPageStack(container2)
-        assertEquals(1, stack2.size)
-        assertEquals("default_hybrid_$container2", stack2[0].pageId)
+        assertEquals(0, stack2.size)
         assertNull(pageManager.getSelectedPageId(container2))
 
         // Add Media Player to Container 2
         pageManager.addPage(container2, "media_player_2")
         val updatedStack2 = pageManager.getPageStack(container2)
-        assertEquals(2, updatedStack2.size)
-        assertEquals("media_player_2", updatedStack2[1].pageId)
+        assertEquals(1, updatedStack2.size)
+        assertEquals("media_player_2", updatedStack2[0].pageId)
 
         // Delete page from Container 1
         pageManager.removePage(container1, "default_hybrid")
@@ -485,18 +484,24 @@ class HandleGestureContainerTest {
         assertTrue(targetDirect is GestureTarget.Action)
         assertEquals("app:com.android.chrome", (targetDirect as GestureTarget.Action).actionKey)
 
-        // In Container for SWIPE_RIGHT: manage pages
+        // In Container for SWIPE_RIGHT: starts with zero pages under Phase 12.14
         val initialStack = pageManager.getPageStack(containerId)
-        assertEquals(1, initialStack.size)
+        assertEquals(0, initialStack.size)
 
         // Add a Single Widget page with custom title
         val widgetPageId = "widget_news_feed"
         pageManager.addPage(containerId, widgetPageId, position = -1, pageType = "widget", title = "Single Widget")
         val stackAfterAdd = pageManager.getPageStack(containerId)
-        assertEquals(2, stackAfterAdd.size)
+        assertEquals(1, stackAfterAdd.size)
         val addedPage = stackAfterAdd.first { it.pageId == widgetPageId }
         assertEquals("widget", addedPage.type)
         assertEquals("Single Widget", addedPage.title)
+
+        // Add a second page to test multi-page management (reorder, opening face, delete)
+        val secondPageId = "hybrid_grid_custom"
+        pageManager.addPage(containerId, secondPageId, position = -1, pageType = com.example.core.PageTypes.HYBRID_GRID, title = "Hybrid Grid")
+        val stackWithTwo = pageManager.getPageStack(containerId)
+        assertEquals(2, stackWithTwo.size)
 
         // Rename the page
         pageManager.renamePage(containerId, widgetPageId, "Morning News Feed")
@@ -508,13 +513,13 @@ class HandleGestureContainerTest {
         pageManager.saveSelectedPageId(containerId, widgetPageId)
         assertEquals(widgetPageId, pageManager.getSelectedPageId(containerId))
 
-        // Reorder: move to top
+        // Reorder: move second page to top
         pageManager.reorderPages(containerId, 1, 0)
         val reorderedStack = pageManager.getPageStack(containerId)
-        assertEquals(widgetPageId, reorderedStack[0].pageId)
+        assertEquals(secondPageId, reorderedStack[0].pageId)
 
-        // Remove the default hybrid page
-        pageManager.removePage(containerId, initialStack[0].pageId)
+        // Remove the second page
+        pageManager.removePage(containerId, secondPageId)
         val finalStack = pageManager.getPageStack(containerId)
         assertEquals(1, finalStack.size)
         assertEquals(widgetPageId, finalStack[0].pageId)

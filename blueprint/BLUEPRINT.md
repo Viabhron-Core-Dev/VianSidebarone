@@ -207,15 +207,22 @@
     - `onDimSidebar` -> `HeavyProcessHost.getInstance(context).requestSetDimmed(dimmed, containerId)`
     - `onHeightChanged` -> `reportDesiredPageHeight(pageId, newH)`
   - Applies theme background (`applyThemeBackground`) with configured color, transparency, and corner radii matching the Sidebar theme.
-- [x] **Home Grid Main-Residency Preservation**:
-  - Preserved `SidebarPageFactory.isResidentDefaultHybrid` ensuring ONLY the original `default_hybrid` on Handle 1's primary gesture (`handle_1_swipe_left`, `sidebar`, `handle_1`, or `getFirstHandlePrimaryContainerId()`) is instantiated in Main.
-  - All other Hybrid Grids (other handles, other gestures, user-created grids, secondary grids) route to `HeavyPagePlaceholderView` and run in `:heavy`.
-- [x] **Empty Hybrid Grid Behavior & Geometry**:
-  - Gated default tiles (`ebook_reader`, `log_keeper`) strictly to `pageId == "default_hybrid"`. Newly created Hybrid Grids start with empty item list `[]`.
-  - Empty Hybrid Grids mount cleanly, render the Sidebar theme background and rounded bottom corner, display the "Empty Hybrid Grid\nTap to add widgets & apps" prompt, and report valid geometry (`120dp`) without exposing transparent/broken punch-holes.
-  - Tapping the empty prompt launches `HybridGridEditActivity` with `PAGE_ID` and `CONTAINER_ID` and closes the Sidebar via `onClose` IPC callback.
-- [x] **Heavy Action Dispatching & Accessibility Forwarding**:
-  - In `ElementActionDispatcher.handleSystemAction`, detected `:heavy` process execution (`LogKeeper.getProcessName(context).endsWith(":heavy")`) and routed accessibility actions and `force_stop_running_apps` across IPC to Main via `HeavyProcessHost.requestTriggerAction`, where `VianSideAccessibilityService.instance` is active.
+- [x] **Home Grid Main-Residency & Zero-Page Container Invariant**:
+  - Strictly enforced ownership rule: ONLY the original Handle 1 -> Swipe Left container (`handle_1_swipe_left`, `sidebar`, `handle_1`) gets the special `default_hybrid` Home Grid with its default starter tiles.
+  - All other newly created Sidebar containers (secondary gestures on Handle 1, Handle 2+ containers) start with ZERO pages.
+  - Eliminated automatic generation/cloning of `default_hybrid_<containerId>`.
+- [x] **Add Page List & Terminology Alignment**:
+  - Addable grid page type strictly displays and resolves as "Hybrid Grid", creating normal `hybrid_grid_*` pages running in `:heavy`.
+  - "Home Grid" is reserved exclusively for the special resident page and never appears as an addable type.
+- [x] **Truly Empty Hybrid Grid**:
+  - Newly created Hybrid Grids start completely empty: zero starter tiles, zero dummy elements, zero empty-state text, rendering the clean themed background. Edit Mode remains the mechanism for populating it.
+  - Storage isolation strictly enforced under `"handle_${containerId}_hybrid_grid_$pageId"`.
+- [x] **Heavy Hybrid Grid Startup Geometry & Jerkiness Elimination**:
+  - Called `loadWidgets()` upon instantiation in `:heavy` before SVCH measurement so `:heavy` reports legitimate initial desired height across Binder.
+  - In Main `SidebarView.calculateTargetHeight`, reused legitimate cached height (`"handle_${containerId}_hybrid_grid_height_${page.id}"`) avoiding generic 280px fallbacks.
+  - In `HeavyPagePlaceholderView`, deferred `SurfaceView.alpha = 1f` unmasking until stable bounds layout completes when initial dimensions differ.
+- [x] **Horizontal Line Below Sidebar Top Bar Removal**:
+  - Removed duplicated `setStroke` from `HybridGridPageView.applyThemeBackground`, preserving Main's ownership of the Sidebar shell/header chrome and eliminating the horizontal border under the top bar.
 - [ ] **Physical On-Device Verification**: Awaiting physical testing of newly created Hybrid Grids on secondary gestures/handles running in `:heavy` via SurfaceControlViewHost.
 
 ---

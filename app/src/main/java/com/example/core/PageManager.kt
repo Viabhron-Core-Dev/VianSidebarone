@@ -41,7 +41,8 @@ object PageTypes {
     )
 
     fun resolveDefaultTitle(pageType: String): String = when (pageType) {
-        HYBRID, HYBRID_GRID, "home_grid" -> "Home Grid"
+        HYBRID, "home_grid" -> "Home Grid"
+        HYBRID_GRID -> "Hybrid Grid"
         APPS, APPS_GRID -> "Apps Grid"
         WIDGETS, WIDGETS_GRID -> "Widgets Grid"
         WIDGET, SINGLE_WIDGET -> "Single Widget"
@@ -173,9 +174,13 @@ data class SidebarPage(
                 rawTitle.equals("widget", ignoreCase = true) ||
                 rawTitle.equals("single_widget", ignoreCase = true)
             val sanitizedTitle = if (isKnownTypeToken) {
-                PageTypes.resolveDefaultTitle(sanitizedType)
-            } else if (rawTitle == "Home Grid" && !rawId.startsWith("default_hybrid")) {
-                "Hybrid"
+                if (sanitizedType == PageTypes.HYBRID_GRID && rawId == "default_hybrid") {
+                    "Home Grid"
+                } else {
+                    PageTypes.resolveDefaultTitle(sanitizedType)
+                }
+            } else if (rawTitle == "Home Grid" && rawId != "default_hybrid") {
+                "Hybrid Grid"
             } else {
                 rawTitle
             }
@@ -212,7 +217,12 @@ data class SidebarPage(
             )
         }
 
-        fun createDefault(id: String, type: String = PageTypes.HYBRID_GRID, title: String = "Home Grid", order: Int = 0): SidebarPage {
+        fun createDefault(
+            id: String,
+            type: String = PageTypes.HYBRID_GRID,
+            title: String = if (id == "default_hybrid") "Home Grid" else if (type == PageTypes.HYBRID_GRID) "Hybrid Grid" else PageTypes.resolveDefaultTitle(type),
+            order: Int = 0
+        ): SidebarPage {
             return SidebarPage(
                 pageId = id,
                 pageType = type,
@@ -256,43 +266,46 @@ class PageManager internal constructor(private val context: Context) {
         }
 
         val isFirstHandlePrimary = (containerId == "sidebar" || containerId == "handle_1" ||
-            containerId == "handle_1_swipe_left" || containerId == handleManager.getFirstHandlePrimaryContainerId())
-
-        val defaultPageId = if (isFirstHandlePrimary) {
-            "default_hybrid"
-        } else {
-            "default_hybrid_$containerId"
-        }
-
-        val defaultPage = SidebarPage.createDefault(
-            id = defaultPageId,
-            type = PageTypes.HYBRID_GRID,
-            title = "Home Grid",
-            order = 0
-        )
-
-        // Ensure default hybrid grid elements exist in storage (both container-isolated and legacy keys)
-        val isolatedGridKey = "handle_${containerId}_hybrid_grid_$defaultPageId"
-        if (!prefs.contains(isolatedGridKey) && !prefs.contains("hybrid_grid_$defaultPageId")) {
-            val jsonStr = """[{"id": "system:ebook_reader", "cols": 1, "rows": 1, "x": 0, "y": 0}, {"id": "system:log_keeper", "cols": 1, "rows": 1, "x": 1, "y": 0}]"""
-            prefs.edit()
-                .putString(isolatedGridKey, jsonStr)
-                .putString("hybrid_grid_$defaultPageId", jsonStr)
-                .putInt("handle_${containerId}_hybrid_grid_cols_$defaultPageId", 3)
-                .putInt("hybrid_grid_cols_$defaultPageId", 3)
-                .putBoolean("handle_${containerId}_sidebar_wrap_content", true)
-                .apply()
-        }
+            containerId == "handle_1_swipe_left")
 
         if (raw.isNullOrBlank()) {
-            return listOf(defaultPage)
+            if (isFirstHandlePrimary) {
+                val defaultPage = SidebarPage.createDefault(
+                    id = "default_hybrid",
+                    type = PageTypes.HYBRID_GRID,
+                    title = "Home Grid",
+                    order = 0
+                )
+                // Ensure default hybrid grid elements exist in storage for the resident Home Grid
+                val isolatedGridKey = "handle_${containerId}_hybrid_grid_default_hybrid"
+                if (!prefs.contains(isolatedGridKey) && !prefs.contains("hybrid_grid_default_hybrid")) {
+                    val jsonStr = """[{"id": "system:ebook_reader", "cols": 1, "rows": 1, "x": 0, "y": 0}, {"id": "system:log_keeper", "cols": 1, "rows": 1, "x": 1, "y": 0}]"""
+                    prefs.edit()
+                        .putString(isolatedGridKey, jsonStr)
+                        .putString("hybrid_grid_default_hybrid", jsonStr)
+                        .putInt("handle_${containerId}_hybrid_grid_cols_default_hybrid", 3)
+                        .putInt("hybrid_grid_cols_default_hybrid", 3)
+                        .putBoolean("handle_${containerId}_sidebar_wrap_content", true)
+                        .apply()
+                }
+                return listOf(defaultPage)
+            } else {
+                return emptyList()
+            }
         }
 
+        val defaultPageId = if (isFirstHandlePrimary) "default_hybrid" else ""
         val parsed = parseRawPagesString(raw, defaultPageId)
-        val result = if (parsed.isEmpty()) listOf(defaultPage) else parsed
+        val result = if (parsed.isEmpty()) {
+            if (isFirstHandlePrimary) {
+                listOf(SidebarPage.createDefault("default_hybrid", PageTypes.HYBRID_GRID, "Home Grid", 0))
+            } else {
+                emptyList()
+            }
+        } else parsed
 
         // Auto-migrate to isolated container key if loaded from fallback key or legacy comma-separated string
-        if (raw != prefs.getString(isolatedKey, null) || !raw.trim().startsWith("[")) {
+        if (result.isNotEmpty() && (raw != prefs.getString(isolatedKey, null) || !raw.trim().startsWith("["))) {
             savePageStack(containerId, result)
         }
 
@@ -765,13 +778,17 @@ class PageManager internal constructor(private val context: Context) {
             } else null
 
             val pagesJson = containerSpecificJson ?: handlePagesJson
-            val defaultPageId = if (rawHandleId == "sidebar" || rawHandleId == "sidebar_swipe_left") "default_hybrid" else "default_hybrid_$rawHandleId"
-            val defaultPage = SidebarPage.createDefault(defaultPageId, PageTypes.HYBRID_GRID, "Home Grid", 0)
+            val isFirstHandlePrimary = (rawHandleId == "sidebar" || rawHandleId == "sidebar_swipe_left" ||
+                rawHandleId == "handle_1" || rawHandleId == "handle_1_swipe_left")
+            val defaultPageId = if (isFirstHandlePrimary) "default_hybrid" else ""
+            val defaultPage = SidebarPage.createDefault("default_hybrid", PageTypes.HYBRID_GRID, "Home Grid", 0)
 
-            if (pagesJson == null) return listOf(defaultPage)
+            if (pagesJson == null) return if (isFirstHandlePrimary) listOf(defaultPage) else emptyList()
             val parsed = parseRawPagesString(pagesJson, defaultPageId)
-            val result = if (parsed.isEmpty()) listOf(defaultPage) else parsed
-            if (containerSpecificJson == null || !pagesJson.trim().startsWith("[")) {
+            val result = if (parsed.isEmpty()) {
+                if (isFirstHandlePrimary) listOf(defaultPage) else emptyList()
+            } else parsed
+            if (result.isNotEmpty() && (containerSpecificJson == null || !pagesJson.trim().startsWith("["))) {
                 savePagesToPrefs(prefs, rawHandleId, result)
             }
             return result

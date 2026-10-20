@@ -681,6 +681,9 @@ fun ContainerPageManagementScreen(
 ) {
     val context = LocalContext.current
     val pageManager = remember { com.example.core.PageManager.getInstance(context) }
+    val isFirstHandlePrimary = remember(containerId) {
+        containerId == "sidebar" || containerId == "handle_1" || containerId == "handle_1_swipe_left"
+    }
     var pages by remember { mutableStateOf(pageManager.getPageStack(containerId)) }
     var selectedFaceId by remember { mutableStateOf(pageManager.getOpeningFaceId(containerId) ?: pages.firstOrNull()?.pageId ?: "") }
     var showAddPageDialog by remember { mutableStateOf(false) }
@@ -830,8 +833,8 @@ fun ContainerPageManagementScreen(
                                     Text("▼", style = MaterialTheme.typography.bodyMedium)
                                 }
                             }
-                            // Delete button (can delete if more than 1 page)
-                            if (pages.size > 1) {
+                            // Delete button (enforce minimum 1 page on Home Grid, allow zero on secondary containers)
+                            if (pages.size > 1 || !isFirstHandlePrimary) {
                                 IconButton(
                                     onClick = {
                                         pageManager.removePage(containerId, page.pageId)
@@ -893,7 +896,7 @@ fun ContainerPageManagementScreen(
 
     if (showAddPageDialog) {
         val supportedTypes = listOf(
-            com.example.core.PageTypes.HYBRID_GRID to "Home Grid",
+            com.example.core.PageTypes.HYBRID_GRID to "Hybrid Grid",
             com.example.core.PageTypes.APPS to "Apps Grid",
             com.example.core.PageTypes.WIDGETS_GRID to "Widgets Grid",
             com.example.core.PageTypes.WIDGET to "Single Widget",

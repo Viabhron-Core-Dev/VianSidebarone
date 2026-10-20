@@ -184,18 +184,27 @@ class HeavyPagePlaceholderView(
                 if (reply != null && reply.getBoolean("success")) {
                     @Suppress("DEPRECATION")
                     val surfacePackage = reply.getParcelable<android.view.SurfaceControlViewHost.SurfacePackage>("surfacePackage")
+                    val initialDesiredH = reply.getInt("desiredHeight", -1).takeIf { it > 0 } ?: pendingDesiredHeightPx.takeIf { it > 0 }
                     if (surfacePackage != null && isSelected && isMountRequested) {
                         try {
                             (currentSurfacePackage as? android.view.SurfaceControlViewHost.SurfacePackage)?.release()
                         } catch (_: Throwable) {}
                         currentSurfacePackage = surfacePackage
+                        if (initialDesiredH != null && initialDesiredH > 0) {
+                            applyDesiredHeight(initialDesiredH, forceApply = true)
+                        }
                         sv.setChildSurfacePackage(surfacePackage)
                         isEmbeddedAttached = true
-                        sv.alpha = 1f
-                        LogKeeper.log(context, TAG, "Successfully embedded SurfacePackage for '${config.id}' in Main SurfaceView")
-                        if (pendingDesiredHeightPx > 0) {
-                            applyDesiredHeight(pendingDesiredHeightPx)
+                        if (initialDesiredH != null && initialDesiredH > 0 && initialDesiredH != height) {
+                            post {
+                                if (isEmbeddedAttached && isSelected) {
+                                    sv.alpha = 1f
+                                }
+                            }
+                        } else {
+                            sv.alpha = 1f
                         }
+                        LogKeeper.log(context, TAG, "Successfully embedded SurfacePackage for '${config.id}' in Main SurfaceView (initialDesiredH=$initialDesiredH)")
                     } else {
                         LogKeeper.log(context, TAG, "SurfacePackage received but null or unselected (isSelected=$isSelected)")
                         try {
@@ -359,10 +368,12 @@ class HeavyPagePlaceholderView(
         }
     }
 
-    private fun applyDesiredHeight(newHeight: Int) {
+    fun getReportedDesiredHeightPx(): Int = desiredHeightPx.takeIf { it > 0 } ?: pendingDesiredHeightPx.takeIf { it > 0 } ?: 0
+
+    private fun applyDesiredHeight(newHeight: Int, forceApply: Boolean = false) {
         if (newHeight <= 0) return
         pendingDesiredHeightPx = newHeight
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && !isEmbeddedAttached) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && !isEmbeddedAttached && !forceApply) {
             LogKeeper.log(context, TAG, "Deferring desired height $newHeight for '${config.id}' until SurfacePackage is attached")
             return
         }
@@ -377,7 +388,7 @@ class HeavyPagePlaceholderView(
             LogKeeper.log(context, TAG, "Desired height $newHeight confirmed unchanged for '${config.id}' in Main")
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            if (isEmbeddedAttached && currentHostWidth > 0) {
+            if (isEmbeddedAttached && currentHostWidth > 0 && changed) {
                 connectionManager.relayoutSurfaceHost(config.id, currentHostWidth, newHeight)
             }
         } else {

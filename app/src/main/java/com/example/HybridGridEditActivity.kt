@@ -577,8 +577,8 @@ fun loadHybridLocalItems(prefs: android.content.SharedPreferences, pageId: Strin
         else isolatedKey
     var jsonStr = prefs.getString(key, null)
     val isModified = prefs.getBoolean("handle_${containerId}_hybrid_grid_modified_$pageId", prefs.getBoolean("hybrid_grid_modified_$pageId", false))
-    if (jsonStr == null || (jsonStr == "[]" && pageId.startsWith("default_hybrid") && !isModified)) {
-        if (pageId.startsWith("default_hybrid")) {
+    if (jsonStr == null || (jsonStr == "[]" && pageId == "default_hybrid" && !isModified)) {
+        if (pageId == "default_hybrid") {
             jsonStr = """[{"id": "system:ebook_reader", "cols": 1, "rows": 1, "x": 0, "y": 0}, {"id": "system:log_keeper", "cols": 1, "rows": 1, "x": 1, "y": 0}]"""
         } else {
             jsonStr = "[]"
