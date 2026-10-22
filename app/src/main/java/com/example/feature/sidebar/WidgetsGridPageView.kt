@@ -40,8 +40,41 @@ class WidgetsGridPageView(
     private val pageId: String,
     private val scope: CoroutineScope,
     private val containerId: String = "sidebar",
+    private val onClose: (() -> Unit)? = null,
     private val onHeightChanged: (Int) -> Unit
 ) : FrameLayout(context), SidebarPageControllable {
+
+    var themeBackgroundDrawable: android.graphics.drawable.GradientDrawable? = null
+        private set
+
+    fun applyThemeBackground(bgColor: Int = 0, isRight: Boolean = true) {
+        val finalColor = if (bgColor != 0) {
+            bgColor
+        } else {
+            val opacity = prefs.getFloat("handle_${containerId}_sidebar_transparency", prefs.getFloat("sidebar_transparency", 0.9f))
+            val alphaInt = (opacity * 255).toInt().coerceIn(0, 255)
+            val colorHex = prefs.getString("handle_${containerId}_sidebar_color", prefs.getString("sidebar_color", "#1E1E2E")) ?: "#1E1E2E"
+            val baseColor = try { Color.parseColor(colorHex) } catch (e: Exception) { Color.parseColor("#1E1E2E") }
+            val r = Color.red(baseColor)
+            val g = Color.green(baseColor)
+            val b = Color.blue(baseColor)
+            Color.argb(alphaInt, r, g, b)
+        }
+
+        val density = try { resources?.displayMetrics?.density ?: 1f } catch (_: Throwable) { 1f }
+        val radius = 16f * density
+        val bgDrawable = android.graphics.drawable.GradientDrawable().apply {
+            shape = android.graphics.drawable.GradientDrawable.RECTANGLE
+            setColor(finalColor)
+            cornerRadii = if (isRight) {
+                floatArrayOf(0f, 0f, 0f, 0f, 0f, 0f, radius, radius)
+            } else {
+                floatArrayOf(0f, 0f, 0f, 0f, radius, radius, 0f, 0f)
+            }
+        }
+        themeBackgroundDrawable = bgDrawable
+        background = bgDrawable
+    }
 
     private val prefs = context.getSharedPreferences("FloatingReaderPrefs", Context.MODE_PRIVATE)
 
@@ -108,6 +141,7 @@ class WidgetsGridPageView(
 
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
+        AppWidgetHelper.startListening(context)
         post { loadWidgets() }
         val filter = IntentFilter()
         filter.addAction("WIDGET_ADDED_TO_GRID")
@@ -512,6 +546,7 @@ class WidgetsGridPageView(
             addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
         }
         context.startActivity(intent)
+        onClose?.invoke()
         context.sendBroadcast(android.content.Intent("com.example.CLOSE_SIDEBAR"))
     }
 }

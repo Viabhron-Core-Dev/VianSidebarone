@@ -17,10 +17,17 @@ import com.example.core.ipc.HeavyCommand
 import com.example.core.ipc.HeavyEvent
 import com.example.core.ipc.HeavyEventType
 import com.example.core.ipc.HeavyProcessHost
+import com.example.core.AppWidgetHelper
+import com.example.core.PageManager
+import com.example.core.SidebarPage
 import com.example.core.ipc.IpcErrorCode
 import com.example.core.ipc.IpcResult
+import com.example.feature.sidebar.AppsPageView
 import com.example.feature.sidebar.CalculatorPageView
 import com.example.feature.sidebar.HybridGridPageView
+import com.example.feature.sidebar.SidebarAppsManager
+import com.example.feature.sidebar.WidgetPageView
+import com.example.feature.sidebar.WidgetsGridPageView
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -135,6 +142,74 @@ class HeavyPageHostManager private constructor(private val context: Context) {
                                 LogKeeper.log(context, TAG, "HybridGrid requested onDimSidebar($dimmed) from :heavy")
                                 HeavyProcessHost.getInstance(context).requestSetDimmed(dimmed, containerId)
                             },
+                            onHeightChanged = { newH ->
+                                reportDesiredPageHeight(pageId, newH)
+                            }
+                        )
+                    }
+                    "apps", "apps_grid" -> {
+                        val containerId = command.payload["containerId"] ?: "sidebar"
+                        LogKeeper.log(context, TAG, "Instantiating AppsPageView in :heavy for pageId='$pageId', containerId='$containerId'")
+                        val prefs = context.getSharedPreferences("FloatingReaderPrefs", Context.MODE_PRIVATE)
+                        val prefKey = "sidebar_apps_${containerId}_$pageId"
+                        if (!prefs.contains(prefKey)) {
+                            val legacyVal = if (containerId == "sidebar" || containerId == "handle_1_swipe_left") {
+                                prefs.getString("sidebar_apps_$pageId", null) ?: prefs.getString("sidebar_apps", null)
+                            } else null
+                            if (legacyVal != null) {
+                                prefs.edit().putString(prefKey, legacyVal).apply()
+                            }
+                        }
+                        val manager = SidebarAppsManager(context, prefs, hostScope, prefKey) {}
+                        manager.ensureLoaded()
+                        val pageConfig = PageManager.getInstance(context).getPage(containerId, pageId)
+                            ?: SidebarPage(id = pageId, title = "Apps", type = pageType)
+                        AppsPageView(
+                            context = context,
+                            handleId = containerId,
+                            pageConfig = pageConfig,
+                            manager = manager,
+                            serviceScope = hostScope,
+                            onCloseSidebar = {
+                                LogKeeper.log(context, TAG, "AppsPageView requested onCloseSidebar from :heavy")
+                                HeavyProcessHost.getInstance(context).requestCloseSidebar(containerId)
+                            },
+                            onDimSidebar = { dimmed ->
+                                LogKeeper.log(context, TAG, "AppsPageView requested onDimSidebar($dimmed) from :heavy")
+                                HeavyProcessHost.getInstance(context).requestSetDimmed(dimmed, containerId)
+                            },
+                            onHeightChanged = { newH ->
+                                reportDesiredPageHeight(pageId, newH)
+                            },
+                            containerId = containerId
+                        ).apply {
+                            updateData(manager.activeItems)
+                        }
+                    }
+                    "widgets_grid", "widgets" -> {
+                        val containerId = command.payload["containerId"] ?: "sidebar"
+                        LogKeeper.log(context, TAG, "Instantiating WidgetsGridPageView in :heavy for pageId='$pageId', containerId='$containerId'")
+                        AppWidgetHelper.startListening(context)
+                        WidgetsGridPageView(
+                            context = context,
+                            pageId = pageId,
+                            scope = hostScope,
+                            containerId = containerId,
+                            onClose = {
+                                LogKeeper.log(context, TAG, "WidgetsGridPageView requested onClose from :heavy")
+                                HeavyProcessHost.getInstance(context).requestCloseSidebar(containerId)
+                            },
+                            onHeightChanged = { newH ->
+                                reportDesiredPageHeight(pageId, newH)
+                            }
+                        )
+                    }
+                    "widget", "single_widget" -> {
+                        LogKeeper.log(context, TAG, "Instantiating WidgetPageView in :heavy for pageId='$pageId'")
+                        AppWidgetHelper.startListening(context)
+                        WidgetPageView(
+                            context = context,
+                            widgetIdStr = pageId,
                             onHeightChanged = { newH ->
                                 reportDesiredPageHeight(pageId, newH)
                             }
@@ -327,6 +402,9 @@ class HeavyPageHostManager private constructor(private val context: Context) {
                     if (backgroundColor != 0) {
                         (existing.pageView as? CalculatorPageView)?.applyThemeBackground(backgroundColor, isRight)
                         (existing.pageView as? HybridGridPageView)?.applyThemeBackground(backgroundColor, isRight)
+                        (existing.pageView as? AppsPageView)?.applyThemeBackground(backgroundColor, isRight)
+                        (existing.pageView as? WidgetsGridPageView)?.applyThemeBackground(backgroundColor, isRight)
+                        (existing.pageView as? WidgetPageView)?.applyThemeBackground(backgroundColor, isRight)
                     }
                 } catch (e: Throwable) {
                     LogKeeper.logCrash(context, TAG, e)
@@ -389,6 +467,85 @@ class HeavyPageHostManager private constructor(private val context: Context) {
                             loadWidgets()
                         }
                     }
+                    "apps", "apps_grid" -> {
+                        val containerId = params.getString("containerId") ?: "sidebar"
+                        LogKeeper.log(context, TAG, "Instantiating AppsPageView in :heavy for pageId='$pageId', containerId='$containerId'")
+                        val prefs = context.getSharedPreferences("FloatingReaderPrefs", Context.MODE_PRIVATE)
+                        val prefKey = "sidebar_apps_${containerId}_$pageId"
+                        if (!prefs.contains(prefKey)) {
+                            val legacyVal = if (containerId == "sidebar" || containerId == "handle_1_swipe_left") {
+                                prefs.getString("sidebar_apps_$pageId", null) ?: prefs.getString("sidebar_apps", null)
+                            } else null
+                            if (legacyVal != null) {
+                                prefs.edit().putString(prefKey, legacyVal).apply()
+                            }
+                        }
+                        val manager = SidebarAppsManager(context, prefs, hostScope, prefKey) {}
+                        manager.ensureLoaded()
+                        val pageConfig = PageManager.getInstance(context).getPage(containerId, pageId)
+                            ?: SidebarPage(id = pageId, title = "Apps", type = pageType)
+                        AppsPageView(
+                            context = context,
+                            handleId = containerId,
+                            pageConfig = pageConfig,
+                            manager = manager,
+                            serviceScope = hostScope,
+                            onCloseSidebar = {
+                                LogKeeper.log(context, TAG, "AppsPageView requested onCloseSidebar from :heavy")
+                                HeavyProcessHost.getInstance(context).requestCloseSidebar(containerId)
+                            },
+                            onDimSidebar = { dimmed ->
+                                LogKeeper.log(context, TAG, "AppsPageView requested onDimSidebar($dimmed) from :heavy")
+                                HeavyProcessHost.getInstance(context).requestSetDimmed(dimmed, containerId)
+                            },
+                            onHeightChanged = { newH ->
+                                reportDesiredPageHeight(pageId, newH)
+                            },
+                            containerId = containerId
+                        ).apply {
+                            if (backgroundColor != 0) {
+                                applyThemeBackground(backgroundColor, isRight)
+                            }
+                            updateData(manager.activeItems)
+                        }
+                    }
+                    "widgets_grid", "widgets" -> {
+                        val containerId = params.getString("containerId") ?: "sidebar"
+                        LogKeeper.log(context, TAG, "Instantiating WidgetsGridPageView in :heavy for pageId='$pageId', containerId='$containerId'")
+                        AppWidgetHelper.startListening(context)
+                        WidgetsGridPageView(
+                            context = context,
+                            pageId = pageId,
+                            scope = hostScope,
+                            containerId = containerId,
+                            onClose = {
+                                LogKeeper.log(context, TAG, "WidgetsGridPageView requested onClose from :heavy")
+                                HeavyProcessHost.getInstance(context).requestCloseSidebar(containerId)
+                            },
+                            onHeightChanged = { newH ->
+                                reportDesiredPageHeight(pageId, newH)
+                            }
+                        ).apply {
+                            if (backgroundColor != 0) {
+                                applyThemeBackground(backgroundColor, isRight)
+                            }
+                        }
+                    }
+                    "widget", "single_widget" -> {
+                        LogKeeper.log(context, TAG, "Instantiating WidgetPageView in :heavy for pageId='$pageId'")
+                        AppWidgetHelper.startListening(context)
+                        WidgetPageView(
+                            context = context,
+                            widgetIdStr = pageId,
+                            onHeightChanged = { newH ->
+                                reportDesiredPageHeight(pageId, newH)
+                            }
+                        ).apply {
+                            if (backgroundColor != 0) {
+                                applyThemeBackground(backgroundColor, isRight)
+                            }
+                        }
+                    }
                     else -> {
                         LogKeeper.log(context, TAG, "Unsupported embedded page type '$pageType'")
                         latch.countDown()
@@ -402,6 +559,9 @@ class HeavyPageHostManager private constructor(private val context: Context) {
                 )
                 val desiredH = when (pageView) {
                     is HybridGridPageView -> pageView.getCurrentHeightPx().takeIf { it > 0 } ?: pageView.measuredHeight
+                    is AppsPageView -> pageView.getCurrentHeightPx().takeIf { it > 0 } ?: pageView.measuredHeight
+                    is WidgetsGridPageView -> pageView.getCurrentHeightPx().takeIf { it > 0 } ?: pageView.measuredHeight
+                    is WidgetPageView -> pageView.getCurrentHeightPx().takeIf { it > 0 } ?: pageView.measuredHeight
                     else -> pageView.measuredHeight
                 }
                 val finalHostHeight = if (desiredH > 0) desiredH else height

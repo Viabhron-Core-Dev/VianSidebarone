@@ -51,6 +51,17 @@ class SidebarAppsManager(
         pageId: String? = null,
         onComplete: ((List<AppInfo>) -> Unit)? = null
     ) {
+        if (com.example.core.LogKeeper.getProcessName(context).endsWith(":heavy")) {
+            coroutineScope.launch(Dispatchers.IO) {
+                val apps = com.example.feature.heavy.HeavyAppsDataProvider.scanInstalledApps(context, precacheIcons = true)
+                allInstalledApps = apps
+                withContext(Dispatchers.Main) {
+                    notifyUpdated()
+                    onComplete?.invoke(apps)
+                }
+            }
+            return
+        }
         val connMgr = com.example.core.ipc.HeavyProcessConnectionManager.getInstance(context)
         connMgr.acquireConsumer("apps_manager_${prefKey}")
         coroutineScope.launch(Dispatchers.IO) {
@@ -83,6 +94,7 @@ class SidebarAppsManager(
     }
 
     fun releaseHeavyConnection() {
+        if (com.example.core.LogKeeper.getProcessName(context).endsWith(":heavy")) return
         val connMgr = com.example.core.ipc.HeavyProcessConnectionManager.getInstance(context)
         connMgr.releaseConsumer("apps_manager_${prefKey}")
     }

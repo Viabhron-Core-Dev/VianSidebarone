@@ -225,7 +225,47 @@
   - Removed duplicated `setStroke` from `HybridGridPageView.applyThemeBackground`, preserving Main's ownership of the Sidebar shell/header chrome and eliminating the horizontal border under the top bar.
 - [ ] **Physical On-Device Verification**: Awaiting physical testing of newly created Hybrid Grids on secondary gestures/handles running in `:heavy` via SurfaceControlViewHost.
 
+### 12.15 — Automatic Initial Placement for Newly Created Sidebar Handles (Completed)
+- [x] **Deterministic Non-Overlapping Placement Algorithm (`HandleManager.calculateInitialPosition`)**:
+  - Gated exclusively to new handle creation (`createHandle()`); existing, saved, or reloaded handles strictly retain persisted coordinates without continuous auto-layout.
+  - Same-edge collision avoidance: Inspects existing handles exclusively along the target edge (e.g. RIGHT vs LEFT). Opposite-edge handles do not alter positioning.
+  - Spacing & Bounds Clamping: Applies 16dp minimum inter-handle spacing and clamps positions within usable bounds (`0.05f` to `0.95f`).
+  - Hierarchical slot search:
+    1. Preferred placement directly after/below the lowest existing handle on the edge.
+    2. Inter-handle gap search if bottom bound is reached.
+    3. Above/before the highest handle if interior space is saturated.
+    4. Proportional largest-gap centering fallback for heavily crowded edges.
+- [x] **Unit & Regression Test Coverage (`HandleInitialPlacementTest`)**:
+  - Validated Handle 2 non-overlapping initial position below Handle 1 on the same edge.
+  - Validated Handle 3 creation preserves Handle 1 and Handle 2 positions untouched.
+  - Validated strict bounds enforcement (`0.05f`..`0.95f`) across sequentially added handles.
+  - Validated custom manual positions are preserved without recalculation.
+  - Validated independence of handles on opposing screen edges.
+  - Validated reload/restart does not trigger re-placement.
+
+### 12.16 — Main → Heavy Sidebar Split: Apps Grid + Widgets Grid + Single Widget (Completed)
+- [x] **Main-Side Delegation (`SidebarPageFactory`)**:
+  - Routed `"apps"`, `"apps_grid"`, `"widgets_grid"`, `"widgets"`, `"widget"`, and `"single_widget"` to `HeavyPagePlaceholderView(context, config, containerId)`.
+  - Main keeps exclusively the single resident Home Grid (`default_hybrid` on Handle 1 -> Swipe Left -> first/default container).
+  - Main owns the single Sidebar window/overlay, gesture tracking, container metadata, and navigation routing.
+- [x] **Heavy Host Execution (`HeavyPageHostManager`)**:
+  - API 30+ SurfaceControlViewHost (`createSurfacePackageApi30`) and API 26-29 overlay fallback (`mountPage`):
+    - Apps Grid: instantiates `AppsPageView` with container-isolated `SidebarAppsManager` (`sidebar_apps_${containerId}_$pageId`), action callbacks (`onCloseSidebar`, `onDimSidebar`, `onHeightChanged`), theme background (`applyThemeBackground`), and initial active-apps data binding without falling back to all installed apps.
+    - Widgets Grid: initializes `AppWidgetHelper.startListening(context)` in `:heavy`, instantiates `WidgetsGridPageView` with `pageId`, `containerId`, `onClose` IPC callback, `onHeightChanged`, and `applyThemeBackground`.
+    - Single Widget: initializes `AppWidgetHelper.startListening(context)` in `:heavy`, instantiates `WidgetPageView` with robust ID parsing (`removePrefix("widget:").removePrefix("widget_").removePrefix("single_widget_")`), `onHeightChanged`, and `applyThemeBackground`.
+  - Geometry & Sizing: Reused `getCurrentHeightPx()` for dynamic child measurement and Binder event reporting (`reportDesiredPageHeight`).
+- [x] **Theme Background & Styling Synchronization**:
+  - Added `applyThemeBackground(bgColor, isRight)` and `themeBackgroundDrawable` across `AppsPageView`, `WidgetsGridPageView`, and `WidgetPageView` ensuring identical visual appearance, corner radii, and transparency to the Main Sidebar shell.
+- [x] **Unit & Regression Test Coverage (`HeavyAppWidgetSplitTest`)**:
+  - Validated Apps Grid, Widgets Grid, and Single Widget routing to Heavy.
+  - Validated exact `default_hybrid` Home Grid remains resident in Main.
+  - Validated secondary/other grids remain in Heavy.
+  - Validated storage and container isolation across containers and pages.
+  - Validated Calculator residency remains unchanged.
+  - Validated Internet Speed Monitor is untouched.
+
 ---
+
 
 ## Phase 14: PWA Engine & External AI App Integration (Tier 5 - Highest Complexity)
 - [ ] **14.1 Local PWA Runner Core**: Embedded lightweight local HTTP/asset server (`PwaServer`), `PwaWindowManager`, `PwaDatabase`, and ZIP manifest importer (`PwaImportActivity`).

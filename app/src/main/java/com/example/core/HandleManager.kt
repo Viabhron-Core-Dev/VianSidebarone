@@ -367,6 +367,102 @@ class HandleManager(private val context: Context) {
     }
 
     /**
+     * Determines a non-overlapping initial vertical position for a newly created handle.
+     * Only called during new handle creation; existing handles retain their persisted positions.
+     */
+    fun calculateInitialPosition(edge: HandleEdge, dimensionDp: Int = 120): Float {
+        val sameEdgeHandles = getAllHandles().filter { it.edge == edge }
+        if (sameEdgeHandles.isEmpty()) {
+            return 0.5f
+        }
+
+        val isHorizontal = edge == HandleEdge.TOP || edge == HandleEdge.BOTTOM
+        val screenTotalDp = runCatching {
+            val dm = context.resources?.displayMetrics
+            if (dm != null && dm.density > 0) {
+                if (isHorizontal) dm.widthPixels / dm.density else dm.heightPixels / dm.density
+            } else {
+                if (isHorizontal) 400f else 800f
+            }
+        }.getOrDefault(if (isHorizontal) 400f else 800f).coerceAtLeast(300f)
+
+        val newTravelDp = (screenTotalDp - dimensionDp).coerceAtLeast(1f)
+        val minPosDp = newTravelDp * 0.05f
+        val maxPosDp = newTravelDp * 0.95f
+        val spacingDp = 16f
+
+        data class HandleSpan(val startDp: Float, val endDp: Float)
+        val existingSpans = sameEdgeHandles.map { h ->
+            val hDim = if (isHorizontal) h.widthDp else h.heightDp
+            val travel = (screenTotalDp - hDim).coerceAtLeast(1f)
+            val start = (travel * h.positionPercent).coerceIn(0f, travel)
+            val end = start + hDim
+            HandleSpan(start, end)
+        }.sortedBy { it.startDp }
+
+        // 1. Preferred candidate: Place directly after/below the lowest handle on this edge
+        val lowestEnd = existingSpans.maxOf { it.endDp }
+        val candidateBelow = lowestEnd + spacingDp
+        if (candidateBelow <= maxPosDp) {
+            val overlaps = existingSpans.any { span ->
+                candidateBelow < span.endDp + spacingDp && candidateBelow + dimensionDp + spacingDp > span.startDp
+            }
+            if (!overlaps) {
+                return (candidateBelow / newTravelDp).coerceIn(0.05f, 0.95f)
+            }
+        }
+
+        // 2. Search for an available gap between existing handles
+        for (i in 0 until existingSpans.size - 1) {
+            val upper = existingSpans[i]
+            val lower = existingSpans[i + 1]
+            val gapStart = upper.endDp + spacingDp
+            val gapEnd = lower.startDp - spacingDp
+            if (gapEnd - gapStart >= dimensionDp) {
+                return (gapStart / newTravelDp).coerceIn(0.05f, 0.95f)
+            }
+        }
+
+        // 3. Search before/above the first handle on this edge
+        val highestStart = existingSpans.minOf { it.startDp }
+        val candidateAbove = highestStart - spacingDp - dimensionDp
+        if (candidateAbove >= minPosDp) {
+            val overlaps = existingSpans.any { span ->
+                candidateAbove < span.endDp + spacingDp && candidateAbove + dimensionDp + spacingDp > span.startDp
+            }
+            if (!overlaps) {
+                return (candidateAbove / newTravelDp).coerceIn(0.05f, 0.95f)
+            }
+        }
+
+        // 4. Fallback for crowded edge: find the largest available gap
+        var bestStart = minPosDp
+        var maxGap = -1f
+
+        val topGap = existingSpans.first().startDp - minPosDp
+        if (topGap > maxGap) {
+            maxGap = topGap
+            bestStart = minPosDp
+        }
+
+        for (i in 0 until existingSpans.size - 1) {
+            val gap = existingSpans[i + 1].startDp - existingSpans[i].endDp
+            if (gap > maxGap) {
+                maxGap = gap
+                bestStart = existingSpans[i].endDp + (gap - dimensionDp).coerceAtLeast(0f) / 2f
+            }
+        }
+
+        val bottomGap = (maxPosDp + dimensionDp) - existingSpans.last().endDp
+        if (bottomGap > maxGap) {
+            maxGap = bottomGap
+            bestStart = existingSpans.last().endDp + spacingDp
+        }
+
+        return (bestStart / newTravelDp).coerceIn(0.05f, 0.95f)
+    }
+
+    /**
      * Creates and persists a new Handle with distinct ID and safe defaults.
      */
     fun createHandle(name: String? = null, edge: HandleEdge = HandleEdge.RIGHT): HandleConfig {
@@ -377,14 +473,16 @@ class HandleManager(private val context: Context) {
         }
         val newId = "handle_$nextIndex"
         val handleName = name ?: "Handle $nextIndex"
+        val handleHeight = 120
+        val initialPosition = calculateInitialPosition(edge, handleHeight)
         val config = HandleConfig(
             id = newId,
             name = handleName,
             enabled = true,
             edge = edge,
-            positionPercent = 0.5f,
+            positionPercent = initialPosition,
             widthDp = 12,
-            heightDp = 120,
+            heightDp = handleHeight,
             color = Color.parseColor("#242962ff"),
             shape = HandleShape.SLANTED_BLOCK,
             alphaPercent = 14,

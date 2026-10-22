@@ -349,3 +349,65 @@
 * Any deviation from what was requested, and why: None. Scoped strictly to resolving the test suite failures and stabilizing the Phase 12.14 implementation.
 * Any known issue or follow-up needed: Ready for on-device manual QA verification.
 
+---
+
+* Timestamp: 2026-10-20T13:42:00-07:00
+* One-line summary of what was requested: Implement automatic initial placement for newly created Sidebar handles to avoid vertical overlap on the same edge.
+* Exact files touched:
+  - app/src/main/java/com/example/core/HandleManager.kt
+  - app/src/test/java/com/example/core/HandleInitialPlacementTest.kt
+  - blueprint/BLUEPRINT.md
+  - receipts/RECEIPTS_097.md
+* What was actually done:
+  - Initial Position Calculation (`HandleManager.kt`): Implemented `calculateInitialPosition(edge: HandleEdge, dimensionDp: Int): Float` which deterministically evaluates existing handles on the same edge to prevent overlap upon new handle creation:
+    * Examines existing handles specifically on the same edge (`sameEdgeHandles = getAllHandles().filter { it.edge == edge }`). If none exist, starts at center (`0.5f`).
+    * Resolves usable edge travel distance using display metrics (with 800dp/400dp fallback) and clamps travel bounds between 5% (`0.05f`) and 95% (`0.95f`).
+    * Evaluates candidate positions in deterministic order: (1) below the lowest existing handle on the edge (`lowestEnd + 16dp spacing`), (2) in interior gaps between existing handles (`gapEnd - gapStart >= dimensionDp`), (3) above the highest handle (`highestStart - 16dp spacing - dimensionDp`), and (4) fallback centering in the largest available gap when the edge is crowded.
+    * Gated strictly to `createHandle()`: only invoked when a genuinely new handle is created. Existing handles read directly from SharedPreferences in `getHandle()` and `getAllHandles()`, strictly preserving user customizations and preventing continuous relayout or reload shifts.
+  - Comprehensive Unit Test Suite (`HandleInitialPlacementTest.kt`): Added 6 dedicated test cases covering:
+    1. Handle 2 created on same edge receives a non-overlapping position below Handle 1.
+    2. Handle 3 creation preserves Handle 1 and Handle 2 positions without modification.
+    3. All sequentially created handles remain strictly within valid travel bounds (`0.05f`..`0.95f`).
+    4. Existing custom/manual positions are preserved and respected.
+    5. Handles on opposing edges (e.g. LEFT vs RIGHT) are placed independently.
+    6. App reload / HandleManager re-instantiation preserves persisted coordinates without re-triggering auto-placement.
+  - Verification: Executed `gradle :app:testDebugUnitTest` (all 229 tests passed), `gradle assembleDebug` (succeeded), and `compile_applet` (succeeded).
+* How it was verified: local build only (`gradle :app:testDebugUnitTest` passed all 229/229 tests; `gradle assembleDebug` built cleanly; `compile_applet` succeeded).
+* Any deviation from what was requested, and why: None. Scoped strictly to initial placement of new handles.
+* Any known issue or follow-up needed: Ready for on-device manual QA verification.
+
+---
+
+* Timestamp: 2026-10-22T11:25:00-07:00
+* One-line summary of what was requested: Migrate Apps Grid, Widgets Grid, and Single Widget to :heavy process via SurfaceControlViewHost, keeping only exact default_hybrid Home Grid in Main.
+* Exact files touched:
+  - app/src/main/java/com/example/feature/sidebar/SidebarPageFactory.kt
+  - app/src/main/java/com/example/feature/sidebar/AppsPageView.kt
+  - app/src/main/java/com/example/feature/sidebar/WidgetsGridPageView.kt
+  - app/src/main/java/com/example/feature/sidebar/WidgetPageView.kt
+  - app/src/main/java/com/example/feature/heavy/page/HeavyPageHostManager.kt
+  - app/src/main/java/com/example/feature/sidebar/SidebarAppsManager.kt
+  - app/src/test/java/com/example/feature/sidebar/HeavyAppWidgetSplitTest.kt
+  - blueprint/BLUEPRINT.md
+  - receipts/RECEIPTS_097.md
+* What was actually done:
+  - Main Process Delegation (`SidebarPageFactory.kt`):
+    * Updated `createPageView` so `"apps"`, `"apps_grid"`, `"widgets_grid"`, `"widgets"`, `"widget"`, and `"single_widget"` delegate to `HeavyPagePlaceholderView(context, config, containerId)`.
+    * Main process preserves exclusively the single resident Home Grid (`default_hybrid` on Handle 1 -> Swipe Left -> first/default container).
+  - Heavy Process Host Runtime (`HeavyPageHostManager.kt`):
+    * Extended `createSurfacePackageApi30` and `mountPage` fallback to instantiate and host `AppsPageView`, `WidgetsGridPageView`, and `WidgetPageView`.
+    * Apps Grid: binds container-isolated `SidebarAppsManager` (`sidebar_apps_${containerId}_${pageId}`), wires `onCloseSidebar`, `onDimSidebar`, `onHeightChanged` callbacks, and initializes active apps list without falling back to all installed apps.
+    * Widgets Grid: initializes `AppWidgetHelper.startListening(context)` in `:heavy`, binds container ID and page ID, wires `onClose` to MainCommandRequest.CloseSidebar, and hooks height measurement.
+    * Single Widget: initializes `AppWidgetHelper.startListening(context)` in `:heavy`, handles widget IDs formatted as `"widget:123"`, `"widget_123"`, and `"single_widget_123"`, and wires height reporting.
+    * Height & Geometry: Generalized `getCurrentHeightPx()` resolution and Binder event reporting across all four page view types.
+  - Page View Styling & Synchronization (`AppsPageView.kt`, `WidgetsGridPageView.kt`, `WidgetPageView.kt`):
+    * Implemented `applyThemeBackground(bgColor, isRight)` and `themeBackgroundDrawable` matching Sidebar theme background color, opacity, and asymmetric corner radius.
+  - Data Provider In-Process Optimization (`SidebarAppsManager.kt`):
+    * Added `:heavy` process detection to query `HeavyAppsDataProvider.scanInstalledApps` in-process directly without redundant IPC loopback.
+  - Test Suite (`HeavyAppWidgetSplitTest.kt`):
+    * Created 9 unit tests verifying Apps Grid, Widgets Grid, and Single Widget routing to Heavy; exact resident Home Grid retention in Main; container/page isolation; Calculator residency; Internet Speed Monitor untouched; and theme background application.
+* How it was verified: local build only (`gradle :app:testDebugUnitTest --tests "com.example.feature.sidebar.HeavyAppWidgetSplitTest"`, `gradle assembleDebug`, and `compile_applet`).
+* Any deviation from what was requested, and why: None. Internet Speed Monitor untouched; Calculator unchanged; other pages not migrated.
+* Any known issue or follow-up needed: Ready for on-device manual QA verification.
+
+
