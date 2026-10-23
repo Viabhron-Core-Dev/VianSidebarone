@@ -264,7 +264,32 @@
   - Validated Calculator residency remains unchanged.
   - Validated Internet Speed Monitor is untouched.
 
+### 12.17 — Main → Heavy Sidebar Split: Compass (Completed)
+- [x] **Main-Side Delegation (`SidebarPageFactory`)**:
+  - Routed `"compass"` to `HeavyPagePlaceholderView(context, config, containerId) { onHeightChanged(it) }`.
+  - Main preserves exclusively the single resident Home Grid (`default_hybrid` on Handle 1 -> Swipe Left -> first/default container).
+  - Main owns the single Sidebar window/overlay, gesture tracking, container metadata, and navigation routing.
+- [x] **Heavy Host Execution (`HeavyPageHostManager`)**:
+  - API 30+ SurfaceControlViewHost (`createSurfacePackageApi30`) and API 26-29 overlay fallback (`mountPage`):
+    - Instantiates `CompassPageView` in `:heavy` with dynamic height reporting via Binder (`reportDesiredPageHeight`).
+    - Applies Sidebar theme background and corner radii (`applyThemeBackground`).
+  - Height & Geometry: Dynamic child measurement via `getCurrentHeightPx()`.
+- [x] **Sensor Registration & Lifecycle Management (`CompassPageView`)**:
+  - Sensors (`TYPE_ACCELEROMETER`, `TYPE_MAGNETIC_FIELD`) are registered only while Compass is active in Heavy (`startListening()`).
+  - Registered upon window attachment (`onAttachedToWindow()`) or page selection (`onPageSelected()`).
+  - Completely unregistered when detached (`onDetachedFromWindow()`), unselected (`onPageUnselected()`), or when the Heavy embedded host is released (`releaseSurfaceHost()`, `unmountPageInternal()`).
+  - Safe null handling for sensor manager and defensive programmatic fallback for test environments.
+- [x] **Unit & Regression Test Coverage (`HeavyCompassSplitTest`)**:
+  - Validated Compass routes to Heavy in Main.
+  - Validated exact `default_hybrid` Home Grid remains resident in Main.
+  - Validated Calculator, Apps Grid, Widgets Grid, and Single Widget remain in Heavy.
+  - Validated secondary grids remain in Heavy.
+  - Validated sensor lifecycle starts on attach/select and unregisters on detach/unselect/release.
+  - Validated theme background and height measurement.
+  - Validated Internet Speed Monitor is untouched.
+
 ---
+
 
 
 ## Phase 14: PWA Engine & External AI App Integration (Tier 5 - Highest Complexity)

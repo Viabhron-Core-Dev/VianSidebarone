@@ -58,7 +58,7 @@ class DefaultSidebarPageFactory(
             "calculator" -> HeavyPagePlaceholderView(context, config, containerId) { newHeight ->
                 onHeightChanged(newHeight)
             }
-            "compass" -> CompassPageView(context) { newHeight ->
+            "compass" -> HeavyPagePlaceholderView(context, config, containerId) { newHeight ->
                 onHeightChanged(newHeight)
             }
             "apps", "apps_grid" -> {

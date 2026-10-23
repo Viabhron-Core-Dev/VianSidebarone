@@ -410,4 +410,35 @@
 * Any deviation from what was requested, and why: None. Internet Speed Monitor untouched; Calculator unchanged; other pages not migrated.
 * Any known issue or follow-up needed: Ready for on-device manual QA verification.
 
+---
+
+* Timestamp: 2026-10-22T13:33:00-07:00
+* One-line summary of what was requested: Migrate Compass page UI/runtime to :heavy process via SurfaceControlViewHost, keeping only exact default_hybrid Home Grid in Main.
+* Exact files touched:
+  - app/src/main/java/com/example/feature/sidebar/SidebarPageFactory.kt
+  - app/src/main/java/com/example/feature/sidebar/CompassPageView.kt
+  - app/src/main/java/com/example/feature/heavy/page/HeavyPageHostManager.kt
+  - app/src/test/java/com/example/feature/sidebar/HeavyCompassSplitTest.kt
+  - blueprint/BLUEPRINT.md
+  - receipts/RECEIPTS_097.md
+* What was actually done:
+  - Main Process Delegation (`SidebarPageFactory.kt`):
+    * Routed `"compass"` to `HeavyPagePlaceholderView(context, config, containerId) { onHeightChanged(it) }`.
+    * Main process preserves exclusively the single resident Home Grid (`default_hybrid` on Handle 1 -> Swipe Left -> first/default container).
+  - Heavy Host Runtime (`HeavyPageHostManager.kt`):
+    * Extended `createSurfacePackageApi30` (API 30+) and `mountPage` (API 26-29 fallback) to instantiate `CompassPageView` in `:heavy`.
+    * Wired dynamic height measurement (`getCurrentHeightPx()`) and Binder height reporting (`reportDesiredPageHeight`).
+    * Implemented theme background synchronization (`applyThemeBackground`).
+    * Added explicit sensor stop and cleanup on `releaseSurfaceHost` and `unmountPageInternal`.
+  - Lifecycle & Sensor Management (`CompassPageView.kt`):
+    * Sensor listening (`TYPE_ACCELEROMETER`, `TYPE_MAGNETIC_FIELD`) is managed strictly on demand: registered via `startListening()` on window attachment (`onAttachedToWindow()`) or page selection (`onPageSelected()`), and completely unregistered via `stopListening()` on detachment (`onDetachedFromWindow()`), unselection (`onPageUnselected()`), or host release.
+    * Added `applyThemeBackground(bgColor, isRight)` and `themeBackgroundDrawable` for Sidebar visual coherence.
+    * Added defensive programmatic fallback in `init` for testability in lightweight test environments.
+  - Test Suite (`HeavyCompassSplitTest.kt`):
+    * Created 7 unit tests verifying Compass routing to Heavy; exact resident Home Grid retention in Main; Calculator, Apps Grid, Widgets Grid, and Single Widget remaining Heavy; secondary grid routing; sensor lifecycle registration and complete teardown; theme background application; and untouched Internet Speed Monitor files.
+* How it was verified: local build only (`gradle :app:testDebugUnitTest --tests "com.example.feature.sidebar.HeavyCompassSplitTest"` and `gradle assembleDebug`).
+* Any deviation from what was requested, and why: None. Internet Speed Monitor, Calculator, Apps Grid, Widgets Grid, Single Widget, and other unmigrated pages untouched.
+* Any known issue or follow-up needed: Ready for on-device manual QA verification.
+
+
 

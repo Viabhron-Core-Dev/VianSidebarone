@@ -24,6 +24,7 @@ import com.example.core.ipc.IpcErrorCode
 import com.example.core.ipc.IpcResult
 import com.example.feature.sidebar.AppsPageView
 import com.example.feature.sidebar.CalculatorPageView
+import com.example.feature.sidebar.CompassPageView
 import com.example.feature.sidebar.HybridGridPageView
 import com.example.feature.sidebar.SidebarAppsManager
 import com.example.feature.sidebar.WidgetPageView
@@ -215,6 +216,14 @@ class HeavyPageHostManager private constructor(private val context: Context) {
                             }
                         )
                     }
+                    "compass" -> {
+                        LogKeeper.log(context, TAG, "Instantiating CompassPageView in :heavy for pageId='$pageId'")
+                        CompassPageView(context) { newH ->
+                            reportDesiredPageHeight(pageId, newH)
+                        }.apply {
+                            applyThemeBackground()
+                        }
+                    }
                     else -> {
                         LogKeeper.log(context, TAG, "Unsupported Heavy page type '$pageType'")
                         return@post
@@ -405,6 +414,7 @@ class HeavyPageHostManager private constructor(private val context: Context) {
                         (existing.pageView as? AppsPageView)?.applyThemeBackground(backgroundColor, isRight)
                         (existing.pageView as? WidgetsGridPageView)?.applyThemeBackground(backgroundColor, isRight)
                         (existing.pageView as? WidgetPageView)?.applyThemeBackground(backgroundColor, isRight)
+                        (existing.pageView as? CompassPageView)?.applyThemeBackground(backgroundColor, isRight)
                     }
                 } catch (e: Throwable) {
                     LogKeeper.logCrash(context, TAG, e)
@@ -546,6 +556,16 @@ class HeavyPageHostManager private constructor(private val context: Context) {
                             }
                         }
                     }
+                    "compass" -> {
+                        LogKeeper.log(context, TAG, "Instantiating CompassPageView in :heavy for pageId='$pageId'")
+                        CompassPageView(context) { newH ->
+                            reportDesiredPageHeight(pageId, newH)
+                        }.apply {
+                            if (backgroundColor != 0) {
+                                applyThemeBackground(backgroundColor, isRight)
+                            }
+                        }
+                    }
                     else -> {
                         LogKeeper.log(context, TAG, "Unsupported embedded page type '$pageType'")
                         latch.countDown()
@@ -562,6 +582,7 @@ class HeavyPageHostManager private constructor(private val context: Context) {
                     is AppsPageView -> pageView.getCurrentHeightPx().takeIf { it > 0 } ?: pageView.measuredHeight
                     is WidgetsGridPageView -> pageView.getCurrentHeightPx().takeIf { it > 0 } ?: pageView.measuredHeight
                     is WidgetPageView -> pageView.getCurrentHeightPx().takeIf { it > 0 } ?: pageView.measuredHeight
+                    is CompassPageView -> pageView.getCurrentHeightPx().takeIf { it > 0 } ?: pageView.measuredHeight
                     else -> pageView.measuredHeight
                 }
                 val finalHostHeight = if (desiredH > 0) desiredH else height
@@ -626,6 +647,7 @@ class HeavyPageHostManager private constructor(private val context: Context) {
         mainHandler.post {
             try {
                 LogKeeper.log(context, TAG, "Releasing SurfaceControlViewHost for '$pageId' in :heavy")
+                (holder.pageView as? CompassPageView)?.stopListening()
                 (holder.host as? android.view.SurfaceControlViewHost)?.release()
             } catch (e: Throwable) {
                 LogKeeper.logCrash(context, TAG, e)
@@ -667,6 +689,7 @@ class HeavyPageHostManager private constructor(private val context: Context) {
         val holder = activeWindows.remove(pageId) ?: return
         if (holder.isAttached) {
             try {
+                (holder.containerView.getChildAt(0) as? CompassPageView)?.stopListening()
                 windowManager.removeViewImmediate(holder.containerView)
                 holder.isAttached = false
                 LogKeeper.log(context, TAG, "Unmounted page window '$pageId' in :heavy")
