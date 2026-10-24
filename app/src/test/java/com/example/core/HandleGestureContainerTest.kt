@@ -625,4 +625,5 @@ class FakeContext(private val prefs: FakeSharedPreferences) : android.content.Co
     override fun getSharedPreferences(name: String?, mode: Int): SharedPreferences = prefs
     override fun getApplicationContext(): Context = this
     override fun getPackageName(): String = "com.example"
+    override fun getResources(): android.content.res.Resources = android.content.res.Resources.getSystem()
 }

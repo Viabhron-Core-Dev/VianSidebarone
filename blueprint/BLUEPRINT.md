@@ -288,6 +288,31 @@
   - Validated theme background and height measurement.
   - Validated Internet Speed Monitor is untouched.
 
+### 12.18 — Main → Heavy Sidebar Split: Scheduler (Completed)
+- [x] **Main-Side Delegation (`SidebarPageFactory`)**:
+  - Routed `"scheduler"` to `HeavyPagePlaceholderView(context, config, containerId) { onHeightChanged(it) }`.
+  - Main preserves exclusively the single resident Home Grid (`default_hybrid` on Handle 1 -> Swipe Left -> first/default container).
+  - Main owns the single Sidebar window/overlay, gesture tracking, container metadata, and navigation routing.
+- [x] **Heavy Host Execution (`HeavyPageHostManager`)**:
+  - API 30+ SurfaceControlViewHost (`createSurfacePackageApi30`) and API 26-29 overlay fallback (`mountPage`):
+    - Instantiates `SchedulerPageView` in `:heavy` with dynamic height reporting via Binder (`reportDesiredPageHeight`).
+    - Applies Sidebar theme background and corner radii (`applyThemeBackground`).
+  - Height & Geometry: Dynamic child measurement via `getCurrentHeightPx()`.
+- [x] **Persistence & Data Isolation (`SchedulerPageView`)**:
+  - Data stored in standard Room database (`litereader_db`) using `SchedulerTask` entity and `SchedulerTaskDao`.
+  - Heavy and Main processes safely share the SQLite database via Room with zero database duplication.
+  - Alarms, tasks, and stored reminders survive Sidebar closures and `:heavy` process teardown/kills.
+  - Observers and background Coroutine collectors cleanly unregistered when detached (`onDetachedFromWindow()`), unselected (`onPageUnselected()`), or when the host is released (`cleanup()`).
+- [x] **Unit & Regression Test Coverage (`HeavySchedulerSplitTest`)**:
+  - Validated Scheduler routes to Heavy in Main.
+  - Validated exact `default_hybrid` Home Grid remains resident in Main.
+  - Validated Calculator, Apps Grid, Widgets Grid, Single Widget, and Compass remain in Heavy.
+  - Validated secondary grids remain in Heavy.
+  - Validated Scheduler lifecycle, coroutine job cancellation, and safe cleanup.
+  - Validated theme background and height measurement.
+  - Validated SchedulerTask entity integrity for cross-process persistence.
+  - Validated Internet Speed Monitor is untouched.
+
 ---
 
 

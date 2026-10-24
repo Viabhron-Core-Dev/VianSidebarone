@@ -26,6 +26,7 @@ import com.example.feature.sidebar.AppsPageView
 import com.example.feature.sidebar.CalculatorPageView
 import com.example.feature.sidebar.CompassPageView
 import com.example.feature.sidebar.HybridGridPageView
+import com.example.feature.sidebar.SchedulerPageView
 import com.example.feature.sidebar.SidebarAppsManager
 import com.example.feature.sidebar.WidgetPageView
 import com.example.feature.sidebar.WidgetsGridPageView
@@ -224,6 +225,14 @@ class HeavyPageHostManager private constructor(private val context: Context) {
                             applyThemeBackground()
                         }
                     }
+                    "scheduler" -> {
+                        LogKeeper.log(context, TAG, "Instantiating SchedulerPageView in :heavy for pageId='$pageId'")
+                        SchedulerPageView(context, hostScope) { newH ->
+                            reportDesiredPageHeight(pageId, newH)
+                        }.apply {
+                            applyThemeBackground()
+                        }
+                    }
                     else -> {
                         LogKeeper.log(context, TAG, "Unsupported Heavy page type '$pageType'")
                         return@post
@@ -415,6 +424,7 @@ class HeavyPageHostManager private constructor(private val context: Context) {
                         (existing.pageView as? WidgetsGridPageView)?.applyThemeBackground(backgroundColor, isRight)
                         (existing.pageView as? WidgetPageView)?.applyThemeBackground(backgroundColor, isRight)
                         (existing.pageView as? CompassPageView)?.applyThemeBackground(backgroundColor, isRight)
+                        (existing.pageView as? SchedulerPageView)?.applyThemeBackground(backgroundColor, isRight)
                     }
                 } catch (e: Throwable) {
                     LogKeeper.logCrash(context, TAG, e)
@@ -566,6 +576,16 @@ class HeavyPageHostManager private constructor(private val context: Context) {
                             }
                         }
                     }
+                    "scheduler" -> {
+                        LogKeeper.log(context, TAG, "Instantiating SchedulerPageView in :heavy for pageId='$pageId'")
+                        SchedulerPageView(context, hostScope) { newH ->
+                            reportDesiredPageHeight(pageId, newH)
+                        }.apply {
+                            if (backgroundColor != 0) {
+                                applyThemeBackground(backgroundColor, isRight)
+                            }
+                        }
+                    }
                     else -> {
                         LogKeeper.log(context, TAG, "Unsupported embedded page type '$pageType'")
                         latch.countDown()
@@ -583,6 +603,7 @@ class HeavyPageHostManager private constructor(private val context: Context) {
                     is WidgetsGridPageView -> pageView.getCurrentHeightPx().takeIf { it > 0 } ?: pageView.measuredHeight
                     is WidgetPageView -> pageView.getCurrentHeightPx().takeIf { it > 0 } ?: pageView.measuredHeight
                     is CompassPageView -> pageView.getCurrentHeightPx().takeIf { it > 0 } ?: pageView.measuredHeight
+                    is SchedulerPageView -> pageView.getCurrentHeightPx().takeIf { it > 0 } ?: pageView.measuredHeight
                     else -> pageView.measuredHeight
                 }
                 val finalHostHeight = if (desiredH > 0) desiredH else height
@@ -648,6 +669,7 @@ class HeavyPageHostManager private constructor(private val context: Context) {
             try {
                 LogKeeper.log(context, TAG, "Releasing SurfaceControlViewHost for '$pageId' in :heavy")
                 (holder.pageView as? CompassPageView)?.stopListening()
+                (holder.pageView as? SchedulerPageView)?.cleanup()
                 (holder.host as? android.view.SurfaceControlViewHost)?.release()
             } catch (e: Throwable) {
                 LogKeeper.logCrash(context, TAG, e)
@@ -690,6 +712,7 @@ class HeavyPageHostManager private constructor(private val context: Context) {
         if (holder.isAttached) {
             try {
                 (holder.containerView.getChildAt(0) as? CompassPageView)?.stopListening()
+                (holder.containerView.getChildAt(0) as? SchedulerPageView)?.cleanup()
                 windowManager.removeViewImmediate(holder.containerView)
                 holder.isAttached = false
                 LogKeeper.log(context, TAG, "Unmounted page window '$pageId' in :heavy")

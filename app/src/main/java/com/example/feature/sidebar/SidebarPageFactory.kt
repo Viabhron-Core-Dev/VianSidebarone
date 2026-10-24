@@ -121,7 +121,7 @@ class DefaultSidebarPageFactory(
                     onHeightChanged(newHeight)
                 }
             }
-            "scheduler" -> SchedulerPageView(context, viewScope) { newHeight ->
+            "scheduler" -> HeavyPagePlaceholderView(context, config, containerId) { newHeight ->
                 onHeightChanged(newHeight)
             }
             "notifications", "notification" -> NotificationPageView(
