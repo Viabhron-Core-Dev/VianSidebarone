@@ -312,6 +312,11 @@
   - Validated theme background and height measurement.
   - Validated SchedulerTask entity integrity for cross-process persistence.
   - Validated Internet Speed Monitor is untouched.
+  - Validated Scheduler FAB click switches from list to editor and cancel restores list (`testFabClickShowsEditUiAndCancelingRestoresList`).
+- [x] **Scheduler FAB Touch Fix (`page_scheduler.xml`, `SchedulerPageView`)**:
+  - Configured `android:elevation="8dp"`, `android:translationZ="8dp"`, `android:clickable="true"`, and `android:focusable="true"` on `fab_add` to trigger `hasChildWithZ()` pre-ordering in ViewGroup touch dispatch.
+  - Enforced `fabAdd?.bringToFront()` on initialization and in `hideEditUi()` to place `fab_add` at top of child index order above `ll_list`.
+  - Re-verified test suite and assembleDebug cleanly.
 
 ---
 

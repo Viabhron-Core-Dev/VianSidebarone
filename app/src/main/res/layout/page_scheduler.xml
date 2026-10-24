@@ -48,7 +48,10 @@
         android:layout_gravity="bottom|center_horizontal"
         android:layout_marginBottom="16dp"
         android:background="@drawable/bg_fab_circle"
-        android:elevation="6dp"
+        android:elevation="8dp"
+        android:translationZ="8dp"
+        android:clickable="true"
+        android:focusable="true"
         android:src="@android:drawable/ic_input_add"
         android:tint="#000000"
         android:contentDescription="Add reminder" />

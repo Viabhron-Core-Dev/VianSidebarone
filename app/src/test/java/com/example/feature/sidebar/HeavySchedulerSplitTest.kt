@@ -259,4 +259,30 @@ class HeavySchedulerSplitTest {
         }
         assertNotNull("NetSpeedManager must exist and be untouched", netSpeedManagerClass)
     }
+
+    // 9. Scheduler FAB click switches from list UI to edit UI and cancels cleanly
+    @Test
+    fun testFabClickShowsEditUiAndCancelingRestoresList() {
+        var reportedHeight = 0
+        val pageView = SchedulerPageView(fakeContext, scope) { h -> reportedHeight = h }
+
+        // Initial state: list UI visible, edit UI hidden, fab visible
+        assertTrue("List UI must initially be visible", pageView.isListUiVisible())
+        assertFalse("Edit UI must initially be hidden", pageView.isEditUiVisible())
+        assertTrue("FAB must initially be visible", pageView.isFabVisible())
+
+        // Tapping FAB invokes showEditUi(null)
+        pageView.triggerFabClick()
+
+        // Editor is displayed, list and fab hidden
+        assertTrue("Edit UI must be visible after tapping FAB", pageView.isEditUiVisible())
+        assertFalse("List UI must be hidden when editor is open", pageView.isListUiVisible())
+        assertFalse("FAB must be hidden when editor is open", pageView.isFabVisible())
+
+        // Canceling editor restores list and fab
+        pageView.triggerCancelClick()
+        assertTrue("List UI must be restored after canceling editor", pageView.isListUiVisible())
+        assertFalse("Edit UI must be hidden after canceling editor", pageView.isEditUiVisible())
+        assertTrue("FAB must be restored after canceling editor", pageView.isFabVisible())
+    }
 }

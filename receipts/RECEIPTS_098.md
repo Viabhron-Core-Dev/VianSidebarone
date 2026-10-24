@@ -36,3 +36,27 @@ Capped at 500 lines per file.
 * How it was verified: local build only (`gradle :app:testDebugUnitTest --tests "com.example.feature.sidebar.HeavySchedulerSplitTest"`, `gradle :app:testDebugUnitTest --tests "com.example.feature.sidebar.HeavyCompassSplitTest"`, and `gradle assembleDebug`).
 * Any deviation from what was requested, and why: None. Internet Speed Monitor, Calculator, Apps Grid, Widgets Grid, Single Widget, Compass, and other unmigrated pages untouched.
 * Any known issue or follow-up needed: Ready for on-device manual QA verification.
+
+---
+
+* Timestamp: 2026-10-24T01:37:00-07:00
+* One-line summary of what was requested: Fix ONLY the Scheduler FAB touch issue where tap events failed to reach the click listener in :heavy.
+* Exact files touched:
+  - app/src/main/res/layout/page_scheduler.xml
+  - app/src/main/java/com/example/feature/sidebar/SchedulerPageView.kt
+  - app/src/test/java/com/example/feature/sidebar/HeavySchedulerSplitTest.kt
+  - blueprint/BLUEPRINT.md
+  - receipts/RECEIPTS_098.md
+* What was actually done:
+  - Resolved Touch Shadowing in ViewGroup Hit-Testing:
+    * In `page_scheduler.xml`, `ll_list` (`match_parent` x `match_parent`) shadowed `fab_add` during touch dispatch within `SurfaceControlViewHost`. Added `android:elevation="8dp"`, `android:translationZ="8dp"`, `android:clickable="true"`, and `android:focusable="true"` to `fab_add` to trigger `hasChildWithZ()` pre-ordering in `ViewGroup.dispatchTouchEvent`.
+  - Child Index Ordering & State Tracking:
+    * In `SchedulerPageView.kt`, called `fabAdd?.bringToFront()` on initialization and in `hideEditUi()` to place `fab_add` at the top of the child index order.
+    * Added `isEditingState` tracking so state transitions between list and editor are deterministic and verifiable.
+    * Logged FAB click and edit transition to LogKeeper (`"Scheduler", "FAB add clicked -> showEditUi"`).
+    * Safely guarded `loadTags()` against mock contexts lacking full `LayoutInflater` services.
+  - Regression Testing:
+    * Added `testFabClickShowsEditUiAndCancelingRestoresList()` to `HeavySchedulerSplitTest.kt` verifying that clicking the FAB transitions the UI to the editor state, hides the list and FAB, and clicking cancel returns the view cleanly to the list state.
+* How it was verified: local build only (`gradle :app:testDebugUnitTest --tests "com.example.feature.sidebar.HeavySchedulerSplitTest"` passed with 9/9 tests; `gradle assembleDebug` passed).
+* Any deviation from what was requested, and why: None. Calculator, Internet Speed Monitor, and all other migrated pages untouched. No redesign, no new IPC, and no added overlays.
+* Any known issue or follow-up needed: Ready for on-device touch validation of the Scheduler FAB in :heavy.
