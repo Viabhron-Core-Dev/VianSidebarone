@@ -108,7 +108,7 @@ class HeavyPagePlaceholderView(
             }
         }.apply {
             layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
-            setZOrderMediaOverlay(true)
+            setZOrderOnTop(true)
             holder.setFormat(PixelFormat.TRANSLUCENT)
             alpha = 0f
         }
