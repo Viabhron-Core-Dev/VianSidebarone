@@ -689,6 +689,7 @@ class HeavyPageHostManager private constructor(private val context: Context) {
                 val finalHostHeight = if (desiredH > 0) desiredH else height
 
                 host.setView(pageView, width, finalHostHeight)
+                (pageView as? com.example.feature.sidebar.SidebarPageControllable)?.onPageSelected()
                 val surfacePackage = host.surfacePackage
                 val holder = EmbeddedHostHolder(pageId, pageType, host, pageView, width, finalHostHeight)
                 activeEmbeddedHosts[pageId] = holder
@@ -752,6 +753,7 @@ class HeavyPageHostManager private constructor(private val context: Context) {
                 (holder.pageView as? SchedulerPageView)?.cleanup()
                 (holder.pageView as? AppTrackerPageView)?.cleanup()
                 (holder.pageView as? MediaPlayerPageView)?.cleanup()
+                (holder.pageView as? com.example.feature.sidebar.SidebarPageControllable)?.onPageUnselected()
                 (holder.host as? android.view.SurfaceControlViewHost)?.release()
             } catch (e: Throwable) {
                 LogKeeper.logCrash(context, TAG, e)
@@ -797,6 +799,7 @@ class HeavyPageHostManager private constructor(private val context: Context) {
                 (holder.containerView.getChildAt(0) as? SchedulerPageView)?.cleanup()
                 (holder.containerView.getChildAt(0) as? AppTrackerPageView)?.cleanup()
                 (holder.containerView.getChildAt(0) as? MediaPlayerPageView)?.cleanup()
+                (holder.containerView.getChildAt(0) as? com.example.feature.sidebar.SidebarPageControllable)?.onPageUnselected()
                 windowManager.removeViewImmediate(holder.containerView)
                 holder.isAttached = false
                 LogKeeper.log(context, TAG, "Unmounted page window '$pageId' in :heavy")

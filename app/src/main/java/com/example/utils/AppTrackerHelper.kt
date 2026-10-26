@@ -65,15 +65,31 @@ object AppTrackerHelper {
             val event = UsageEvents.Event()
             while (events.hasNextEvent()) {
                 events.getNextEvent(event)
-                if (event.eventType == UsageEvents.Event.ACTIVITY_RESUMED) {
+                if (event.eventType == UsageEvents.Event.ACTIVITY_RESUMED ||
+                    event.eventType == 1 /* UsageEvents.Event.MOVE_TO_FOREGROUND */) {
                     appLastUsed[event.packageName] = event.timeStamp
                 }
             }
         } catch (e: Exception) {}
 
-        // 2. Fallback / supplement via queryUsageStats in case events were pruned
+        // 2. Query aggregate usage stats (reliable across interval bucket boundaries)
         try {
-            val statsList = usageStatsManager.queryUsageStats(UsageStatsManager.INTERVAL_BEST, startTime, endTime)
+            val aggregated = usageStatsManager.queryAndAggregateUsageStats(startTime, endTime)
+            for ((pkg, stats) in aggregated) {
+                val lastTime = stats.lastTimeUsed
+                if (lastTime > 0) {
+                    val current = appLastUsed[pkg] ?: 0L
+                    if (lastTime > current) {
+                        appLastUsed[pkg] = lastTime
+                    }
+                }
+            }
+        } catch (e: Exception) {}
+
+        // 3. Fallback / supplement via queryUsageStats in case events were pruned
+        try {
+            val statsList = usageStatsManager.queryUsageStats(UsageStatsManager.INTERVAL_DAILY, startTime, endTime)
+                ?: usageStatsManager.queryUsageStats(UsageStatsManager.INTERVAL_BEST, startTime, endTime)
             if (statsList != null) {
                 for (stats in statsList) {
                     val lastTime = stats.lastTimeUsed
@@ -86,6 +102,23 @@ object AppTrackerHelper {
                 }
             }
         } catch (e: Exception) {}
+
+        // 4. If still empty (e.g. recent device reboot or fresh install), expand query window to 7 days
+        if (appLastUsed.isEmpty()) {
+            val weekStart = endTime - TimeUnit.DAYS.toMillis(7)
+            try {
+                val aggregated = usageStatsManager.queryAndAggregateUsageStats(weekStart, endTime)
+                for ((pkg, stats) in aggregated) {
+                    val lastTime = stats.lastTimeUsed
+                    if (lastTime > 0) {
+                        val current = appLastUsed[pkg] ?: 0L
+                        if (lastTime > current) {
+                            appLastUsed[pkg] = lastTime
+                        }
+                    }
+                }
+            } catch (e: Exception) {}
+        }
 
         val whitelist = getForceStopWhitelist(context, containerId)
 

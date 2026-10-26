@@ -85,3 +85,36 @@ Capped at 500 lines per file.
 * How it was verified: local build only (`gradle :app:testDebugUnitTest --tests "com.example.feature.sidebar.HeavyAppTrackerSplitTest"`, `gradle :app:testDebugUnitTest --tests "com.example.feature.sidebar.HeavyMediaPlayerSplitTest"`, and `compile_applet`).
 * Any deviation from what was requested, and why: None. Home Grid default_hybrid on Handle 1 swipe left remains the single resident page in Main. Internet Speed Monitor, Scheduler, Calculator, Apps, Widgets, Compass, Notifications, and Resources Tracker untouched.
 * Any known issue or follow-up needed: None.
+
+---
+
+* Timestamp: 2026-10-26T14:56:00-07:00
+* One-line summary of what was requested: Fix horizontal Sidebar page swiping regression on App Tracker and Media Player; fix App Tracker initial height bottom-navigation overlap and empty results after usage access permission grant.
+* Exact files touched:
+  - app/src/main/res/layout/item_app_tracker_running_icon.xml
+  - app/src/main/res/layout/item_app_tracker_grid.xml
+  - app/src/main/res/layout/page_app_tracker.xml
+  - app/src/main/java/com/example/utils/AppTrackerHelper.kt
+  - app/src/main/java/com/example/feature/sidebar/AppTrackerPageView.kt
+  - app/src/main/java/com/example/feature/sidebar/MediaPlayerPageView.kt
+  - app/src/main/java/com/example/feature/sidebar/SidebarView.kt
+  - app/src/main/java/com/example/feature/heavy/page/HeavyPageHostManager.kt
+  - app/src/test/java/com/example/feature/sidebar/HeavyAppTrackerSplitTest.kt
+  - receipts/RECEIPTS_098.md
+* What was actually done:
+  - Task 1 (Swipe Regression Root Cause & Resolution):
+    * Discovered that `item_app_tracker_running_icon.xml` and `item_app_tracker_grid.xml` contained explicit `android:clickable="true"` and `android:focusable="true"` on their root containers, and `page_app_tracker.xml` had `match_parent` RecyclerView with `wrap_content` tv_empty, consuming `ACTION_DOWN` across the entire screen inside the embedded SurfaceControlViewHost window.
+    * In `MediaPlayerPageView`, `updateState()` and `updateUI()` were never called on initialization or attach, leaving default visible child buttons and an unmeasured height (falling back to 360dp) that captured touches.
+    * Removed `android:clickable="true"` and `android:focusable="true"` from item layouts. Made `tv_empty` match_parent with centered gravity in `page_app_tracker.xml`, and dynamically hid `RecyclerView` when empty (matching `AppsPageView` and `SchedulerPageView`) so empty-state touches pass through to host ViewPager2.
+    * Implemented proper layout measurement in `MediaPlayerPageView.getCurrentHeightPx()` (80dp-120dp), called `updateState()` and `updateUI()` in `init` and `onAttachedToWindow()`, showing unclickable "Nothing playing" when no active media is present.
+    * Driven lifecycle (`onPageSelected()` / `onPageUnselected()`) from `HeavyPageHostManager` on attach and detach.
+  - Task 2 (App Tracker Physical Bugs):
+    * Resolved initial height/bottom-navigation overlap: aligned `SidebarView.kt` initial fallback heights (`"app_tracker" -> 180`, `"media_player" -> 100`) and clamped `AppTrackerPageView` to 180dp-360dp, eliminating 560dp navigation-bar overflow.
+    * Resolved empty data on permission return: added initial `loadData()` call in `AppTrackerPageView.init`, added `onWindowFocusChanged` and `onWindowVisibilityChanged` to immediately recheck permission and refresh data when user returns from system Settings.
+    * Enhanced `AppTrackerHelper.getRecentApps()`: added `MOVE_TO_FOREGROUND` event checking, `queryAndAggregateUsageStats`, and 7-day fallback window when 24h query returns empty.
+  - Task 3 (Media Player):
+    * Preserved existing Media Player session querying without redesign. Reported current capabilities and limitations.
+* How it was verified: local build only (`gradle :app:testDebugUnitTest --tests "com.example.feature.sidebar.HeavyAppTrackerSplitTest" --tests "com.example.feature.sidebar.HeavyMediaPlayerSplitTest"` passed; `gradle :app:testDebugUnitTest --tests "com.example.feature.sidebar.HeavySchedulerSplitTest" --tests "com.example.feature.sidebar.HeavyCompassSplitTest"` passed; `compile_applet` passed; confirmed `setZOrderOnTop(true)` remains intact).
+* Any deviation from what was requested, and why: None. No global touch workarounds or generic SurfaceView modifications introduced. All existing working pages untouched.
+* Any known issue or follow-up needed: Ready for on-device manual QA validation of swiping from App Tracker and Media Player.
+

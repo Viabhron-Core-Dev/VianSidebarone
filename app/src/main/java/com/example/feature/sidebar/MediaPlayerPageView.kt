@@ -116,9 +116,29 @@ class MediaPlayerPageView(
                 onHeightChanged?.invoke(height)
             }
         }
+
+        updateState()
+        updateUI()
     }
 
-    fun getCurrentHeightPx(): Int = currentHeightPx.takeIf { it > 0 } ?: measuredHeight
+    fun getCurrentHeightPx(): Int {
+        if (currentHeightPx > 0) return currentHeightPx
+        val density = try { resources?.displayMetrics?.density ?: 1f } catch (_: Throwable) { 1f }
+        val fallbackW = (300 * density).toInt()
+        val w = if (width > 0) width else fallbackW
+        try {
+            measure(
+                MeasureSpec.makeMeasureSpec(w, MeasureSpec.EXACTLY),
+                MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED)
+            )
+            val minH = (80 * density).toInt()
+            val maxH = (120 * density).toInt()
+            currentHeightPx = measuredHeight.coerceIn(minH, maxH)
+        } catch (_: Throwable) {
+            currentHeightPx = (100 * density).toInt()
+        }
+        return currentHeightPx
+    }
 
     fun applyThemeBackground(bgColor: Int = 0, isRight: Boolean = true) {
         val finalColor = if (bgColor != 0) {
@@ -161,11 +181,25 @@ class MediaPlayerPageView(
 
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
+        updateState()
+        updateUI()
+        startUpdates()
     }
 
     override fun onDetachedFromWindow() {
         super.onDetachedFromWindow()
         stopUpdates()
+    }
+
+    override fun onWindowVisibilityChanged(visibility: Int) {
+        super.onWindowVisibilityChanged(visibility)
+        if (visibility == View.VISIBLE) {
+            updateState()
+            updateUI()
+            startUpdates()
+        } else {
+            stopUpdates()
+        }
     }
 
     override fun onPageSelected() {

@@ -318,6 +318,32 @@
   - Enforced `fabAdd?.bringToFront()` on initialization and in `hideEditUi()` to place `fab_add` at top of child index order above `ll_list`.
   - Re-verified test suite and assembleDebug cleanly.
 
+### 12.19 — Main → Heavy Sidebar Split: App Tracker & Media Player (Completed)
+- [x] **Main-Side Delegation (`SidebarPageFactory`)**:
+  - Routed `"app_tracker"` and `"media_player"` to `HeavyPagePlaceholderView(context, config, containerId) { onHeightChanged(it) }`.
+  - Main preserves exclusively the single resident Home Grid (`default_hybrid` on Handle 1 -> Swipe Left -> first/default container).
+  - Main owns the single Sidebar window/overlay, gesture tracking, container metadata, and navigation routing.
+- [x] **Heavy Host Execution (`HeavyPageHostManager`)**:
+  - API 30+ SurfaceControlViewHost (`createSurfacePackageApi30`) and API 26-29 overlay fallback (`mountPage`):
+    - Instantiates `AppTrackerPageView` and `MediaPlayerPageView` in `:heavy` with dynamic height reporting via Binder (`reportDesiredPageHeight`).
+    - Applies Sidebar theme background and corner radii (`applyThemeBackground`).
+    - Driven lifecycle (`onPageSelected()` / `onPageUnselected()`) upon host attachment and release.
+- [x] **App Tracker Physical Bug Fixes & Swipe Regression Resolution**:
+  - Eliminated initial bottom-navigation overlap: aligned `SidebarView.kt` initial fallback heights (`"app_tracker" -> 180`, `"media_player" -> 100`) and clamped `AppTrackerPageView` to 180dp-360dp.
+  - Fixed empty results on permission grant: added initial `loadData()` call in `AppTrackerPageView.init`, and added `onWindowFocusChanged` / `onWindowVisibilityChanged` to immediately refresh permission and reload data upon return from system Settings.
+  - Enhanced `AppTrackerHelper.getRecentApps()`: added `MOVE_TO_FOREGROUND` event checking, `queryAndAggregateUsageStats`, and 7-day query fallback when 24h events are empty.
+  - Restored horizontal swiping: removed `android:clickable="true"` and `android:focusable="true"` from `item_app_tracker_running_icon.xml` and `item_app_tracker_grid.xml`. Configured `tv_empty` as `match_parent` centered and hid `RecyclerView` when empty so unhandled touches pass through to host ViewPager2.
+- [x] **Media Player Physical Bug Fixes & Swipe Regression Resolution**:
+  - Implemented real layout measurement in `MediaPlayerPageView.getCurrentHeightPx()` (80dp-120dp), preventing 360dp placeholder ballooning.
+  - Initialized `updateState()` and `updateUI()` in `init` and `onAttachedToWindow()`, correctly displaying unclickable "Nothing playing" banner when inactive so touches fall through to host ViewPager2.
+- [x] **Unit & Regression Test Coverage (`HeavyAppTrackerSplitTest`, `HeavyMediaPlayerSplitTest`)**:
+  - Validated App Tracker and Media Player routing to Heavy in Main (7/7 tests passed each).
+  - Validated exact `default_hybrid` Home Grid remains resident in Main.
+  - Validated Calculator, Compass, Scheduler, Apps, and Widgets remain in Heavy.
+  - Validated secondary grids remain in Heavy.
+  - Validated theme background, dynamic height measurement, and idempotent cleanup.
+  - Validated Internet Speed Monitor is untouched.
+
 ---
 
 

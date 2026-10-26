@@ -145,6 +145,7 @@ class AppTrackerPageView(
             false
         }
         llPermissionBanner?.visibility = if (hasUsageStatsPermission) View.GONE else View.VISIBLE
+        loadData()
     }
 
     fun getCurrentHeightPx(): Int {
@@ -157,11 +158,11 @@ class AppTrackerPageView(
                     MeasureSpec.makeMeasureSpec(w, MeasureSpec.EXACTLY),
                     MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED)
                 )
-                val minH = (220 * density).toInt()
-                val maxH = (560 * density).toInt()
+                val minH = (180 * density).toInt()
+                val maxH = (360 * density).toInt()
                 lastCalculatedHeightPx = measuredHeight.coerceIn(minH, maxH)
             } catch (_: Throwable) {
-                lastCalculatedHeightPx = (240 * density).toInt()
+                lastCalculatedHeightPx = (180 * density).toInt()
             }
         }
         return lastCalculatedHeightPx
@@ -205,17 +206,20 @@ class AppTrackerPageView(
         scope.coroutineContext[Job]?.cancelChildren()
     }
 
-    override fun onPageSelected() {
+    private fun refreshPermissionAndData() {
         val perm = try {
             AppTrackerHelper.checkUsageStatsPermission(context)
         } catch (_: Throwable) {
             false
         }
-        if (perm != hasUsageStatsPermission) {
-            hasUsageStatsPermission = perm
-            llPermissionBanner?.visibility = if (hasUsageStatsPermission) View.GONE else View.VISIBLE
-        }
+        val changed = (perm != hasUsageStatsPermission)
+        hasUsageStatsPermission = perm
+        llPermissionBanner?.visibility = if (hasUsageStatsPermission) View.GONE else View.VISIBLE
         loadData()
+    }
+
+    override fun onPageSelected() {
+        refreshPermissionAndData()
     }
 
     override fun onPageUnselected() {
@@ -226,15 +230,20 @@ class AppTrackerPageView(
 
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
-        val perm = try {
-            AppTrackerHelper.checkUsageStatsPermission(context)
-        } catch (_: Throwable) {
-            false
+        refreshPermissionAndData()
+    }
+
+    override fun onWindowFocusChanged(hasWindowFocus: Boolean) {
+        super.onWindowFocusChanged(hasWindowFocus)
+        if (hasWindowFocus) {
+            refreshPermissionAndData()
         }
-        if (perm != hasUsageStatsPermission) {
-            hasUsageStatsPermission = perm
-            llPermissionBanner?.visibility = if (hasUsageStatsPermission) View.GONE else View.VISIBLE
-            loadData()
+    }
+
+    override fun onWindowVisibilityChanged(visibility: Int) {
+        super.onWindowVisibilityChanged(visibility)
+        if (visibility == View.VISIBLE) {
+            refreshPermissionAndData()
         }
     }
 
@@ -268,6 +277,7 @@ class AppTrackerPageView(
             adapter.submitList(list, isRunning)
         } catch (_: Throwable) {}
         tvEmpty?.visibility = if (list.isEmpty()) View.VISIBLE else View.GONE
+        recyclerView?.visibility = if (list.isEmpty()) View.GONE else View.VISIBLE
         post {
             val density = try { resources?.displayMetrics?.density ?: 1f } catch (_: Throwable) { 1f }
             val fallbackW = (330 * density).toInt()
@@ -278,13 +288,13 @@ class AppTrackerPageView(
                     MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED)
                 )
                 val measuredH = measuredHeight
-                val minH = (220 * density).toInt()
-                val maxH = (560 * density).toInt()
+                val minH = (180 * density).toInt()
+                val maxH = (360 * density).toInt()
                 val targetH = measuredH.coerceIn(minH, maxH)
                 lastCalculatedHeightPx = targetH
                 onHeightChanged?.invoke(targetH)
             } catch (_: Throwable) {
-                lastCalculatedHeightPx = (240 * density).toInt()
+                lastCalculatedHeightPx = (180 * density).toInt()
                 onHeightChanged?.invoke(lastCalculatedHeightPx)
             }
         }

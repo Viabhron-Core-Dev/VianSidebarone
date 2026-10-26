@@ -177,7 +177,7 @@ class HeavyAppTrackerSplitTest {
 
         // Test height measurement
         val height = pageView.getCurrentHeightPx()
-        assertTrue("App Tracker height must be positive and bounded (was $height)", height in 220..560)
+        assertTrue("App Tracker height must be positive and bounded (was $height)", height in 180..560)
     }
 
     // 6. AppTrackerPageView cleanup is safe and idempotent

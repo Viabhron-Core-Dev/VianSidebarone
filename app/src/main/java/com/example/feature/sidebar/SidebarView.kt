@@ -160,8 +160,8 @@ class SidebarView(
                     "scheduler" -> 520
                     "notifications", "notification" -> 520
                     "resources_tracker" -> 460
-                    "app_tracker" -> 560
-                    "media_player" -> 360
+                    "app_tracker" -> 180
+                    "media_player" -> 100
                     else -> prefs.getInt("handle_${containerId}_sidebar_height", prefs.getInt("sidebar_height", 360))
                 }
             }
