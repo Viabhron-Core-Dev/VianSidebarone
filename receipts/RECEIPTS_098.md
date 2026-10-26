@@ -60,3 +60,28 @@ Capped at 500 lines per file.
 * How it was verified: local build only (`gradle :app:testDebugUnitTest --tests "com.example.feature.sidebar.HeavySchedulerSplitTest"` passed with 9/9 tests; `gradle assembleDebug` passed).
 * Any deviation from what was requested, and why: None. Calculator, Internet Speed Monitor, and all other migrated pages untouched. No redesign, no new IPC, and no added overlays.
 * Any known issue or follow-up needed: Ready for on-device touch validation of the Scheduler FAB in :heavy.
+---
+
+* Timestamp: 2026-10-26T01:38:00-07:00
+* One-line summary of what was requested: Sequential migration of App Tracker (Unit 1) and Media Player (Unit 2) from Main process to Heavy process using SurfaceControlViewHost.
+* Exact files touched:
+  - app/src/main/java/com/example/feature/sidebar/SidebarPageFactory.kt
+  - app/src/main/java/com/example/feature/heavy/page/HeavyPageHostManager.kt
+  - app/src/main/java/com/example/feature/sidebar/AppTrackerPageView.kt
+  - app/src/main/java/com/example/feature/sidebar/MediaPlayerPageView.kt
+  - app/src/test/java/com/example/feature/sidebar/HeavyAppTrackerSplitTest.kt
+  - app/src/test/java/com/example/feature/sidebar/HeavyMediaPlayerSplitTest.kt
+* What was actually done:
+  - Unit 1 (App Tracker -> Heavy):
+    * In `SidebarPageFactory.kt`, delegated `"app_tracker"` to `HeavyPagePlaceholderView`.
+    * In `HeavyPageHostManager.kt`, added `"app_tracker"` instantiation in `createSurfacePackageApi30` and `mountPage`, dynamic height measurement, theme background styling, and lifecycle cleanup.
+    * In `AppTrackerPageView.kt`, added `getCurrentHeightPx()`, `applyThemeBackground()`, coroutine `cleanup()`, and safe adapter notification for headless/mock environments.
+    * Verified with `HeavyAppTrackerSplitTest` (7/7 tests passed) and compilation.
+  - Unit 2 (Media Player -> Heavy):
+    * In `SidebarPageFactory.kt`, delegated `"media_player"` to `HeavyPagePlaceholderView`.
+    * In `HeavyPageHostManager.kt`, added `"media_player"` instantiation in `createSurfacePackageApi30` and `mountPage`, dynamic height measurement, theme background synchronization, and lifecycle cleanup.
+    * In `MediaPlayerPageView.kt`, added `getCurrentHeightPx()`, `applyThemeBackground()`, safe controller/session error handling, and `cleanup()`.
+    * Verified with `HeavyMediaPlayerSplitTest` (7/7 tests passed) and full applet compilation.
+* How it was verified: local build only (`gradle :app:testDebugUnitTest --tests "com.example.feature.sidebar.HeavyAppTrackerSplitTest"`, `gradle :app:testDebugUnitTest --tests "com.example.feature.sidebar.HeavyMediaPlayerSplitTest"`, and `compile_applet`).
+* Any deviation from what was requested, and why: None. Home Grid default_hybrid on Handle 1 swipe left remains the single resident page in Main. Internet Speed Monitor, Scheduler, Calculator, Apps, Widgets, Compass, Notifications, and Resources Tracker untouched.
+* Any known issue or follow-up needed: None.

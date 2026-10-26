@@ -86,35 +86,11 @@ class DefaultSidebarPageFactory(
                     onHeightChanged(newHeight)
                 }
             }
-            "app_tracker" -> {
-                AppTrackerPageView(
-                    context,
-                    containerId = containerId,
-                    onCloseSidebar = { onClose() },
-                    onAppSelected = { pkgName ->
-                        try {
-                            val pm = context.packageManager
-                            val launchIntent = pm.getLaunchIntentForPackage(pkgName)
-                            if (launchIntent != null) {
-                                launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                context.startActivity(launchIntent)
-                            } else {
-                                val detailsIntent = Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-                                    data = android.net.Uri.parse("package:$pkgName")
-                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                }
-                                context.startActivity(detailsIntent)
-                            }
-                        } catch (_: Exception) {}
-                        onClose()
-                    },
-                    onHeightChanged = { newHeight -> onHeightChanged(newHeight) }
-                )
+            "app_tracker" -> HeavyPagePlaceholderView(context, config, containerId) { newHeight ->
+                onHeightChanged(newHeight)
             }
-            "media_player" -> {
-                MediaPlayerPageView(context, onCloseSidebar = { onClose() }) { newHeight ->
-                    onHeightChanged(newHeight)
-                }
+            "media_player" -> HeavyPagePlaceholderView(context, config, containerId) { newHeight ->
+                onHeightChanged(newHeight)
             }
             "widget", "single_widget" -> {
                 HeavyPagePlaceholderView(context, config, containerId) { newHeight ->

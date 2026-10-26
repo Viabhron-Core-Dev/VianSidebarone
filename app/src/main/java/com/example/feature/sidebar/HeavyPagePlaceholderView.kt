@@ -89,24 +89,7 @@ class HeavyPagePlaceholderView(
 
     @RequiresApi(Build.VERSION_CODES.R)
     private fun initEmbeddedSurfaceApi30() {
-        val sv = object : SurfaceView(context) {
-            override fun dispatchTouchEvent(event: MotionEvent): Boolean {
-                val actionStr = when (event.actionMasked) {
-                    MotionEvent.ACTION_DOWN -> "ACTION_DOWN"
-                    MotionEvent.ACTION_UP -> "ACTION_UP"
-                    MotionEvent.ACTION_CANCEL -> "ACTION_CANCEL"
-                    else -> null
-                }
-                if (actionStr != null) {
-                    LogKeeper.log(
-                        context,
-                        TAG,
-                        "[DIAG_TOUCH_MAIN] SurfaceView dispatchTouchEvent pageId='${config.id}', action=$actionStr, pos=(${event.x.toInt()}, ${event.y.toInt()}), size=${width}x${height}"
-                    )
-                }
-                return super.dispatchTouchEvent(event)
-            }
-        }.apply {
+        val sv = SurfaceView(context).apply {
             layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
             setZOrderOnTop(true)
             holder.setFormat(PixelFormat.TRANSLUCENT)
@@ -263,25 +246,6 @@ class HeavyPagePlaceholderView(
         if (isSelected || isMountRequested) {
             onPageUnselected()
         }
-    }
-
-    override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
-        val actionStr = when (ev.actionMasked) {
-            MotionEvent.ACTION_DOWN -> "ACTION_DOWN"
-            MotionEvent.ACTION_UP -> "ACTION_UP"
-            MotionEvent.ACTION_CANCEL -> "ACTION_CANCEL"
-            else -> null
-        }
-        if (actionStr != null) {
-            val svW = embeddedSurfaceView?.width ?: width
-            val svH = embeddedSurfaceView?.height ?: height
-            LogKeeper.log(
-                context,
-                TAG,
-                "[DIAG_TOUCH_MAIN] HeavyPagePlaceholderView dispatchTouchEvent pageId='${config.id}', action=$actionStr, pos=(${ev.x.toInt()}, ${ev.y.toInt()}), surfaceSize=${svW}x${svH}"
-            )
-        }
-        return super.dispatchTouchEvent(ev)
     }
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {

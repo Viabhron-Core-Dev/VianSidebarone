@@ -121,24 +121,7 @@ class SchedulerPageView(
         
         // Ensure fab_add is unconditionally the top interactive view above the list hierarchy
         fabAdd?.bringToFront()
-        fabAdd?.setOnTouchListener { v, event ->
-            val actionStr = when (event.actionMasked) {
-                MotionEvent.ACTION_DOWN -> "ACTION_DOWN"
-                MotionEvent.ACTION_UP -> "ACTION_UP"
-                MotionEvent.ACTION_CANCEL -> "ACTION_CANCEL"
-                else -> null
-            }
-            if (actionStr != null) {
-                LogKeeper.log(
-                    context,
-                    "Scheduler",
-                    "[DIAG_TOUCH_HEAVY_FAB] onTouch reaching FAB: action=$actionStr, pos=(${event.x.toInt()}, ${event.y.toInt()}), size=${v.width}x${v.height}, bounds=Rect(${v.left}, ${v.top}, ${v.right}, ${v.bottom})"
-                )
-            }
-            false
-        }
         fabAdd?.setOnClickListener {
-            LogKeeper.log(context, "Scheduler", "[DIAG_TOUCH_HEAVY_FAB] OnClickListener fired -> showEditUi")
             showEditUi(null)
         }
         
@@ -263,32 +246,6 @@ class SchedulerPageView(
     
     private fun updateSelectedTagsText() {
         tvSelectedTags?.text = "Selected: ${selectedTags.joinToString(", ")}"
-    }
-
-    override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
-        val actionStr = when (ev.actionMasked) {
-            MotionEvent.ACTION_DOWN -> "ACTION_DOWN"
-            MotionEvent.ACTION_UP -> "ACTION_UP"
-            MotionEvent.ACTION_CANCEL -> "ACTION_CANCEL"
-            else -> null
-        }
-        if (actionStr != null) {
-            val fab = fabAdd
-            val insideFab = if (fab != null && fab.visibility == View.VISIBLE) {
-                val fabRect = android.graphics.Rect()
-                fab.getHitRect(fabRect)
-                fabRect.contains(ev.x.toInt(), ev.y.toInt())
-            } else {
-                false
-            }
-            val fabBoundsStr = if (fab != null) "Rect(${fab.left}, ${fab.top}, ${fab.right}, ${fab.bottom})" else "null"
-            LogKeeper.log(
-                context,
-                "Scheduler",
-                "[DIAG_TOUCH_HEAVY_PAGE] dispatchTouchEvent action=$actionStr, pos=(${ev.x.toInt()}, ${ev.y.toInt()}), pageSize=${width}x${height}, insideFab=$insideFab, fabBounds=$fabBoundsStr"
-            )
-        }
-        return super.dispatchTouchEvent(ev)
     }
 
     override fun onAttachedToWindow() {

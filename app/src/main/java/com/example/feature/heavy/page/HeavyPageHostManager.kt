@@ -22,10 +22,12 @@ import com.example.core.PageManager
 import com.example.core.SidebarPage
 import com.example.core.ipc.IpcErrorCode
 import com.example.core.ipc.IpcResult
+import com.example.feature.sidebar.AppTrackerPageView
 import com.example.feature.sidebar.AppsPageView
 import com.example.feature.sidebar.CalculatorPageView
 import com.example.feature.sidebar.CompassPageView
 import com.example.feature.sidebar.HybridGridPageView
+import com.example.feature.sidebar.MediaPlayerPageView
 import com.example.feature.sidebar.SchedulerPageView
 import com.example.feature.sidebar.SidebarAppsManager
 import com.example.feature.sidebar.WidgetPageView
@@ -233,6 +235,40 @@ class HeavyPageHostManager private constructor(private val context: Context) {
                             applyThemeBackground()
                         }
                     }
+                    "app_tracker" -> {
+                        val containerId = command.payload["containerId"] ?: "sidebar"
+                        LogKeeper.log(context, TAG, "Instantiating AppTrackerPageView in :heavy for pageId='$pageId'")
+                        AppTrackerPageView(
+                            context = context,
+                            containerId = containerId,
+                            onCloseSidebar = {
+                                HeavyProcessHost.getInstance(context).requestCloseSidebar(containerId)
+                            },
+                            onAppSelected = {},
+                            onHeightChanged = { newH ->
+                                reportDesiredPageHeight(pageId, newH)
+                            }
+                        ).apply {
+                            applyThemeBackground()
+                        }
+                    }
+                    "media_player" -> {
+                        val containerId = command.payload["containerId"] ?: "sidebar"
+                        LogKeeper.log(context, TAG, "Instantiating MediaPlayerPageView in :heavy for pageId='$pageId'")
+                        MediaPlayerPageView(
+                            context = context,
+                            onCloseSidebar = {
+                                HeavyProcessHost.getInstance(context).requestCloseSidebar(containerId)
+                            },
+                            onHeightChanged = { newH ->
+                                reportDesiredPageHeight(pageId, newH)
+                            },
+                            containerId = containerId,
+                            scope = hostScope
+                        ).apply {
+                            applyThemeBackground()
+                        }
+                    }
                     else -> {
                         LogKeeper.log(context, TAG, "Unsupported Heavy page type '$pageType'")
                         return@post
@@ -425,6 +461,8 @@ class HeavyPageHostManager private constructor(private val context: Context) {
                         (existing.pageView as? WidgetPageView)?.applyThemeBackground(backgroundColor, isRight)
                         (existing.pageView as? CompassPageView)?.applyThemeBackground(backgroundColor, isRight)
                         (existing.pageView as? SchedulerPageView)?.applyThemeBackground(backgroundColor, isRight)
+                        (existing.pageView as? AppTrackerPageView)?.applyThemeBackground(backgroundColor, isRight)
+                        (existing.pageView as? MediaPlayerPageView)?.applyThemeBackground(backgroundColor, isRight)
                     }
                 } catch (e: Throwable) {
                     LogKeeper.logCrash(context, TAG, e)
@@ -586,6 +624,46 @@ class HeavyPageHostManager private constructor(private val context: Context) {
                             }
                         }
                     }
+                    "app_tracker" -> {
+                        val containerId = params.getString("containerId") ?: "sidebar"
+                        LogKeeper.log(context, TAG, "Instantiating AppTrackerPageView in :heavy for pageId='$pageId', containerId='$containerId'")
+                        AppTrackerPageView(
+                            context = context,
+                            containerId = containerId,
+                            onCloseSidebar = {
+                                LogKeeper.log(context, TAG, "AppTrackerPageView requested onCloseSidebar from :heavy")
+                                HeavyProcessHost.getInstance(context).requestCloseSidebar(containerId)
+                            },
+                            onAppSelected = {},
+                            onHeightChanged = { newH ->
+                                reportDesiredPageHeight(pageId, newH)
+                            }
+                        ).apply {
+                            if (backgroundColor != 0) {
+                                applyThemeBackground(backgroundColor, isRight)
+                            }
+                        }
+                    }
+                    "media_player" -> {
+                        val containerId = params.getString("containerId") ?: "sidebar"
+                        LogKeeper.log(context, TAG, "Instantiating MediaPlayerPageView in :heavy for pageId='$pageId', containerId='$containerId'")
+                        MediaPlayerPageView(
+                            context = context,
+                            onCloseSidebar = {
+                                LogKeeper.log(context, TAG, "MediaPlayerPageView requested onCloseSidebar from :heavy")
+                                HeavyProcessHost.getInstance(context).requestCloseSidebar(containerId)
+                            },
+                            onHeightChanged = { newH ->
+                                reportDesiredPageHeight(pageId, newH)
+                            },
+                            containerId = containerId,
+                            scope = hostScope
+                        ).apply {
+                            if (backgroundColor != 0) {
+                                applyThemeBackground(backgroundColor, isRight)
+                            }
+                        }
+                    }
                     else -> {
                         LogKeeper.log(context, TAG, "Unsupported embedded page type '$pageType'")
                         latch.countDown()
@@ -604,6 +682,8 @@ class HeavyPageHostManager private constructor(private val context: Context) {
                     is WidgetPageView -> pageView.getCurrentHeightPx().takeIf { it > 0 } ?: pageView.measuredHeight
                     is CompassPageView -> pageView.getCurrentHeightPx().takeIf { it > 0 } ?: pageView.measuredHeight
                     is SchedulerPageView -> pageView.getCurrentHeightPx().takeIf { it > 0 } ?: pageView.measuredHeight
+                    is AppTrackerPageView -> pageView.getCurrentHeightPx().takeIf { it > 0 } ?: pageView.measuredHeight
+                    is MediaPlayerPageView -> pageView.getCurrentHeightPx().takeIf { it > 0 } ?: pageView.measuredHeight
                     else -> pageView.measuredHeight
                 }
                 val finalHostHeight = if (desiredH > 0) desiredH else height
@@ -670,6 +750,8 @@ class HeavyPageHostManager private constructor(private val context: Context) {
                 LogKeeper.log(context, TAG, "Releasing SurfaceControlViewHost for '$pageId' in :heavy")
                 (holder.pageView as? CompassPageView)?.stopListening()
                 (holder.pageView as? SchedulerPageView)?.cleanup()
+                (holder.pageView as? AppTrackerPageView)?.cleanup()
+                (holder.pageView as? MediaPlayerPageView)?.cleanup()
                 (holder.host as? android.view.SurfaceControlViewHost)?.release()
             } catch (e: Throwable) {
                 LogKeeper.logCrash(context, TAG, e)
@@ -713,6 +795,8 @@ class HeavyPageHostManager private constructor(private val context: Context) {
             try {
                 (holder.containerView.getChildAt(0) as? CompassPageView)?.stopListening()
                 (holder.containerView.getChildAt(0) as? SchedulerPageView)?.cleanup()
+                (holder.containerView.getChildAt(0) as? AppTrackerPageView)?.cleanup()
+                (holder.containerView.getChildAt(0) as? MediaPlayerPageView)?.cleanup()
                 windowManager.removeViewImmediate(holder.containerView)
                 holder.isAttached = false
                 LogKeeper.log(context, TAG, "Unmounted page window '$pageId' in :heavy")
