@@ -149,6 +149,41 @@ class AppTrackerPageView(
         loadData()
     }
 
+    private var downX = 0f
+    private var downY = 0f
+    private var isHorizontalSwipeConsumed = false
+    private val touchSlop = try { android.view.ViewConfiguration.get(context).scaledTouchSlop } catch (_: Throwable) { 16 }
+
+    override fun onInterceptTouchEvent(ev: android.view.MotionEvent): Boolean {
+        when (ev.actionMasked) {
+            android.view.MotionEvent.ACTION_DOWN -> {
+                downX = ev.rawX
+                downY = ev.rawY
+                isHorizontalSwipeConsumed = false
+            }
+            android.view.MotionEvent.ACTION_MOVE -> {
+                val dx = ev.rawX - downX
+                val dy = ev.rawY - downY
+                if (!isHorizontalSwipeConsumed && kotlin.math.abs(dx) > touchSlop * 2 && kotlin.math.abs(dx) > kotlin.math.abs(dy) * 1.5f) {
+                    isHorizontalSwipeConsumed = true
+                    val delta = if (dx < 0) 1 else -1
+                    com.example.core.ipc.HeavyProcessHost.getInstance(context).requestMainAction(
+                        com.example.core.ipc.MainCommandRequest(
+                            action = com.example.core.ipc.MainActionType.CUSTOM,
+                            targetId = "NAVIGATE_PAGE",
+                            parameters = mapOf("delta" to delta.toString())
+                        )
+                    )
+                    return true
+                }
+            }
+            android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> {
+                isHorizontalSwipeConsumed = false
+            }
+        }
+        return super.onInterceptTouchEvent(ev)
+    }
+
     fun getCurrentHeightPx(): Int {
         if (lastCalculatedHeightPx == 0) {
             val density = try { resources?.displayMetrics?.density ?: 1f } catch (_: Throwable) { 1f }
@@ -159,11 +194,11 @@ class AppTrackerPageView(
                     MeasureSpec.makeMeasureSpec(w, MeasureSpec.EXACTLY),
                     MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED)
                 )
-                val minH = (240 * density).toInt()
-                val maxH = (420 * density).toInt()
+                val minH = (220 * density).toInt()
+                val maxH = (280 * density).toInt()
                 lastCalculatedHeightPx = measuredHeight.coerceIn(minH, maxH)
             } catch (_: Throwable) {
-                lastCalculatedHeightPx = (300 * density).toInt()
+                lastCalculatedHeightPx = (260 * density).toInt()
             }
         }
         return lastCalculatedHeightPx
@@ -273,15 +308,15 @@ class AppTrackerPageView(
                     MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED)
                 )
                 val measuredH = measuredHeight
-                val minH = (240 * density).toInt()
-                val maxH = (420 * density).toInt()
+                val minH = (220 * density).toInt()
+                val maxH = (280 * density).toInt()
                 val targetH = measuredH.coerceIn(minH, maxH)
                 if (targetH != lastCalculatedHeightPx) {
                     lastCalculatedHeightPx = targetH
                     onHeightChanged?.invoke(targetH)
                 }
             } catch (_: Throwable) {
-                val fallbackH = (300 * density).toInt()
+                val fallbackH = (260 * density).toInt()
                 if (fallbackH != lastCalculatedHeightPx) {
                     lastCalculatedHeightPx = fallbackH
                     onHeightChanged?.invoke(fallbackH)
@@ -453,6 +488,7 @@ class AppTrackerPageView(
 
     override fun onEditClicked() {
         val intent = Intent(context, com.example.AppTrackerSettingsActivity::class.java).apply {
+            putExtra("CONTAINER_ID", containerId)
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
         context.startActivity(intent)

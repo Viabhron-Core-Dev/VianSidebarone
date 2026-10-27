@@ -1,6 +1,9 @@
 package com.example.feature.heavy.page
 
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.graphics.PixelFormat
 import android.os.Bundle
 import android.os.Build
@@ -28,6 +31,7 @@ import com.example.feature.sidebar.CalculatorPageView
 import com.example.feature.sidebar.CompassPageView
 import com.example.feature.sidebar.HybridGridPageView
 import com.example.feature.sidebar.MediaPlayerPageView
+import com.example.feature.sidebar.ResourcesTrackerPageView
 import com.example.feature.sidebar.SchedulerPageView
 import com.example.feature.sidebar.SidebarAppsManager
 import com.example.feature.sidebar.WidgetPageView
@@ -58,6 +62,50 @@ class HeavyPageHostManager private constructor(private val context: Context) {
     private val activeWindows = ConcurrentHashMap<String, PageWindowHolder>()
     private val activeEmbeddedHosts = ConcurrentHashMap<String, EmbeddedHostHolder>()
     private val lastReportedHeights = ConcurrentHashMap<String, Int>()
+
+    private val syncReceiver = object : BroadcastReceiver() {
+        override fun onReceive(ctx: Context?, intent: Intent?) {
+            if (intent?.action == com.example.core.OverlaySyncManager.ACTION_SYNC_PREF) {
+                val key = intent.getStringExtra(com.example.core.OverlaySyncManager.EXTRA_KEY) ?: ""
+                val value = intent.getStringExtra(com.example.core.OverlaySyncManager.EXTRA_VALUE) ?: ""
+                val type = intent.getStringExtra(com.example.core.OverlaySyncManager.EXTRA_TYPE) ?: ""
+                val prefs = context.getSharedPreferences("FloatingReaderPrefs", Context.MODE_PRIVATE)
+                val editor = prefs.edit()
+                when (type) {
+                    "STRING" -> editor.putString(key, value)
+                    "INT" -> editor.putInt(key, value.toIntOrNull() ?: 0)
+                    "BOOLEAN" -> editor.putBoolean(key, value.toBoolean())
+                    "FLOAT" -> editor.putFloat(key, value.toFloatOrNull() ?: 0f)
+                    "STRING_SET" -> {
+                        val set = if (value.isEmpty()) emptySet() else value.split("|||").toSet()
+                        editor.putStringSet(key, set)
+                    }
+                    "REMOVE" -> editor.remove(key)
+                }
+                editor.commit()
+                if (key.contains("app_tracker") || key.contains("whitelist")) {
+                    mainHandler.post {
+                        for (holder in activeEmbeddedHosts.values) {
+                            if (holder.pageView is AppTrackerPageView) {
+                                (holder.pageView as? com.example.feature.sidebar.SidebarPageControllable)?.onPageSelected()
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    init {
+        try {
+            val filter = IntentFilter(com.example.core.OverlaySyncManager.ACTION_SYNC_PREF)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                context.registerReceiver(syncReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+            } else {
+                context.registerReceiver(syncReceiver, filter)
+            }
+        } catch (_: Throwable) {}
+    }
 
     private data class PageWindowHolder(
         val pageId: String,
@@ -245,6 +293,36 @@ class HeavyPageHostManager private constructor(private val context: Context) {
                                 HeavyProcessHost.getInstance(context).requestCloseSidebar(containerId)
                             },
                             onAppSelected = {},
+                            onHeightChanged = { newH ->
+                                reportDesiredPageHeight(pageId, newH)
+                            }
+                        ).apply {
+                            applyThemeBackground()
+                        }
+                    }
+                    "media_player" -> {
+                        val containerId = command.payload["containerId"] ?: "sidebar"
+                        LogKeeper.log(context, TAG, "Instantiating MediaPlayerPageView in :heavy for pageId='$pageId'")
+                        MediaPlayerPageView(
+                            context = context,
+                            onCloseSidebar = {
+                                HeavyProcessHost.getInstance(context).requestCloseSidebar(containerId)
+                            },
+                            onHeightChanged = { newH ->
+                                reportDesiredPageHeight(pageId, newH)
+                            },
+                            containerId = containerId
+                        ).apply {
+                            applyThemeBackground()
+                        }
+                    }
+                    "resources_tracker" -> {
+                        val containerId = command.payload["containerId"] ?: "sidebar"
+                        LogKeeper.log(context, TAG, "Instantiating ResourcesTrackerPageView in :heavy for pageId='$pageId'")
+                        ResourcesTrackerPageView(
+                            context = context,
+                            scope = hostScope,
+                            containerId = containerId,
                             onHeightChanged = { newH ->
                                 reportDesiredPageHeight(pageId, newH)
                             }
@@ -626,6 +704,40 @@ class HeavyPageHostManager private constructor(private val context: Context) {
                             }
                         }
                     }
+                    "media_player" -> {
+                        val containerId = params.getString("containerId") ?: "sidebar"
+                        LogKeeper.log(context, TAG, "Instantiating MediaPlayerPageView in :heavy for pageId='$pageId', containerId='$containerId'")
+                        MediaPlayerPageView(
+                            context = context,
+                            onCloseSidebar = {
+                                HeavyProcessHost.getInstance(context).requestCloseSidebar(containerId)
+                            },
+                            onHeightChanged = { newH ->
+                                reportDesiredPageHeight(pageId, newH)
+                            },
+                            containerId = containerId
+                        ).apply {
+                            if (backgroundColor != 0) {
+                                applyThemeBackground(backgroundColor, isRight)
+                            }
+                        }
+                    }
+                    "resources_tracker" -> {
+                        val containerId = params.getString("containerId") ?: "sidebar"
+                        LogKeeper.log(context, TAG, "Instantiating ResourcesTrackerPageView in :heavy for pageId='$pageId', containerId='$containerId'")
+                        ResourcesTrackerPageView(
+                            context = context,
+                            scope = hostScope,
+                            containerId = containerId,
+                            onHeightChanged = { newH ->
+                                reportDesiredPageHeight(pageId, newH)
+                            }
+                        ).apply {
+                            if (backgroundColor != 0) {
+                                applyThemeBackground(backgroundColor, isRight)
+                            }
+                        }
+                    }
                     else -> {
                         LogKeeper.log(context, TAG, "Unsupported embedded page type '$pageType'")
                         latch.countDown()
@@ -645,6 +757,8 @@ class HeavyPageHostManager private constructor(private val context: Context) {
                     is CompassPageView -> pageView.getCurrentHeightPx().takeIf { it > 0 } ?: pageView.measuredHeight
                     is SchedulerPageView -> pageView.getCurrentHeightPx().takeIf { it > 0 } ?: pageView.measuredHeight
                     is AppTrackerPageView -> pageView.getCurrentHeightPx().takeIf { it > 0 } ?: pageView.measuredHeight
+                    is MediaPlayerPageView -> pageView.getCurrentHeightPx().takeIf { it > 0 } ?: pageView.measuredHeight
+                    is ResourcesTrackerPageView -> pageView.getCurrentHeightPx().takeIf { it > 0 } ?: pageView.measuredHeight
                     else -> pageView.measuredHeight
                 }
                 val finalHostHeight = if (desiredH > 0) desiredH else height
@@ -713,6 +827,8 @@ class HeavyPageHostManager private constructor(private val context: Context) {
                 (holder.pageView as? CompassPageView)?.stopListening()
                 (holder.pageView as? SchedulerPageView)?.cleanup()
                 (holder.pageView as? AppTrackerPageView)?.cleanup()
+                (holder.pageView as? MediaPlayerPageView)?.cleanup()
+                (holder.pageView as? ResourcesTrackerPageView)?.cleanup()
                 (holder.pageView as? com.example.feature.sidebar.SidebarPageControllable)?.onPageUnselected()
                 (holder.host as? android.view.SurfaceControlViewHost)?.release()
             } catch (e: Throwable) {
@@ -758,6 +874,8 @@ class HeavyPageHostManager private constructor(private val context: Context) {
                 (holder.containerView.getChildAt(0) as? CompassPageView)?.stopListening()
                 (holder.containerView.getChildAt(0) as? SchedulerPageView)?.cleanup()
                 (holder.containerView.getChildAt(0) as? AppTrackerPageView)?.cleanup()
+                (holder.containerView.getChildAt(0) as? MediaPlayerPageView)?.cleanup()
+                (holder.containerView.getChildAt(0) as? ResourcesTrackerPageView)?.cleanup()
                 (holder.containerView.getChildAt(0) as? com.example.feature.sidebar.SidebarPageControllable)?.onPageUnselected()
                 windowManager.removeViewImmediate(holder.containerView)
                 holder.isAttached = false

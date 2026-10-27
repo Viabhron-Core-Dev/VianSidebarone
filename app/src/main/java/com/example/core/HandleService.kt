@@ -487,6 +487,10 @@ class HandleService : Service(), SharedPreferences.OnSharedPreferenceChangeListe
                 }
             }
             "FLOAT" -> prefs.edit().putFloat(key, value.toFloatOrNull() ?: 0f).commit()
+            "STRING_SET" -> {
+                val set = if (value.isEmpty()) emptySet() else value.split("|||").toSet()
+                prefs.edit().putStringSet(key, set).commit()
+            }
             "REMOVE" -> prefs.edit().remove(key).commit()
             "SYNC_HANDLE" -> {
                 val bundle = intent.extras

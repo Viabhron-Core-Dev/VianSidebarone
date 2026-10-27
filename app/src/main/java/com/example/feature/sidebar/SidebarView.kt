@@ -49,9 +49,7 @@ class SidebarView(
     private val onClose: () -> Unit
 ) : FrameLayout(context) {
 
-    private val pageConfigs: List<SidebarPage> = pageConfigs.filter {
-        it.type != "media_player" && it.type != com.example.core.PageTypes.MEDIA && !it.id.startsWith("media_player")
-    }
+    private val pageConfigs: List<SidebarPage> = pageConfigs
 
     val isRight: Boolean = run {
         val legacyEdge = if (prefs.getBoolean("sidebar_position_left", false)) "left" else "right"
@@ -114,7 +112,7 @@ class SidebarView(
             initialPage.width
         } else {
             when (initialPage?.type) {
-                "calculator", "compass", "resources_tracker" -> 320
+                "calculator", "compass", "resources_tracker", "media_player" -> 320
                 "scheduler", "notifications", "notification", "app_tracker" -> 330
                 "widgets_grid", "widget" -> {
                     val cols = prefs.getInt("handle_${containerId}_widgets_grid_cols_${initialPage?.id}", prefs.getInt("widgets_grid_cols_${initialPage?.id}", 4))
@@ -145,7 +143,7 @@ class SidebarView(
             initialPage.wrapContentHeight
         } else {
             when (initialPage?.type) {
-                "calculator", "compass", "resources_tracker", "app_tracker", "scheduler", "notifications", "notification" -> true
+                "calculator", "compass", "resources_tracker", "app_tracker", "scheduler", "notifications", "notification", "media_player" -> true
                 "apps", "widgets_grid", "hybrid_grid", "default_hybrid", "widget" -> true
                 else -> true
             }
@@ -163,7 +161,8 @@ class SidebarView(
                     "scheduler" -> 520
                     "notifications", "notification" -> 520
                     "resources_tracker" -> 460
-                    "app_tracker" -> 320
+                    "app_tracker" -> 260
+                    "media_player" -> 110
                     else -> prefs.getInt("handle_${containerId}_sidebar_height", prefs.getInt("sidebar_height", 360))
                 }
             }
@@ -604,7 +603,8 @@ class SidebarView(
                         "resources_tracker" -> 160
                         "scheduler" -> 200
                         "notifications", "notification" -> 160
-                        "app_tracker" -> 320
+                        "app_tracker" -> 260
+                        "media_player" -> 110
                         "apps" -> 140
                         "widgets_grid", "widget" -> 140
                         "hybrid_grid", "default_hybrid" -> 140
@@ -620,7 +620,8 @@ class SidebarView(
                 "resources_tracker" -> 160
                 "scheduler" -> 200
                 "notifications", "notification" -> 160
-                "app_tracker" -> 320
+                "app_tracker" -> 260
+                "media_player" -> 110
                 "widgets_grid", "widget" -> prefs.getInt("handle_${containerId}_sidebar_height", prefs.getInt("sidebar_height", 280))
                 "hybrid_grid", "default_hybrid" -> prefs.getInt("handle_${containerId}_sidebar_height", prefs.getInt("sidebar_height", 280))
                 else -> prefs.getInt("handle_${containerId}_sidebar_height", prefs.getInt("sidebar_height", 280))
@@ -828,6 +829,19 @@ class SidebarView(
             if (viewPager.currentItem != targetIdx) {
                 viewPager.setCurrentItem(targetIdx, true)
             }
+        }
+    }
+
+    fun navigatePage(delta: Int) {
+        if (pageConfigs.isEmpty()) return
+        val current = viewPager.currentItem
+        val nextItem = if (isLooping) {
+            current + delta
+        } else {
+            (current + delta).coerceIn(0, pageConfigs.size - 1)
+        }
+        if (nextItem != current) {
+            viewPager.setCurrentItem(nextItem, true)
         }
     }
     

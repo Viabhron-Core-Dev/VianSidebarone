@@ -3,6 +3,7 @@ package com.example.feature.sidebar
 import android.annotation.SuppressLint
 import android.content.ComponentName
 import android.content.Context
+import android.content.Intent
 import android.graphics.Color
 import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
@@ -10,29 +11,25 @@ import android.media.MediaMetadata
 import android.media.session.MediaController
 import android.media.session.MediaSessionManager
 import android.media.session.PlaybackState
+import android.provider.Settings
 import android.view.LayoutInflater
+import android.view.MotionEvent
 import android.view.View
+import android.view.ViewConfiguration
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.TextView
 import com.example.R
 import com.example.service.AppNotificationListener
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancelChildren
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
+import kotlin.math.abs
 
 @SuppressLint("ViewConstructor")
 class MediaPlayerPageView(
     context: Context,
     private val onCloseSidebar: () -> Unit = {},
     private val onHeightChanged: ((Int) -> Unit)? = null,
-    val containerId: String = "sidebar",
-    val scope: CoroutineScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+    val containerId: String = "sidebar"
 ) : FrameLayout(context), SidebarPageControllable {
 
     private val mediaSessionManager = try {
@@ -45,6 +42,7 @@ class MediaPlayerPageView(
     private var metadata: MediaMetadata? = null
 
     private val llBlank: View?
+    private val tvBlankStatus: TextView?
     private val llPlayer: View?
     private val ivArtwork: ImageView?
     private val tvTitle: TextView?
@@ -54,12 +52,17 @@ class MediaPlayerPageView(
     private val btnNext: ImageView?
 
     private var currentHeightPx = 0
-    private var updateJob: Job? = null
+    private var isListening = false
 
     var themeBackgroundDrawable: Drawable? = null
         private set
 
-    private val callback = object : MediaController.Callback() {
+    private var downX = 0f
+    private var downY = 0f
+    private var isHorizontalSwipeConsumed = false
+    private val touchSlop = try { ViewConfiguration.get(context).scaledTouchSlop } catch (_: Throwable) { 16 }
+
+    private val controllerCallback = object : MediaController.Callback() {
         override fun onPlaybackStateChanged(state: PlaybackState?) {
             playbackState = state
             updateUI()
@@ -71,16 +74,26 @@ class MediaPlayerPageView(
         }
     }
 
+    private val sessionsChangedListener = MediaSessionManager.OnActiveSessionsChangedListener { controllers ->
+        post { updateStateWithControllers(controllers) }
+    }
+
     init {
         layoutParams = ViewGroup.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT,
-            ViewGroup.LayoutParams.MATCH_PARENT
+            ViewGroup.LayoutParams.WRAP_CONTENT
         )
         try {
             LayoutInflater.from(context).inflate(R.layout.page_media_player, this, true)
         } catch (_: Throwable) {}
 
         llBlank = findViewById(R.id.ll_blank)
+        tvBlankStatus = llBlank?.findViewById(android.R.id.text1) ?: llBlank?.findViewWithTag("status") ?: run {
+            // Find any TextView in llBlank
+            (llBlank as? ViewGroup)?.let { vg ->
+                (0 until vg.childCount).map { vg.getChildAt(it) }.filterIsInstance<TextView>().firstOrNull()
+            }
+        }
         llPlayer = findViewById(R.id.ll_player)
         ivArtwork = findViewById(R.id.iv_artwork)
         tvTitle = findViewById(R.id.tv_title)
@@ -109,34 +122,45 @@ class MediaPlayerPageView(
             } catch (_: Throwable) {}
         }
 
-        addOnLayoutChangeListener { _, _, top, _, bottom, _, _, _, _ ->
-            val height = bottom - top
-            if (currentHeightPx != height && height > 0) {
-                currentHeightPx = height
-                onHeightChanged?.invoke(height)
-            }
-        }
-
         updateState()
         updateUI()
+    }
+
+    override fun onInterceptTouchEvent(ev: MotionEvent): Boolean {
+        when (ev.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                downX = ev.rawX
+                downY = ev.rawY
+                isHorizontalSwipeConsumed = false
+            }
+            MotionEvent.ACTION_MOVE -> {
+                val dx = ev.rawX - downX
+                val dy = ev.rawY - downY
+                if (!isHorizontalSwipeConsumed && abs(dx) > touchSlop * 2 && abs(dx) > abs(dy) * 1.5f) {
+                    isHorizontalSwipeConsumed = true
+                    val delta = if (dx < 0) 1 else -1
+                    com.example.core.ipc.HeavyProcessHost.getInstance(context).requestMainAction(
+                        com.example.core.ipc.MainCommandRequest(
+                            action = com.example.core.ipc.MainActionType.CUSTOM,
+                            targetId = "NAVIGATE_PAGE",
+                            parameters = mapOf("delta" to delta.toString())
+                        )
+                    )
+                    return true
+                }
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                isHorizontalSwipeConsumed = false
+            }
+        }
+        return super.onInterceptTouchEvent(ev)
     }
 
     fun getCurrentHeightPx(): Int {
         if (currentHeightPx > 0) return currentHeightPx
         val density = try { resources?.displayMetrics?.density ?: 1f } catch (_: Throwable) { 1f }
-        val fallbackW = (300 * density).toInt()
-        val w = if (width > 0) width else fallbackW
-        try {
-            measure(
-                MeasureSpec.makeMeasureSpec(w, MeasureSpec.EXACTLY),
-                MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED)
-            )
-            val minH = (80 * density).toInt()
-            val maxH = (120 * density).toInt()
-            currentHeightPx = measuredHeight.coerceIn(minH, maxH)
-        } catch (_: Throwable) {
-            currentHeightPx = (100 * density).toInt()
-        }
+        val targetH = if (activeController != null) (110 * density).toInt() else (90 * density).toInt()
+        currentHeightPx = targetH
         return currentHeightPx
     }
 
@@ -175,82 +199,101 @@ class MediaPlayerPageView(
     }
 
     fun cleanup() {
-        stopUpdates()
-        scope.coroutineContext[Job]?.cancelChildren()
+        stopListening()
     }
 
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
-        updateState()
-        updateUI()
-        startUpdates()
+        startListening()
     }
 
     override fun onDetachedFromWindow() {
         super.onDetachedFromWindow()
-        stopUpdates()
-    }
-
-    override fun onWindowVisibilityChanged(visibility: Int) {
-        super.onWindowVisibilityChanged(visibility)
-        if (visibility == View.VISIBLE) {
-            updateState()
-            updateUI()
-            startUpdates()
-        } else {
-            stopUpdates()
-        }
+        stopListening()
     }
 
     override fun onPageSelected() {
-        startUpdates()
+        startListening()
     }
 
     override fun onPageUnselected() {
-        stopUpdates()
+        stopListening()
         ivArtwork?.setImageDrawable(null)
     }
 
-    private fun startUpdates() {
-        if (updateJob?.isActive == true) return
-        updateJob = scope.launch {
-            while (true) {
-                updateState()
-                delay(1000)
+    private fun startListening() {
+        if (isListening) return
+        isListening = true
+        try {
+            val pkg = context.packageName ?: ""
+            if (pkg.isNotEmpty()) {
+                val componentName = ComponentName(pkg, AppNotificationListener::class.java.name)
+                mediaSessionManager?.addOnActiveSessionsChangedListener(sessionsChangedListener, componentName)
             }
-        }
+        } catch (_: Throwable) {}
+        updateState()
     }
 
-    private fun stopUpdates() {
-        updateJob?.cancel()
-        updateJob = null
+    private fun stopListening() {
+        isListening = false
         try {
-            activeController?.unregisterCallback(callback)
+            mediaSessionManager?.removeOnActiveSessionsChangedListener(sessionsChangedListener)
         } catch (_: Throwable) {}
+        try {
+            activeController?.unregisterCallback(controllerCallback)
+        } catch (_: Throwable) {}
+        activeController = null
+    }
+
+    private fun hasNotificationAccess(): Boolean {
+        return try {
+            val cr = context.contentResolver ?: return false
+            val enabled = Settings.Secure.getString(cr, "enabled_notification_listeners") ?: return false
+            val pkg = context.packageName ?: return false
+            val myService = ComponentName(pkg, AppNotificationListener::class.java.name).flattenToString()
+            enabled.contains(myService)
+        } catch (_: Throwable) {
+            false
+        }
     }
 
     private fun updateState() {
         try {
             val manager = mediaSessionManager ?: return
-            val componentName = ComponentName(context, AppNotificationListener::class.java)
+            val pkg = context.packageName ?: return
+            val componentName = ComponentName(pkg, AppNotificationListener::class.java.name)
             val controllers = manager.getActiveSessions(componentName)
-            val controller = controllers.firstOrNull { it.playbackState?.state == PlaybackState.STATE_PLAYING }
-                ?: controllers.firstOrNull()
+            updateStateWithControllers(controllers)
+        } catch (_: SecurityException) {
+            updateStateWithControllers(emptyList())
+        } catch (_: Throwable) {
+            updateStateWithControllers(emptyList())
+        }
+    }
 
-            if (controller != activeController) {
-                try {
-                    activeController?.unregisterCallback(callback)
-                } catch (_: Throwable) {}
-                activeController = controller
-                try {
-                    activeController?.registerCallback(callback)
-                } catch (_: Throwable) {}
-            }
-            playbackState = activeController?.playbackState
-            metadata = activeController?.metadata
-            updateUI()
-        } catch (e: Exception) {
-            e.printStackTrace()
+    private fun updateStateWithControllers(controllers: List<MediaController>?) {
+        val list = controllers ?: emptyList()
+        val controller = list.firstOrNull { it.playbackState?.state == PlaybackState.STATE_PLAYING }
+            ?: list.firstOrNull()
+
+        if (controller != activeController) {
+            try {
+                activeController?.unregisterCallback(controllerCallback)
+            } catch (_: Throwable) {}
+            activeController = controller
+            try {
+                activeController?.registerCallback(controllerCallback)
+            } catch (_: Throwable) {}
+        }
+        playbackState = activeController?.playbackState
+        metadata = activeController?.metadata
+        updateUI()
+
+        val density = try { resources?.displayMetrics?.density ?: 1f } catch (_: Throwable) { 1f }
+        val targetH = if (activeController != null) (110 * density).toInt() else (90 * density).toInt()
+        if (targetH != currentHeightPx) {
+            currentHeightPx = targetH
+            onHeightChanged?.invoke(targetH)
         }
     }
 
@@ -258,6 +301,21 @@ class MediaPlayerPageView(
         if (activeController == null) {
             llBlank?.visibility = View.VISIBLE
             llPlayer?.visibility = View.GONE
+
+            if (!hasNotificationAccess()) {
+                tvBlankStatus?.text = "Grant Notification Access to mirror media"
+                llBlank?.setOnClickListener {
+                    try {
+                        val intent = Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS).apply {
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                        context.startActivity(intent)
+                    } catch (_: Throwable) {}
+                }
+            } else {
+                tvBlankStatus?.text = "Nothing playing"
+                llBlank?.setOnClickListener(null)
+            }
         } else {
             llBlank?.visibility = View.GONE
             llPlayer?.visibility = View.VISIBLE

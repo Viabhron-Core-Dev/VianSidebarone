@@ -98,6 +98,18 @@ class SidebarWindowCoordinator private constructor(context: Context) {
     }
 
     /**
+     * Navigates the active Sidebar ViewPager page by delta (-1 for previous, +1 for next).
+     */
+    fun navigatePage(delta: Int) {
+        runOnMain {
+            val window = activeSidebarWindow
+            if (window != null && window.isAttached) {
+                window.sidebarView?.navigatePage(delta)
+            }
+        }
+    }
+
+    /**
      * Closes the Sidebar overlay with slide-out animation and detaches cleanly.
      */
     fun closeSidebar() {

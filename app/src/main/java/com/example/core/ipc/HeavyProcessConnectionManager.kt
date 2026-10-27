@@ -535,6 +535,13 @@ class HeavyProcessConnectionManager internal constructor(
                                 com.example.feature.sidebar.SidebarManager.getInstance(ctx).openContainerById(targetId)
                             }
                         }
+                        MainActionType.CUSTOM -> {
+                            if (request.targetId == "NAVIGATE_PAGE") {
+                                val delta = request.parameters["delta"]?.toIntOrNull() ?: 0
+                                safeLog("HeavyProcessConnectionManager", "Executing NAVIGATE_PAGE delta=$delta from Heavy")
+                                com.example.feature.sidebar.SidebarWindowCoordinator.getInstance(ctx).navigatePage(delta)
+                            }
+                        }
                         else -> {
                             // Handled by listeners or unhandled
                         }

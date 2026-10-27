@@ -39,7 +39,7 @@ class AppsPageView(
     private val prefs = context.getSharedPreferences("FloatingReaderPrefs", Context.MODE_PRIVATE)
 
     private var columns: Int = 3
-    private val recyclerView: RecyclerView
+    private val recyclerView: RecyclerView?
     private val adapter: AppsAdapter
 
     private var displayedItems = listOf<SidebarItem>()
@@ -90,7 +90,7 @@ class AppsPageView(
     private var emptyView: android.widget.LinearLayout
 
     init {
-        val density = context.resources.displayMetrics.density
+        val density = try { context.resources?.displayMetrics?.density ?: 1f } catch (_: Throwable) { 1f }
         val containerCols = prefs.getInt("handle_${containerId}_page_${pageConfig?.id}_columns", -1)
         val c = if (containerCols != -1) containerCols else prefs.getInt("handle_${handleId}_page_${pageConfig?.id}_columns", -1)
         val defaultCols = prefs.getInt("handle_${containerId}_columns", prefs.getInt("handle_${handleId}_columns", prefs.getInt("sidebar_columns", 3)))
@@ -98,19 +98,23 @@ class AppsPageView(
 
         adapter = AppsAdapter(displayedItems)
 
-        recyclerView = RecyclerView(context).apply {
-            layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply {
-                topMargin = 0
-            }
-            layoutManager = GridLayoutManager(context, columns).apply {
-                spanSizeLookup = object : GridLayoutManager.SpanSizeLookup() {
-                    override fun getSpanSize(position: Int): Int {
-                        return if (this@AppsPageView.adapter.getItemViewType(position) == 1) columns else 1
+        recyclerView = try {
+            RecyclerView(context).apply {
+                layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply {
+                    topMargin = 0
+                }
+                layoutManager = GridLayoutManager(context, columns).apply {
+                    spanSizeLookup = object : GridLayoutManager.SpanSizeLookup() {
+                        override fun getSpanSize(position: Int): Int {
+                            return if (this@AppsPageView.adapter.getItemViewType(position) == 1) columns else 1
+                        }
                     }
                 }
+                setHasFixedSize(true)
+                setItemViewCacheSize(20)
             }
-            setHasFixedSize(true)
-            setItemViewCacheSize(20)
+        } catch (_: Throwable) {
+            null
         }
 
         emptyView = android.widget.LinearLayout(context).apply {
@@ -133,9 +137,9 @@ class AppsPageView(
             visibility = android.view.View.GONE
         }
 
-        recyclerView.adapter = adapter
+        recyclerView?.adapter = adapter
 
-        addView(recyclerView)
+        recyclerView?.let { addView(it) }
         addView(emptyView)
     }
 
@@ -147,7 +151,7 @@ class AppsPageView(
             val updatedCols = if (pageConfig?.useCustomSettings == true) pageConfig.gridColumns else (if (c != -1) c else defaultCols)
             if (updatedCols != columns && updatedCols > 0) {
                 columns = updatedCols
-                (recyclerView.layoutManager as? GridLayoutManager)?.spanCount = columns
+                (recyclerView?.layoutManager as? GridLayoutManager)?.spanCount = columns
             }
             updateData(manager.activeItems)
         }
@@ -181,7 +185,7 @@ class AppsPageView(
 
     fun getDisplayedItems(): List<SidebarItem> = displayedItems
     fun getEmptyViewVisibility(): Int = emptyView.visibility
-    fun getRecyclerViewVisibility(): Int = recyclerView.visibility
+    fun getRecyclerViewVisibility(): Int = recyclerView?.visibility ?: android.view.View.GONE
 
     companion object {
         /**
@@ -234,10 +238,10 @@ class AppsPageView(
         
         if (displayedItems.isEmpty()) {
             emptyView.visibility = android.view.View.VISIBLE
-            recyclerView.visibility = android.view.View.GONE
+            recyclerView?.visibility = android.view.View.GONE
         } else {
             emptyView.visibility = android.view.View.GONE
-            recyclerView.visibility = android.view.View.VISIBLE
+            recyclerView?.visibility = android.view.View.VISIBLE
         }
 
         calculateAndDispatchHeight()

@@ -625,5 +625,24 @@ class FakeContext(private val prefs: FakeSharedPreferences) : android.content.Co
     override fun getSharedPreferences(name: String?, mode: Int): SharedPreferences = prefs
     override fun getApplicationContext(): Context = this
     override fun getPackageName(): String = "com.example"
-    override fun getResources(): android.content.res.Resources = android.content.res.Resources.getSystem()
+
+    private val fakeResources: android.content.res.Resources by lazy {
+        val dm = android.util.DisplayMetrics().apply {
+            density = 2f
+            widthPixels = 800
+            heightPixels = 1600
+        }
+        val conf = android.content.res.Configuration()
+        val am = try {
+            android.content.res.AssetManager::class.java.getConstructor().newInstance()
+        } catch (_: Throwable) {
+            android.content.res.AssetManager::class.java.getDeclaredConstructor().apply { isAccessible = true }.newInstance()
+        }
+        @Suppress("DEPRECATION")
+        object : android.content.res.Resources(am, dm, conf) {
+            override fun getDisplayMetrics(): android.util.DisplayMetrics = dm
+        }
+    }
+
+    override fun getResources(): android.content.res.Resources = fakeResources
 }

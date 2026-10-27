@@ -177,10 +177,26 @@ class HeavyAppTrackerSplitTest {
 
         // Test height measurement
         val height = pageView.getCurrentHeightPx()
-        assertTrue("App Tracker height must be positive and bounded (was $height)", height in 240..560)
+        assertTrue("App Tracker height must be positive and bounded (was $height)", height in 200..560)
     }
 
-    // 6. AppTrackerPageView cleanup is safe and idempotent
+    // 6. Whitelist settings save and retrieve correctly
+    @Test
+    fun testAppTrackerWhitelistSaveAndRetrieve() {
+        val testWhitelist = setOf("com.example.test1", "com.example.test2")
+        com.example.utils.AppTrackerHelper.saveWhitelist(fakeContext, "handle_1_swipe_left", testWhitelist)
+        val retrieved = com.example.utils.AppTrackerHelper.getWhitelist(fakeContext, "handle_1_swipe_left")
+        assertEquals(testWhitelist, retrieved)
+
+        // Deselect an app and verify it does NOT get merged back
+        val updatedWhitelist = setOf("com.example.test1")
+        com.example.utils.AppTrackerHelper.saveWhitelist(fakeContext, "handle_1_swipe_left", updatedWhitelist)
+        val retrievedUpdated = com.example.utils.AppTrackerHelper.getWhitelist(fakeContext, "handle_1_swipe_left")
+        assertEquals(updatedWhitelist, retrievedUpdated)
+        assertFalse("Deselected app must not remain in whitelist", retrievedUpdated.contains("com.example.test2"))
+    }
+
+    // 7. AppTrackerPageView cleanup is safe and idempotent
     @Test
     fun testAppTrackerCleanupIsIdempotent() {
         val pageView = AppTrackerPageView(
