@@ -162,7 +162,7 @@ class SidebarView(
                     "notifications", "notification" -> 520
                     "resources_tracker" -> 460
                     "app_tracker" -> 260
-                    "media_player" -> 110
+                    "media_player" -> 180
                     else -> prefs.getInt("handle_${containerId}_sidebar_height", prefs.getInt("sidebar_height", 360))
                 }
             }
@@ -604,7 +604,7 @@ class SidebarView(
                         "scheduler" -> 200
                         "notifications", "notification" -> 160
                         "app_tracker" -> 260
-                        "media_player" -> 110
+                        "media_player" -> 180
                         "apps" -> 140
                         "widgets_grid", "widget" -> 140
                         "hybrid_grid", "default_hybrid" -> 140
@@ -621,7 +621,7 @@ class SidebarView(
                 "scheduler" -> 200
                 "notifications", "notification" -> 160
                 "app_tracker" -> 260
-                "media_player" -> 110
+                "media_player" -> 180
                 "widgets_grid", "widget" -> prefs.getInt("handle_${containerId}_sidebar_height", prefs.getInt("sidebar_height", 280))
                 "hybrid_grid", "default_hybrid" -> prefs.getInt("handle_${containerId}_sidebar_height", prefs.getInt("sidebar_height", 280))
                 else -> prefs.getInt("handle_${containerId}_sidebar_height", prefs.getInt("sidebar_height", 280))
