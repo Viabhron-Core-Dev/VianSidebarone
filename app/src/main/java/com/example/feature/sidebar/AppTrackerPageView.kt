@@ -108,6 +108,7 @@ class AppTrackerPageView(
         tabRunning = tRunning
         tabCache = tCache
         fabStopAll = fStop
+        fabStopAll?.bringToFront()
 
         try {
             recyclerView?.adapter = adapter
@@ -158,11 +159,11 @@ class AppTrackerPageView(
                     MeasureSpec.makeMeasureSpec(w, MeasureSpec.EXACTLY),
                     MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED)
                 )
-                val minH = (180 * density).toInt()
-                val maxH = (360 * density).toInt()
+                val minH = (240 * density).toInt()
+                val maxH = (420 * density).toInt()
                 lastCalculatedHeightPx = measuredHeight.coerceIn(minH, maxH)
             } catch (_: Throwable) {
-                lastCalculatedHeightPx = (180 * density).toInt()
+                lastCalculatedHeightPx = (300 * density).toInt()
             }
         }
         return lastCalculatedHeightPx
@@ -212,7 +213,6 @@ class AppTrackerPageView(
         } catch (_: Throwable) {
             false
         }
-        val changed = (perm != hasUsageStatsPermission)
         hasUsageStatsPermission = perm
         llPermissionBanner?.visibility = if (hasUsageStatsPermission) View.GONE else View.VISIBLE
         loadData()
@@ -223,28 +223,12 @@ class AppTrackerPageView(
     }
 
     override fun onPageUnselected() {
-        recentApps = emptyList()
-        cacheApps = emptyList()
-        adapter.submitList(emptyList(), true)
+        // Keep loaded state in memory so subsequent selection or layout passes do not flash blank
     }
 
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
         refreshPermissionAndData()
-    }
-
-    override fun onWindowFocusChanged(hasWindowFocus: Boolean) {
-        super.onWindowFocusChanged(hasWindowFocus)
-        if (hasWindowFocus) {
-            refreshPermissionAndData()
-        }
-    }
-
-    override fun onWindowVisibilityChanged(visibility: Int) {
-        super.onWindowVisibilityChanged(visibility)
-        if (visibility == View.VISIBLE) {
-            refreshPermissionAndData()
-        }
     }
 
     private fun setTab(index: Int) {
@@ -255,7 +239,8 @@ class AppTrackerPageView(
                 tabRunning?.setTextColor(0xFF000000.toInt())
                 tabCache?.setBackgroundResource(R.drawable.bg_tab_unselected)
                 tabCache?.setTextColor(0xFFFFFFFF.toInt())
-                fabStopAll?.visibility = if (recentApps.isNotEmpty()) View.VISIBLE else View.GONE
+                fabStopAll?.visibility = View.VISIBLE
+                fabStopAll?.bringToFront()
                 recyclerView?.layoutManager = GridLayoutManager(context, 4)
                 updateList(recentApps, true)
             } else {
@@ -288,14 +273,19 @@ class AppTrackerPageView(
                     MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED)
                 )
                 val measuredH = measuredHeight
-                val minH = (180 * density).toInt()
-                val maxH = (360 * density).toInt()
+                val minH = (240 * density).toInt()
+                val maxH = (420 * density).toInt()
                 val targetH = measuredH.coerceIn(minH, maxH)
-                lastCalculatedHeightPx = targetH
-                onHeightChanged?.invoke(targetH)
+                if (targetH != lastCalculatedHeightPx) {
+                    lastCalculatedHeightPx = targetH
+                    onHeightChanged?.invoke(targetH)
+                }
             } catch (_: Throwable) {
-                lastCalculatedHeightPx = (180 * density).toInt()
-                onHeightChanged?.invoke(lastCalculatedHeightPx)
+                val fallbackH = (300 * density).toInt()
+                if (fallbackH != lastCalculatedHeightPx) {
+                    lastCalculatedHeightPx = fallbackH
+                    onHeightChanged?.invoke(fallbackH)
+                }
             }
         }
     }
@@ -308,11 +298,15 @@ class AppTrackerPageView(
             } else {
                 recentApps = emptyList()
             }
+            if (selectedTab == 0) {
+                setTab(0)
+            }
             
             val caches = withContext(Dispatchers.IO) { getAppsWithCache(context) }
             cacheApps = caches
-
-            setTab(selectedTab) // Refresh UI
+            if (selectedTab == 1) {
+                setTab(1)
+            }
         }
     }
     

@@ -118,3 +118,35 @@ Capped at 500 lines per file.
 * Any deviation from what was requested, and why: None. No global touch workarounds or generic SurfaceView modifications introduced. All existing working pages untouched.
 * Any known issue or follow-up needed: Ready for on-device manual QA validation of swiping from App Tracker and Media Player.
 
+---
+
+* Timestamp: 2026-10-26T15:56:00-07:00
+* One-line summary of what was requested: Focused fix restoring App Tracker visible UI (tab pills and FAB), stabilizing mount churn, and cleanly removing Media Player as an available Sidebar page.
+* Exact files touched:
+  - app/src/main/res/layout/page_app_tracker.xml
+  - app/src/main/java/com/example/feature/sidebar/AppTrackerPageView.kt
+  - app/src/main/java/com/example/feature/sidebar/SidebarView.kt
+  - app/src/main/java/com/example/feature/sidebar/SidebarPageFactory.kt
+  - app/src/main/java/com/example/feature/heavy/page/HeavyPageHostManager.kt
+  - app/src/main/java/com/example/feature/settings/handle/HandleSettingsScreen.kt
+  - app/src/test/java/com/example/feature/sidebar/HeavyAppTrackerSplitTest.kt
+  - app/src/test/java/com/example/feature/sidebar/HeavyMediaPlayerSplitTest.kt
+  - receipts/RECEIPTS_098.md
+* What was actually done:
+  - Task 1 (App Tracker UI Restoration & Mount Churn Elimination):
+    * Root cause analysis: In the previous turn, `onWindowFocusChanged` and `onWindowVisibilityChanged` were added to `AppTrackerPageView`, which repeatedly fired on every WindowManager layout change, causing rapid coroutine queries, unconditional `onHeightChanged` dispatches, ViewPager rebinds, and detachment/unbinding where `embeddedSurfaceView?.alpha` was set to 0f, making the surface blank. Furthermore, `onPageUnselected()` was aggressively clearing all app data, and `setTab(0)` was hiding the FAB when `recentApps` was empty.
+    * Removed `onWindowFocusChanged` and `onWindowVisibilityChanged` listeners to permanently eliminate the oscillation feedback loop.
+    * Restored Tab 0 FAB visibility (`fabStopAll?.visibility = View.VISIBLE`), brought FAB to front (`bringToFront()`), and added `android:translationZ="6dp"` to `page_app_tracker.xml`.
+    * Retained loaded app lists in `onPageUnselected()` so page does not clear state on temporary unselect/rebind passes.
+    * Added change-deduplication to `updateList` (`if (targetH != lastCalculatedHeightPx)`), preventing spurious height reporting.
+    * Bounded measured height to a comfortable compact range (`minH = 240dp`, `maxH = 420dp`, fallback `320dp`), preventing tab pills from being pushed off-screen while staying safely above the bottom navigation bar.
+    * Updated `SidebarView.kt` initial fallback height for `app_tracker` to 320dp.
+  - Task 2 (Clean Removal of Media Player Sidebar Page):
+    * Removed Media Player from user-facing Add Page dialog in `HandleSettingsScreen.kt`.
+    * In `SidebarView.kt`, sanitized incoming `pageConfigs` by filtering out any legacy or saved Media Player page entries (`it.type != "media_player"`), ensuring existing configs cannot break ViewPager, crash, or attempt Heavy connection.
+    * In `SidebarPageFactory.kt`, updated `"media_player"` routing to return an inert zero-sized GONE view fallback.
+    * In `HeavyPageHostManager.kt`, removed obsolete Media Player hosting, theme application, and cleanup blocks.
+    * Updated `HeavyMediaPlayerSplitTest.kt` to prove safe decommission without creating Heavy placeholders.
+* How it was verified: local build only (`gradle :app:testDebugUnitTest --tests "com.example.feature.sidebar.HeavyAppTrackerSplitTest" --tests "com.example.feature.sidebar.HeavyMediaPlayerSplitTest" --tests "com.example.feature.sidebar.HeavySchedulerSplitTest" --tests "com.example.feature.sidebar.HeavyCompassSplitTest"` passed with 26/26 tests; `compile_applet` passed cleanly; transient keystore files purged per Credential Immunity Rule).
+* Any deviation from what was requested, and why: None. Retained `setZOrderOnTop(true)` and Main/Heavy process split. Internet Speed Monitor, Scheduler, Calculator, Apps, Widgets, Compass, and Notifications untouched.
+* Any known issue or follow-up needed: Ready for physical device verification of restored App Tracker UI, smooth horizontal swiping, and clean omission of Media Player.

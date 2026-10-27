@@ -44,10 +44,14 @@ class SidebarView(
     private val windowManager: WindowManager,
     val physicalHandleId: String,
     val containerId: String,
-    private val pageConfigs: List<SidebarPage>,
+    pageConfigs: List<SidebarPage>,
     private val defaultPageIndex: Int,
     private val onClose: () -> Unit
 ) : FrameLayout(context) {
+
+    private val pageConfigs: List<SidebarPage> = pageConfigs.filter {
+        it.type != "media_player" && it.type != com.example.core.PageTypes.MEDIA && !it.id.startsWith("media_player")
+    }
 
     val isRight: Boolean = run {
         val legacyEdge = if (prefs.getBoolean("sidebar_position_left", false)) "left" else "right"
@@ -112,7 +116,6 @@ class SidebarView(
             when (initialPage?.type) {
                 "calculator", "compass", "resources_tracker" -> 320
                 "scheduler", "notifications", "notification", "app_tracker" -> 330
-                "media_player" -> 300
                 "widgets_grid", "widget" -> {
                     val cols = prefs.getInt("handle_${containerId}_widgets_grid_cols_${initialPage?.id}", prefs.getInt("widgets_grid_cols_${initialPage?.id}", 4))
                     if (cols == 3) prefs.getInt("handle_${containerId}_sidebar_width", prefs.getInt("sidebar_width", 220))
@@ -142,7 +145,7 @@ class SidebarView(
             initialPage.wrapContentHeight
         } else {
             when (initialPage?.type) {
-                "calculator", "compass", "resources_tracker", "media_player", "app_tracker", "scheduler", "notifications", "notification" -> true
+                "calculator", "compass", "resources_tracker", "app_tracker", "scheduler", "notifications", "notification" -> true
                 "apps", "widgets_grid", "hybrid_grid", "default_hybrid", "widget" -> true
                 else -> true
             }
@@ -160,8 +163,7 @@ class SidebarView(
                     "scheduler" -> 520
                     "notifications", "notification" -> 520
                     "resources_tracker" -> 460
-                    "app_tracker" -> 180
-                    "media_player" -> 100
+                    "app_tracker" -> 320
                     else -> prefs.getInt("handle_${containerId}_sidebar_height", prefs.getInt("sidebar_height", 360))
                 }
             }
@@ -548,7 +550,6 @@ class SidebarView(
                 "compass" -> 250
                 "resources_tracker" -> 320
                 "scheduler", "notifications", "notification", "app_tracker" -> 330
-                "media_player" -> 300
                 "widgets_grid", "widget" -> {
                     val cols = prefs.getInt("handle_${containerId}_widgets_grid_cols_${page.id}", prefs.getInt("widgets_grid_cols_${page.id}", 4))
                     if (cols == 3) prefs.getInt("handle_${containerId}_sidebar_width", prefs.getInt("sidebar_width", 220))
@@ -601,10 +602,9 @@ class SidebarView(
                         "calculator" -> 260
                         "compass" -> 270
                         "resources_tracker" -> 160
-                        "media_player" -> 100
                         "scheduler" -> 200
                         "notifications", "notification" -> 160
-                        "app_tracker" -> 180
+                        "app_tracker" -> 320
                         "apps" -> 140
                         "widgets_grid", "widget" -> 140
                         "hybrid_grid", "default_hybrid" -> 140
@@ -618,10 +618,9 @@ class SidebarView(
                 "calculator" -> 260
                 "compass" -> 270
                 "resources_tracker" -> 160
-                "media_player" -> 100
                 "scheduler" -> 200
                 "notifications", "notification" -> 160
-                "app_tracker" -> 180
+                "app_tracker" -> 320
                 "widgets_grid", "widget" -> prefs.getInt("handle_${containerId}_sidebar_height", prefs.getInt("sidebar_height", 280))
                 "hybrid_grid", "default_hybrid" -> prefs.getInt("handle_${containerId}_sidebar_height", prefs.getInt("sidebar_height", 280))
                 else -> prefs.getInt("handle_${containerId}_sidebar_height", prefs.getInt("sidebar_height", 280))

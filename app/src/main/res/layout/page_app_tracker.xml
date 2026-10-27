@@ -140,6 +140,7 @@
         android:layout_marginBottom="64dp"
         android:background="@drawable/bg_fab_circle"
         android:elevation="6dp"
+        android:translationZ="6dp"
         android:src="@android:drawable/ic_media_play"
         android:tint="#000000"
         android:contentDescription="Stop All" />

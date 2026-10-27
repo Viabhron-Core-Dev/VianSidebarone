@@ -902,7 +902,6 @@ fun ContainerPageManagementScreen(
             com.example.core.PageTypes.WIDGET to "Single Widget",
             com.example.core.PageTypes.CALCULATOR to "Calculator",
             com.example.core.PageTypes.COMPASS to "Compass",
-            com.example.core.PageTypes.MEDIA to "Media Player",
             com.example.core.PageTypes.APP_TRACKER to "App Tracker",
             com.example.core.PageTypes.RESOURCES_TRACKER to "Resources Tracker",
             com.example.core.PageTypes.SCHEDULER to "Scheduler",

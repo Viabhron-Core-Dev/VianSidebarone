@@ -89,8 +89,12 @@ class DefaultSidebarPageFactory(
             "app_tracker" -> HeavyPagePlaceholderView(context, config, containerId) { newHeight ->
                 onHeightChanged(newHeight)
             }
-            "media_player" -> HeavyPagePlaceholderView(context, config, containerId) { newHeight ->
-                onHeightChanged(newHeight)
+            "media_player" -> {
+                // Media Player is removed as an available Sidebar page. Fail safely without breaking Heavy or crashing.
+                View(context).apply {
+                    visibility = View.GONE
+                    layoutParams = FrameLayout.LayoutParams(0, 0)
+                }
             }
             "widget", "single_widget" -> {
                 HeavyPagePlaceholderView(context, config, containerId) { newHeight ->

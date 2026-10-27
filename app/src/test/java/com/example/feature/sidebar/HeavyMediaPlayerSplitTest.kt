@@ -42,9 +42,9 @@ class HeavyMediaPlayerSplitTest {
         factory = DefaultSidebarPageFactory(fakePrefs)
     }
 
-    // 1. Media Player routes to Heavy (HeavyPagePlaceholderView in Main)
+    // 1. Media Player decommissions safely (does not create HeavyPagePlaceholderView, does not break Heavy)
     @Test
-    fun testMediaPlayerRoutesToHeavyPlaceholder() {
+    fun testMediaPlayerFailsSafelyWithoutHeavyPlaceholder() {
         val mediaPlayerConfig = SidebarPage(id = "media_player_default", title = "Media Player", type = "media_player")
         val view = factory.createPageView(
             context = fakeContext,
@@ -56,7 +56,7 @@ class HeavyMediaPlayerSplitTest {
             setDimmed = {},
             onHeightChanged = {}
         )
-        assertTrue("Media Player page must route to HeavyPagePlaceholderView in Main", view is HeavyPagePlaceholderView)
+        assertFalse("Media Player page must NOT route to HeavyPagePlaceholderView in Main", view is HeavyPagePlaceholderView)
     }
 
     // 2. Exact default_hybrid Home Grid still routes to Main
@@ -93,8 +93,7 @@ class HeavyMediaPlayerSplitTest {
             SidebarPage(id = "sched_1", title = "Scheduler", type = "scheduler"),
             SidebarPage(id = "apps_1", title = "Apps", type = "apps"),
             SidebarPage(id = "widgets_1", title = "Widgets", type = "widgets_grid"),
-            SidebarPage(id = "app_tracker_1", title = "App Tracker", type = "app_tracker"),
-            SidebarPage(id = "media_player_1", title = "Media Player", type = "media_player")
+            SidebarPage(id = "app_tracker_1", title = "App Tracker", type = "app_tracker")
         )
         for (page in pages) {
             val view = factory.createPageView(
