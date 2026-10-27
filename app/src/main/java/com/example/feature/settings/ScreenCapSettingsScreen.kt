@@ -77,6 +77,7 @@ fun ScreenCapSettingsScreen(onBack: () -> Unit) {
             }
             val path = uri.toString()
             prefs.edit().putString("save_location", path).apply()
+            com.example.core.OverlaySyncManager.syncString(context, "save_location", path, "ScreenCapPrefs")
             saveLocation = path
             Toast.makeText(context, "Location saved", Toast.LENGTH_SHORT).show()
         }
@@ -129,8 +130,10 @@ fun ScreenCapSettingsScreen(onBack: () -> Unit) {
                     }
                     Button(
                         onClick = {
-                            prefs.edit().putString("save_location", "Default (Pictures/Screenshots)").apply()
-                            saveLocation = "Default (Pictures/Screenshots)"
+                            val defaultLoc = "Default (Pictures/Screenshots)"
+                            prefs.edit().putString("save_location", defaultLoc).apply()
+                            com.example.core.OverlaySyncManager.syncString(context, "save_location", defaultLoc, "ScreenCapPrefs")
+                            saveLocation = defaultLoc
                         },
                         colors = ButtonDefaults.outlinedButtonColors(),
                         modifier = Modifier.testTag("btn_reset_location")
@@ -159,6 +162,7 @@ fun ScreenCapSettingsScreen(onBack: () -> Unit) {
                     onValueChange = {
                         delaySeconds = it.toInt()
                         prefs.edit().putInt("screenshot_delay", delaySeconds).apply()
+                        com.example.core.OverlaySyncManager.syncInt(context, "screenshot_delay", delaySeconds, "ScreenCapPrefs")
                     },
                     valueRange = 0f..10f,
                     steps = 9,
@@ -185,6 +189,7 @@ fun ScreenCapSettingsScreen(onBack: () -> Unit) {
                         onCheckedChange = {
                             recordAudio = it
                             prefs.edit().putBoolean("record_audio", it).apply()
+                            com.example.core.OverlaySyncManager.syncBoolean(context, "record_audio", it, "ScreenCapPrefs")
                         },
                         modifier = Modifier.testTag("switch_record_audio")
                     )
@@ -208,6 +213,7 @@ fun ScreenCapSettingsScreen(onBack: () -> Unit) {
                             .clickable {
                                 recordQuality = 720
                                 prefs.edit().putInt("record_quality", 720).apply()
+                                com.example.core.OverlaySyncManager.syncInt(context, "record_quality", 720, "ScreenCapPrefs")
                             }
                     ) {
                         RadioButton(
@@ -215,6 +221,7 @@ fun ScreenCapSettingsScreen(onBack: () -> Unit) {
                             onClick = {
                                 recordQuality = 720
                                 prefs.edit().putInt("record_quality", 720).apply()
+                                com.example.core.OverlaySyncManager.syncInt(context, "record_quality", 720, "ScreenCapPrefs")
                             },
                             modifier = Modifier.testTag("radio_quality_720")
                         )
@@ -226,6 +233,7 @@ fun ScreenCapSettingsScreen(onBack: () -> Unit) {
                             .clickable {
                                 recordQuality = 1080
                                 prefs.edit().putInt("record_quality", 1080).apply()
+                                com.example.core.OverlaySyncManager.syncInt(context, "record_quality", 1080, "ScreenCapPrefs")
                             }
                     ) {
                         RadioButton(
@@ -233,6 +241,7 @@ fun ScreenCapSettingsScreen(onBack: () -> Unit) {
                             onClick = {
                                 recordQuality = 1080
                                 prefs.edit().putInt("record_quality", 1080).apply()
+                                com.example.core.OverlaySyncManager.syncInt(context, "record_quality", 1080, "ScreenCapPrefs")
                             },
                             modifier = Modifier.testTag("radio_quality_1080")
                         )
@@ -244,6 +253,7 @@ fun ScreenCapSettingsScreen(onBack: () -> Unit) {
                             .clickable {
                                 recordQuality = 0
                                 prefs.edit().putInt("record_quality", 0).apply()
+                                com.example.core.OverlaySyncManager.syncInt(context, "record_quality", 0, "ScreenCapPrefs")
                             }
                     ) {
                         RadioButton(
@@ -251,6 +261,7 @@ fun ScreenCapSettingsScreen(onBack: () -> Unit) {
                             onClick = {
                                 recordQuality = 0
                                 prefs.edit().putInt("record_quality", 0).apply()
+                                com.example.core.OverlaySyncManager.syncInt(context, "record_quality", 0, "ScreenCapPrefs")
                             },
                             modifier = Modifier.testTag("radio_quality_original")
                         )

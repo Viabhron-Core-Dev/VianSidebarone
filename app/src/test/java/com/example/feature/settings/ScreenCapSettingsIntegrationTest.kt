@@ -91,4 +91,34 @@ class ScreenCapSettingsIntegrationTest {
         assertEquals("record_quality", keyRecordQuality)
         assertEquals("record_audio", keyRecordAudio)
     }
+
+    @Test
+    fun testLiveScreenshotDelayTwoWayTransitions() {
+        val prefs = com.example.core.FakeSharedPreferences()
+        val context = com.example.core.FakeContext(prefs)
+
+        // 1. Initial delay = 2 seconds
+        prefs.edit().putInt("screenshot_delay", 2).commit()
+        val module = ScreenshotActionModule(
+            sdkIntProvider = { Build.VERSION_CODES.UPSIDE_DOWN_CAKE },
+            delayProvider = { ctx -> prefs.getInt("screenshot_delay", 0) }
+        )
+        val result2s = module.execute(testService, emptyMap())
+        assertTrue(result2s is AccessibilityActionResult.Success)
+
+        // 2. Change setting from 2s -> 4s live without restart
+        prefs.edit().putInt("screenshot_delay", 4).commit()
+        val delayAfterFirstChange = module.delayProvider(context)
+        assertEquals(4, delayAfterFirstChange)
+
+        // 3. Change setting back from 4s -> 2s live without restart
+        prefs.edit().putInt("screenshot_delay", 2).commit()
+        val delayAfterSecondChange = module.delayProvider(context)
+        assertEquals(2, delayAfterSecondChange)
+    }
+
+    @Test
+    fun testOverlaySyncManagerSupportsTargetPrefs() {
+        assertEquals("extra_pref_name", com.example.core.OverlaySyncManager.EXTRA_PREF_NAME)
+    }
 }

@@ -21,10 +21,38 @@ open class VianSideAccessibilityService : AccessibilityService() {
     private val registry: AccessibilityActionRegistry
         get() = AccessibilityActionRegistry.getInstance()
 
+    private val syncReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(context: android.content.Context?, intent: Intent?) {
+            if (intent?.action == com.example.core.OverlaySyncManager.ACTION_SYNC_PREF && context != null) {
+                val key = intent.getStringExtra(com.example.core.OverlaySyncManager.EXTRA_KEY) ?: ""
+                val value = intent.getStringExtra(com.example.core.OverlaySyncManager.EXTRA_VALUE) ?: ""
+                val type = intent.getStringExtra(com.example.core.OverlaySyncManager.EXTRA_TYPE) ?: ""
+                val prefName = intent.getStringExtra(com.example.core.OverlaySyncManager.EXTRA_PREF_NAME) ?: "FloatingReaderPrefs"
+                val targetPrefs = context.getSharedPreferences(prefName, android.content.Context.MODE_PRIVATE)
+                when (type) {
+                    "STRING" -> targetPrefs.edit().putString(key, value).commit()
+                    "INT" -> targetPrefs.edit().putInt(key, value.toIntOrNull() ?: 0).commit()
+                    "BOOLEAN" -> targetPrefs.edit().putBoolean(key, value.toBoolean()).commit()
+                    "FLOAT" -> targetPrefs.edit().putFloat(key, value.toFloatOrNull() ?: 0f).commit()
+                    "REMOVE" -> targetPrefs.edit().remove(key).commit()
+                }
+            }
+        }
+    }
+
     override fun onServiceConnected() {
         super.onServiceConnected()
         instance = this
         LogKeeper.writeLog(TAG, "Service connected")
+        try {
+            val filter = android.content.IntentFilter(com.example.core.OverlaySyncManager.ACTION_SYNC_PREF)
+            androidx.core.content.ContextCompat.registerReceiver(
+                this,
+                syncReceiver,
+                filter,
+                androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED
+            )
+        } catch (_: Throwable) {}
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
@@ -60,6 +88,9 @@ open class VianSideAccessibilityService : AccessibilityService() {
 
     override fun onUnbind(intent: Intent?): Boolean {
         registry.unloadAll()
+        try {
+            unregisterReceiver(syncReceiver)
+        } catch (_: Throwable) {}
         instance = null
         LogKeeper.writeLog(TAG, "Service unbound")
         return super.onUnbind(intent)
@@ -68,6 +99,9 @@ open class VianSideAccessibilityService : AccessibilityService() {
     override fun onDestroy() {
         super.onDestroy()
         registry.unloadAll()
+        try {
+            unregisterReceiver(syncReceiver)
+        } catch (_: Throwable) {}
         instance = null
         LogKeeper.writeLog(TAG, "Service destroyed")
     }

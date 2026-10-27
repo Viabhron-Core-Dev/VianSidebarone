@@ -7,20 +7,20 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
-import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Color
-import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
+import android.media.AudioDeviceInfo
+import android.media.AudioManager
 import android.media.MediaMetadata
 import android.media.session.MediaController
 import android.media.session.MediaSessionManager
 import android.media.session.PlaybackState
 import android.os.Build
+import android.os.SystemClock
 import android.provider.Settings
 import android.service.notification.StatusBarNotification
-import android.view.Gravity
 import android.view.LayoutInflater
 import android.view.MotionEvent
 import android.view.View
@@ -39,6 +39,21 @@ import com.example.core.ipc.MainCommandRequest
 import com.example.service.AppNotificationListener
 import kotlin.math.abs
 
+/**
+ * MediaPlayerPageView: Notification-style media player for Vian Sidebar.
+ *
+ * Runs exclusively in the :heavy process via SurfaceControlViewHost embedding.
+ * Matches modern Android notification / Quick Settings media player styling:
+ * - Media artwork used as a full card backdrop with gradient scrim
+ * - Source app icon and title with tap-to-open
+ * - Output audio device indicator ("This phone" / Bluetooth device)
+ * - Safe close/dismiss action
+ * - Prominent song title and artist/album metadata
+ * - Playback progress bar with elapsed and remaining timestamps
+ * - Dynamic transport controls reflecting actual session capabilities
+ * - Zero-leak lifecycle with on-demand progress updates (no background polling)
+ * - Horizontal Sidebar swipe preservation via onInterceptTouchEvent
+ */
 @SuppressLint("ViewConstructor")
 class MediaPlayerPageView(
     context: Context,
@@ -53,6 +68,12 @@ class MediaPlayerPageView(
         null
     }
 
+    private val audioManager = try {
+        context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+    } catch (_: Throwable) {
+        null
+    }
+
     private var activeController: MediaController? = null
     private var playbackState: PlaybackState? = null
     private var metadata: MediaMetadata? = null
@@ -62,16 +83,21 @@ class MediaPlayerPageView(
     private val tvBlankStatus: TextView?
     private val ivBlankIcon: ImageView?
 
-    private val llPlayer: View?
+    private val flPlayerCard: FrameLayout?
+    private val ivArtworkBackdrop: ImageView?
+    private val vArtworkScrim: View?
+
     private val llAppHeader: View?
     private val ivAppIcon: ImageView?
     private val tvAppName: TextView?
-    private val tvSessionStatus: TextView?
-    private val flArtworkContainer: FrameLayout?
-    private val ivArtwork: ImageView?
+
+    private val llOutputDevice: View?
+    private val ivOutputIcon: ImageView?
+    private val tvOutputName: TextView?
+    private val ivDismiss: ImageView?
+
     private val tvTitle: TextView?
     private val tvArtist: TextView?
-    private val tvAlbum: TextView?
 
     private val llProgressContainer: View?
     private val pbProgress: ProgressBar?
@@ -82,6 +108,7 @@ class MediaPlayerPageView(
 
     private var currentHeightPx = 0
     private var isListening = false
+    private var isPageSelected = false
 
     var themeBackgroundDrawable: Drawable? = null
         private set
@@ -97,16 +124,19 @@ class MediaPlayerPageView(
         override fun onPlaybackStateChanged(state: PlaybackState?) {
             playbackState = state
             updateUI()
+            manageProgressUpdates()
         }
 
         override fun onMetadataChanged(metadataUpdate: MediaMetadata?) {
             metadata = metadataUpdate
             updateUI()
+            manageProgressUpdates()
         }
 
         override fun onSessionDestroyed() {
             activeController = null
             updateState()
+            manageProgressUpdates()
         }
     }
 
@@ -127,6 +157,16 @@ class MediaPlayerPageView(
         }
     }
 
+    // Lightweight lifecycle-aware progress updater (active ONLY when page is selected and playing)
+    private val progressUpdater = object : Runnable {
+        override fun run() {
+            if (isListening && isPageSelected && playbackState?.state == PlaybackState.STATE_PLAYING) {
+                updateProgress()
+                postDelayed(this, 1000L)
+            }
+        }
+    }
+
     init {
         layoutParams = ViewGroup.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT,
@@ -141,16 +181,21 @@ class MediaPlayerPageView(
         tvBlankStatus = findViewById(R.id.tv_blank_status)
         ivBlankIcon = findViewById(R.id.iv_blank_icon)
 
-        llPlayer = findViewById(R.id.ll_player)
+        flPlayerCard = findViewById(R.id.fl_player_card)
+        ivArtworkBackdrop = findViewById(R.id.iv_artwork_backdrop)
+        vArtworkScrim = findViewById(R.id.v_artwork_scrim)
+
         llAppHeader = findViewById(R.id.ll_app_header)
         ivAppIcon = findViewById(R.id.iv_app_icon)
         tvAppName = findViewById(R.id.tv_app_name)
-        tvSessionStatus = findViewById(R.id.tv_session_status)
-        flArtworkContainer = findViewById(R.id.fl_artwork_container)
-        ivArtwork = findViewById(R.id.iv_artwork)
+
+        llOutputDevice = findViewById(R.id.ll_output_device)
+        ivOutputIcon = findViewById(R.id.iv_output_icon)
+        tvOutputName = findViewById(R.id.tv_output_name)
+        ivDismiss = findViewById(R.id.iv_dismiss)
+
         tvTitle = findViewById(R.id.tv_title)
         tvArtist = findViewById(R.id.tv_artist)
-        tvAlbum = findViewById(R.id.tv_album)
 
         llProgressContainer = findViewById(R.id.ll_progress_container)
         pbProgress = findViewById(R.id.pb_progress)
@@ -159,9 +204,9 @@ class MediaPlayerPageView(
 
         llControls = findViewById(R.id.ll_controls)
 
-        // Clip artwork container outline
+        // Clip the entire player card so the backdrop artwork conforms to the rounded card outline
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            flArtworkContainer?.clipToOutline = true
+            flPlayerCard?.clipToOutline = true
         }
 
         llAppHeader?.setOnClickListener {
@@ -205,7 +250,7 @@ class MediaPlayerPageView(
     fun getCurrentHeightPx(): Int {
         if (currentHeightPx > 0) return currentHeightPx
         val density = try { resources?.displayMetrics?.density ?: 1f } catch (_: Throwable) { 1f }
-        val targetH = if (activeController != null) (180 * density).toInt() else (100 * density).toInt()
+        val targetH = if (activeController != null) (200 * density).toInt() else (100 * density).toInt()
         currentHeightPx = targetH
         return currentHeightPx
     }
@@ -246,7 +291,8 @@ class MediaPlayerPageView(
 
     fun cleanup() {
         stopListening()
-        ivArtwork?.setImageDrawable(null)
+        ivArtworkBackdrop?.setImageDrawable(null)
+        removeCallbacks(progressUpdater)
     }
 
     override fun onAttachedToWindow() {
@@ -257,15 +303,20 @@ class MediaPlayerPageView(
     override fun onDetachedFromWindow() {
         super.onDetachedFromWindow()
         stopListening()
+        removeCallbacks(progressUpdater)
     }
 
     override fun onPageSelected() {
+        isPageSelected = true
         startListening()
+        manageProgressUpdates()
     }
 
     override fun onPageUnselected() {
+        isPageSelected = false
         stopListening()
-        ivArtwork?.setImageDrawable(null)
+        ivArtworkBackdrop?.setImageDrawable(null)
+        removeCallbacks(progressUpdater)
     }
 
     private fun startListening() {
@@ -306,6 +357,7 @@ class MediaPlayerPageView(
             activeController?.unregisterCallback(controllerCallback)
         } catch (_: Throwable) {}
         activeController = null
+        removeCallbacks(progressUpdater)
     }
 
     private fun hasNotificationAccess(): Boolean {
@@ -351,9 +403,10 @@ class MediaPlayerPageView(
         playbackState = activeController?.playbackState
         metadata = activeController?.metadata
         updateUI()
+        manageProgressUpdates()
 
         val density = try { resources?.displayMetrics?.density ?: 1f } catch (_: Throwable) { 1f }
-        val targetH = if (activeController != null) (180 * density).toInt() else (100 * density).toInt()
+        val targetH = if (activeController != null) (200 * density).toInt() else (100 * density).toInt()
         if (targetH != currentHeightPx) {
             currentHeightPx = targetH
             onHeightChanged?.invoke(targetH)
@@ -364,7 +417,7 @@ class MediaPlayerPageView(
         val controller = activeController
         if (controller == null) {
             llBlank?.visibility = View.VISIBLE
-            llPlayer?.visibility = View.GONE
+            flPlayerCard?.visibility = View.GONE
 
             if (!hasNotificationAccess()) {
                 tvBlankStatus?.text = "Grant Notification Access to mirror media"
@@ -382,7 +435,7 @@ class MediaPlayerPageView(
             }
         } else {
             llBlank?.visibility = View.GONE
-            llPlayer?.visibility = View.VISIBLE
+            flPlayerCard?.visibility = View.VISIBLE
 
             // 1. Source App Information
             val pkg = controller.packageName ?: ""
@@ -406,35 +459,82 @@ class MediaPlayerPageView(
                 ivAppIcon?.visibility = View.GONE
             }
 
-            val isPlaying = playbackState?.state == PlaybackState.STATE_PLAYING
-            tvSessionStatus?.text = if (isPlaying) "Playing" else "Paused"
+            // 2. Output Device Indicator
+            updateOutputDevice()
 
-            // 2. Track Title & Artist Metadata
+            // 3. Dismiss / Close Action
+            updateDismissAction(controller)
+
+            // 4. Track Title & Artist Metadata
             val title = metadata?.getString(MediaMetadata.METADATA_KEY_TITLE)?.takeIf { it.isNotBlank() }
                 ?: "Unknown Title"
             val artist = metadata?.getString(MediaMetadata.METADATA_KEY_ARTIST)?.takeIf { it.isNotBlank() }
                 ?: metadata?.getString(MediaMetadata.METADATA_KEY_ALBUM_ARTIST)?.takeIf { it.isNotBlank() }
                 ?: appName
-            val album = metadata?.getString(MediaMetadata.METADATA_KEY_ALBUM)?.takeIf { it.isNotBlank() }
 
             tvTitle?.text = title
             tvArtist?.text = artist
 
-            if (album != null && album != title) {
-                tvAlbum?.text = album
-                tvAlbum?.visibility = View.VISIBLE
-            } else {
-                tvAlbum?.visibility = View.GONE
-            }
-
-            // 3. Artwork Extraction (High-res / Album Art / Notification fallback)
+            // 5. Artwork Backdrop (High-res album art / notification fallback)
             updateArtwork(controller)
 
-            // 4. Progress Bar (Secondary, only when duration > 0 without polling)
+            // 6. Playback Progress
             updateProgress()
 
-            // 5. Dynamic Controls Row
+            // 7. Dynamic Controls Row
             populateDynamicControls(controller)
+        }
+    }
+
+    private fun updateOutputDevice() {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && audioManager != null) {
+                val devices = audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
+                val btDevice = devices.firstOrNull {
+                    it.type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP || it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO
+                }
+                val wiredDevice = devices.firstOrNull {
+                    it.type == AudioDeviceInfo.TYPE_WIRED_HEADSET || it.type == AudioDeviceInfo.TYPE_WIRED_HEADPHONES
+                }
+
+                if (btDevice != null) {
+                    val name = btDevice.productName?.toString()?.takeIf { it.isNotBlank() } ?: "Bluetooth"
+                    tvOutputName?.text = name
+                } else if (wiredDevice != null) {
+                    tvOutputName?.text = "Headphones"
+                } else {
+                    tvOutputName?.text = "This phone"
+                }
+            } else {
+                tvOutputName?.text = "This phone"
+            }
+            llOutputDevice?.visibility = View.VISIBLE
+        } catch (_: Throwable) {
+            tvOutputName?.text = "This phone"
+            llOutputDevice?.visibility = View.VISIBLE
+        }
+    }
+
+    private fun updateDismissAction(controller: MediaController) {
+        val sbn = try {
+            AppNotificationListener.instance?.activeNotifications?.firstOrNull {
+                it.packageName == controller.packageName
+            }
+        } catch (_: Throwable) { null }
+
+        if (sbn != null) {
+            ivDismiss?.visibility = View.VISIBLE
+            ivDismiss?.setOnClickListener {
+                try {
+                    controller.transportControls.stop()
+                } catch (_: Throwable) {}
+                try {
+                    AppNotificationListener.instance?.cancelNotification(sbn.key)
+                } catch (_: Throwable) {}
+                postDelayed({ updateState() }, 200L)
+            }
+        } else {
+            ivDismiss?.visibility = View.GONE
         }
     }
 
@@ -464,28 +564,43 @@ class MediaPlayerPageView(
         }
 
         if (bitmap != null) {
-            ivArtwork?.setImageBitmap(bitmap)
-            ivArtwork?.scaleType = ImageView.ScaleType.CENTER_CROP
+            ivArtworkBackdrop?.setImageBitmap(bitmap)
+            ivArtworkBackdrop?.visibility = View.VISIBLE
         } else {
-            // Clean fallback: music note with themed background
-            ivArtwork?.setImageResource(R.drawable.ic_music_note)
-            ivArtwork?.scaleType = ImageView.ScaleType.CENTER_INSIDE
-            ivArtwork?.setColorFilter(Color.parseColor("#A0A0C0"))
+            ivArtworkBackdrop?.setImageDrawable(null)
+            ivArtworkBackdrop?.visibility = View.GONE
         }
     }
 
     private fun updateProgress() {
         val duration = metadata?.getLong(MediaMetadata.METADATA_KEY_DURATION) ?: 0L
-        val position = playbackState?.position ?: 0L
+        val basePosition = playbackState?.position ?: 0L
 
-        if (duration > 0 && position >= 0) {
+        // Extrapolate position if actively playing
+        val currentPosition = if (playbackState?.state == PlaybackState.STATE_PLAYING && playbackState?.lastPositionUpdateTime != null) {
+            val elapsed = SystemClock.elapsedRealtime() - (playbackState?.lastPositionUpdateTime ?: SystemClock.elapsedRealtime())
+            (basePosition + (elapsed * (playbackState?.playbackSpeed ?: 1f)).toLong()).coerceIn(0L, if (duration > 0) duration else Long.MAX_VALUE)
+        } else {
+            basePosition
+        }
+
+        if (duration > 0 && currentPosition >= 0) {
             llProgressContainer?.visibility = View.VISIBLE
-            val progressFraction = ((position.toFloat() / duration.toFloat()) * 1000).toInt().coerceIn(0, 1000)
+            val progressFraction = ((currentPosition.toFloat() / duration.toFloat()) * 1000).toInt().coerceIn(0, 1000)
             pbProgress?.progress = progressFraction
-            tvTimeCurrent?.text = formatDuration(position)
+            tvTimeCurrent?.text = formatDuration(currentPosition)
             tvTimeTotal?.text = formatDuration(duration)
         } else {
             llProgressContainer?.visibility = View.GONE
+        }
+    }
+
+    private fun manageProgressUpdates() {
+        removeCallbacks(progressUpdater)
+        val isPlaying = playbackState?.state == PlaybackState.STATE_PLAYING
+        val duration = metadata?.getLong(MediaMetadata.METADATA_KEY_DURATION) ?: 0L
+        if (isListening && isPageSelected && isPlaying && duration > 0) {
+            post(progressUpdater)
         }
     }
 
@@ -497,8 +612,7 @@ class MediaPlayerPageView(
     }
 
     /**
-     * Builds and populates the dynamic media controls row based on the active session's supported actions.
-     * Adapts to the source application rather than assuming fixed buttons.
+     * Builds and populates dynamic media controls row based on the active session's supported actions.
      */
     private fun populateDynamicControls(controller: MediaController) {
         val container = llControls ?: return
@@ -532,7 +646,7 @@ class MediaPlayerPageView(
                     id = "rewind",
                     title = "Rewind",
                     iconResId = android.R.drawable.ic_media_rew,
-                    tintColor = Color.parseColor("#C8C8DC"),
+                    tintColor = Color.parseColor("#E0E0E0"),
                     onClick = {
                         try {
                             controller.transportControls.rewind()
@@ -542,7 +656,7 @@ class MediaPlayerPageView(
             )
         }
 
-        // 3. Play / Pause (Primary Action - Centered & Elevated)
+        // 3. Play / Pause (Primary Action - Centered & Circularly Elevated)
         val playPauseSupported = (actionsMask and (PlaybackState.ACTION_PLAY or PlaybackState.ACTION_PAUSE or PlaybackState.ACTION_PLAY_PAUSE)) != 0L || playbackState != null
         if (playPauseSupported) {
             actions.add(
@@ -572,7 +686,7 @@ class MediaPlayerPageView(
                     id = "fast_forward",
                     title = "Fast Forward",
                     iconResId = android.R.drawable.ic_media_ff,
-                    tintColor = Color.parseColor("#C8C8DC"),
+                    tintColor = Color.parseColor("#E0E0E0"),
                     onClick = {
                         try {
                             controller.transportControls.fastForward()
@@ -599,7 +713,7 @@ class MediaPlayerPageView(
             )
         }
 
-        // 6. Custom Actions from PlaybackState (e.g. Favorite, Like, Shuffle, Repeat, Bookmark)
+        // 6. Custom Actions from PlaybackState (e.g. Favorite, Like, Shuffle, Repeat)
         playbackState?.customActions?.forEach { customAction ->
             val name = customAction.name?.toString() ?: customAction.action
             val lower = name.lowercase()
@@ -620,7 +734,7 @@ class MediaPlayerPageView(
                     tintColor = when {
                         isFavorite -> Color.parseColor("#F43F5E")
                         isShuffle || isRepeat -> Color.parseColor("#818CF8")
-                        else -> Color.parseColor("#C8C8DC")
+                        else -> Color.parseColor("#E0E0E0")
                     },
                     onClick = {
                         try {
@@ -631,7 +745,7 @@ class MediaPlayerPageView(
             )
         }
 
-        // 7. Extra actions from matching active notification (e.g. thumbs up/down, like, shuffle) if not redundant
+        // 7. Extra actions from matching active notification
         try {
             val matchingSbn = AppNotificationListener.instance?.activeNotifications?.firstOrNull {
                 it.packageName == controller.packageName
@@ -659,7 +773,7 @@ class MediaPlayerPageView(
                             tintColor = when {
                                 isLike -> Color.parseColor("#F43F5E")
                                 isShuffle || isRepeat -> Color.parseColor("#818CF8")
-                                else -> Color.parseColor("#C8C8DC")
+                                else -> Color.parseColor("#E0E0E0")
                             },
                             onClick = {
                                 try {
@@ -694,11 +808,10 @@ class MediaPlayerPageView(
             )
         }
 
-        // Render actions as interactive views
+        // Render actions as interactive views (max 5 to fit comfortably in Sidebar)
         val density = try { resources?.displayMetrics?.density ?: 1f } catch (_: Throwable) { 1f }
-        val maxActionsToShow = 5 // Keep comfortable spacing within compact sidebar width
+        val maxActionsToShow = 5
         val finalActions = if (actions.size > maxActionsToShow) {
-            // Prioritize primary action and adjacent standard controls
             val primary = actions.firstOrNull { it.isPrimary }
             val others = actions.filterNot { it.isPrimary }
             val subset = others.take(maxActionsToShow - (if (primary != null) 1 else 0)).toMutableList()
@@ -714,12 +827,12 @@ class MediaPlayerPageView(
             val btn = ImageView(context).apply {
                 contentDescription = action.title
                 if (action.isPrimary) {
-                    val sizePx = (38 * density).toInt()
+                    val sizePx = (42 * density).toInt()
                     layoutParams = LinearLayout.LayoutParams(sizePx, sizePx).apply {
                         setMargins((8 * density).toInt(), 0, (8 * density).toInt(), 0)
                     }
                     background = ContextCompat.getDrawable(context, R.drawable.bg_media_play_btn)
-                    val padPx = (7 * density).toInt()
+                    val padPx = (8 * density).toInt()
                     setPadding(padPx, padPx, padPx, padPx)
                 } else {
                     val sizePx = (36 * density).toInt()

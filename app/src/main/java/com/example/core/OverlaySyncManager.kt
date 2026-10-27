@@ -9,48 +9,49 @@ object OverlaySyncManager {
     const val EXTRA_KEY = "extra_key"
     const val EXTRA_VALUE = "extra_value"
     const val EXTRA_TYPE = "extra_type"
+    const val EXTRA_PREF_NAME = "extra_pref_name"
 
-    fun syncString(context: Context, key: String, value: String) {
-        val prefs = context.getSharedPreferences("FloatingReaderPrefs", Context.MODE_PRIVATE)
+    fun syncString(context: Context, key: String, value: String, prefName: String = "FloatingReaderPrefs") {
+        val prefs = context.getSharedPreferences(prefName, Context.MODE_PRIVATE)
         prefs.edit().putString(key, value).commit()
-        sendSync(context, key, value, "STRING")
+        sendSync(context, key, value, "STRING", prefName)
     }
 
-    fun syncInt(context: Context, key: String, value: Int) {
-        val prefs = context.getSharedPreferences("FloatingReaderPrefs", Context.MODE_PRIVATE)
+    fun syncInt(context: Context, key: String, value: Int, prefName: String = "FloatingReaderPrefs") {
+        val prefs = context.getSharedPreferences(prefName, Context.MODE_PRIVATE)
         prefs.edit().putInt(key, value).commit()
-        sendSync(context, key, value.toString(), "INT")
+        sendSync(context, key, value.toString(), "INT", prefName)
     }
 
-    fun syncBoolean(context: Context, key: String, value: Boolean) {
-        val prefs = context.getSharedPreferences("FloatingReaderPrefs", Context.MODE_PRIVATE)
+    fun syncBoolean(context: Context, key: String, value: Boolean, prefName: String = "FloatingReaderPrefs") {
+        val prefs = context.getSharedPreferences(prefName, Context.MODE_PRIVATE)
         prefs.edit().putBoolean(key, value).commit()
-        sendSync(context, key, value.toString(), "BOOLEAN")
+        sendSync(context, key, value.toString(), "BOOLEAN", prefName)
     }
 
-    fun syncFloat(context: Context, key: String, value: Float) {
-        val prefs = context.getSharedPreferences("FloatingReaderPrefs", Context.MODE_PRIVATE)
+    fun syncFloat(context: Context, key: String, value: Float, prefName: String = "FloatingReaderPrefs") {
+        val prefs = context.getSharedPreferences(prefName, Context.MODE_PRIVATE)
         prefs.edit().putFloat(key, value).commit()
-        sendSync(context, key, value.toString(), "FLOAT")
+        sendSync(context, key, value.toString(), "FLOAT", prefName)
     }
 
-    fun syncStringSet(context: Context, key: String, set: Set<String>) {
-        val prefs = context.getSharedPreferences("FloatingReaderPrefs", Context.MODE_PRIVATE)
+    fun syncStringSet(context: Context, key: String, set: Set<String>, prefName: String = "FloatingReaderPrefs") {
+        val prefs = context.getSharedPreferences(prefName, Context.MODE_PRIVATE)
         prefs.edit().putStringSet(key, set).commit()
-        sendSync(context, key, set.joinToString("|||"), "STRING_SET")
+        sendSync(context, key, set.joinToString("|||"), "STRING_SET", prefName)
     }
 
-    fun syncRemove(context: Context, key: String) {
-        val prefs = context.getSharedPreferences("FloatingReaderPrefs", Context.MODE_PRIVATE)
+    fun syncRemove(context: Context, key: String, prefName: String = "FloatingReaderPrefs") {
+        val prefs = context.getSharedPreferences(prefName, Context.MODE_PRIVATE)
         prefs.edit().remove(key).commit()
-        sendSync(context, key, "", "REMOVE")
+        sendSync(context, key, "", "REMOVE", prefName)
     }
 
     fun triggerReload(context: Context) {
-        sendSync(context, "", "", "RELOAD_ALL")
+        sendSync(context, "", "", "RELOAD_ALL", "FloatingReaderPrefs")
     }
 
-    private fun sendSync(context: Context, key: String, value: String, type: String) {
+    private fun sendSync(context: Context, key: String, value: String, type: String, prefName: String = "FloatingReaderPrefs") {
         // 1. Send via startService to HandleService if running
         try {
             val svcIntent = Intent(context, HandleService::class.java).apply {
@@ -58,6 +59,7 @@ object OverlaySyncManager {
                 putExtra(EXTRA_KEY, key)
                 putExtra(EXTRA_VALUE, value)
                 putExtra(EXTRA_TYPE, type)
+                putExtra(EXTRA_PREF_NAME, prefName)
             }
             context.startService(svcIntent)
         } catch (e: Exception) {
@@ -71,6 +73,7 @@ object OverlaySyncManager {
                 putExtra(EXTRA_KEY, key)
                 putExtra(EXTRA_VALUE, value)
                 putExtra(EXTRA_TYPE, type)
+                putExtra(EXTRA_PREF_NAME, prefName)
             }
             context.sendBroadcast(bIntent)
         } catch (e: Exception) {

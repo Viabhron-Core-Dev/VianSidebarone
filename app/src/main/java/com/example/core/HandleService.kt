@@ -474,24 +474,26 @@ class HandleService : Service(), SharedPreferences.OnSharedPreferenceChangeListe
         val key = intent.getStringExtra(OverlaySyncManager.EXTRA_KEY) ?: ""
         val value = intent.getStringExtra(OverlaySyncManager.EXTRA_VALUE) ?: ""
         val type = intent.getStringExtra(OverlaySyncManager.EXTRA_TYPE) ?: ""
+        val prefName = intent.getStringExtra(OverlaySyncManager.EXTRA_PREF_NAME) ?: "FloatingReaderPrefs"
+        val targetPrefs = if (prefName == "FloatingReaderPrefs") prefs else getSharedPreferences(prefName, Context.MODE_PRIVATE)
 
         when (type) {
-            "STRING" -> prefs.edit().putString(key, value).commit()
-            "INT" -> prefs.edit().putInt(key, value.toIntOrNull() ?: 0).commit()
+            "STRING" -> targetPrefs.edit().putString(key, value).commit()
+            "INT" -> targetPrefs.edit().putInt(key, value.toIntOrNull() ?: 0).commit()
             "BOOLEAN" -> {
                 val bVal = value.toBoolean()
-                prefs.edit().putBoolean(key, bVal).commit()
+                targetPrefs.edit().putBoolean(key, bVal).commit()
                 if (key == KEY_NET_SPEED_ENABLED || key == "net_speed_enabled" || key == "netspeed_enabled" || key == "speed_indicator_enabled") {
                     isSpeedMonitorEnabled = bVal
                     setupNetSpeedManager()
                 }
             }
-            "FLOAT" -> prefs.edit().putFloat(key, value.toFloatOrNull() ?: 0f).commit()
+            "FLOAT" -> targetPrefs.edit().putFloat(key, value.toFloatOrNull() ?: 0f).commit()
             "STRING_SET" -> {
                 val set = if (value.isEmpty()) emptySet() else value.split("|||").toSet()
-                prefs.edit().putStringSet(key, set).commit()
+                targetPrefs.edit().putStringSet(key, set).commit()
             }
-            "REMOVE" -> prefs.edit().remove(key).commit()
+            "REMOVE" -> targetPrefs.edit().remove(key).commit()
             "SYNC_HANDLE" -> {
                 val bundle = intent.extras
                 if (bundle != null) {
