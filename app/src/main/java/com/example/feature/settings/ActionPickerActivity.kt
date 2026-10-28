@@ -32,6 +32,7 @@ class ActionPickerActivity : ComponentActivity() {
         val category = intent.getStringExtra("CATEGORY") ?: ""
         val titleStr = intent.getStringExtra("TITLE") ?: "Select Action"
         val pageId = intent.getStringExtra("PAGE_ID")
+        val containerId = intent.getStringExtra("CONTAINER_ID") ?: "sidebar"
         val isHybridGrid = intent.getBooleanExtra("IS_HYBRID_GRID", false)
         
         val mainLayout = LinearLayout(this).apply {
@@ -99,11 +100,15 @@ class ActionPickerActivity : ComponentActivity() {
                         com.example.feature.element.ElementPlacementHelper.addElementToHybridGrid(
                             this@ActionPickerActivity,
                             pageId,
-                            id
+                            id,
+                            containerId = containerId
                         )
                         android.widget.Toast.makeText(this@ActionPickerActivity, "Added: ${item.label}", android.widget.Toast.LENGTH_SHORT).show()
                     } else {
-                        val resultIntent = Intent().apply { putExtra("ELEMENT_ID", id) }
+                        val resultIntent = Intent().apply {
+                            putExtra("ELEMENT_ID", id)
+                            putExtra("CONTAINER_ID", containerId)
+                        }
                         setResult(Activity.RESULT_OK, resultIntent)
                         finish()
                     }

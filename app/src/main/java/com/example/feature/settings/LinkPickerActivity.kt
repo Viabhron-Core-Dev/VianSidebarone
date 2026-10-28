@@ -60,6 +60,7 @@ class LinkPickerActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
 
         val pageId = intent.getStringExtra("PAGE_ID")
+        val containerId = intent.getStringExtra("CONTAINER_ID") ?: "sidebar"
         val isHybridGrid = intent.getBooleanExtra("IS_HYBRID_GRID", false)
 
         setContent {
@@ -74,13 +75,15 @@ class LinkPickerActivity : ComponentActivity() {
                                 com.example.feature.element.ElementPlacementHelper.addElementToHybridGrid(
                                     this@LinkPickerActivity,
                                     pageId,
-                                    elementId
+                                    elementId,
+                                    containerId = containerId
                                 )
                                 val meta = ElementMetadataStore.get(this@LinkPickerActivity, elementId)
                                 Toast.makeText(this@LinkPickerActivity, "Added: ${meta?.label ?: "Link"}", Toast.LENGTH_SHORT).show()
                             } else {
                                 val resultIntent = Intent().apply {
                                     putExtra("ELEMENT_ID", elementId)
+                                    putExtra("CONTAINER_ID", containerId)
                                 }
                                 setResult(Activity.RESULT_OK, resultIntent)
                                 finish()

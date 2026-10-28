@@ -126,6 +126,7 @@ class AddElementActivity : ComponentActivity() {
         }
         
         val pageId = intent.getStringExtra("PAGE_ID")
+        val containerId = intent.getStringExtra("CONTAINER_ID") ?: "sidebar"
         val isHybridGrid = intent.getBooleanExtra("IS_HYBRID_GRID", false)
         val pageType = intent.getStringExtra("PAGE_TYPE")
 
@@ -133,20 +134,37 @@ class AddElementActivity : ComponentActivity() {
         addItem(android.R.drawable.ic_menu_agenda, "App") {
             val appIntent = Intent(this, AppPickerActivity::class.java).apply {
                 putExtra("PAGE_ID", pageId)
+                putExtra("CONTAINER_ID", containerId)
                 putExtra("IS_HYBRID_GRID", isHybridGrid)
                 putExtra("PAGE_TYPE", pageType)
             }
             startActivityForResult(appIntent, 200)
         }
         addItem(android.R.drawable.ic_menu_share, "Shortcut") {
-            startActivityForResult(Intent(this, ShortcutPickerActivity::class.java), 300)
+            val sIntent = Intent(this, ShortcutPickerActivity::class.java).apply {
+                putExtra("PAGE_ID", pageId)
+                putExtra("CONTAINER_ID", containerId)
+                putExtra("IS_HYBRID_GRID", isHybridGrid)
+                putExtra("PAGE_TYPE", pageType)
+            }
+            startActivityForResult(sIntent, 300)
         }
         addItem(android.R.drawable.ic_menu_manage, "Intent") {
-            startActivityForResult(Intent(this, IntentPickerActivity::class.java), 301)
+            val iIntent = Intent(this, IntentPickerActivity::class.java).apply {
+                putExtra("PAGE_ID", pageId)
+                putExtra("CONTAINER_ID", containerId)
+                putExtra("IS_HYBRID_GRID", isHybridGrid)
+                putExtra("PAGE_TYPE", pageType)
+            }
+            startActivityForResult(iIntent, 301)
         }
         addItem(android.R.drawable.ic_menu_gallery, "Widget") {
             val intent = Intent(this, com.example.WidgetPickerActivity::class.java).apply {
                 putExtra("ACTION_TYPE", "RETURN_ID")
+                putExtra("PAGE_ID", pageId)
+                putExtra("CONTAINER_ID", containerId)
+                putExtra("IS_HYBRID_GRID", isHybridGrid)
+                putExtra("PAGE_TYPE", pageType)
             }
             startActivityForResult(intent, 400)
         }
@@ -154,6 +172,10 @@ class AddElementActivity : ComponentActivity() {
         addItem(android.R.drawable.ic_menu_gallery, "Popup Widget") {
             val intent = Intent(this, com.example.WidgetPickerActivity::class.java).apply {
                 putExtra("ACTION_TYPE", "RETURN_ID")
+                putExtra("PAGE_ID", pageId)
+                putExtra("CONTAINER_ID", containerId)
+                putExtra("IS_HYBRID_GRID", isHybridGrid)
+                putExtra("PAGE_TYPE", pageType)
             }
             startActivityForResult(intent, 500)
         }
@@ -193,6 +215,7 @@ class AddElementActivity : ComponentActivity() {
         addItem(com.example.R.drawable.ic_language, "Link") {
             val linkIntent = Intent(this, LinkPickerActivity::class.java).apply {
                 putExtra("PAGE_ID", pageId)
+                putExtra("CONTAINER_ID", containerId)
                 putExtra("IS_HYBRID_GRID", isHybridGrid)
                 putExtra("PAGE_TYPE", pageType)
             }
@@ -213,6 +236,7 @@ class AddElementActivity : ComponentActivity() {
                 putExtra("CATEGORY", category)
                 putExtra("TITLE", title)
                 putExtra("PAGE_ID", pageId)
+                putExtra("CONTAINER_ID", containerId)
                 putExtra("IS_HYBRID_GRID", isHybridGrid)
                 putExtra("PAGE_TYPE", pageType)
             }
@@ -233,6 +257,10 @@ class AddElementActivity : ComponentActivity() {
             addItem(android.R.drawable.ic_menu_crop, "Floating Trigger") {
                 val intent = Intent(this, AddElementActivity::class.java).apply {
                     putExtra("IS_FLOATING_TRIGGER_SELECTION", true)
+                    putExtra("PAGE_ID", pageId)
+                    putExtra("CONTAINER_ID", containerId)
+                    putExtra("IS_HYBRID_GRID", isHybridGrid)
+                    putExtra("PAGE_TYPE", pageType)
                 }
                 startActivityForResult(intent, 700)
             }
@@ -268,6 +296,7 @@ class AddElementActivity : ComponentActivity() {
 
     private fun handleElementSelected(id: String, displayName: String? = null) {
         val pageId = intent.getStringExtra("PAGE_ID")
+        val containerId = intent.getStringExtra("CONTAINER_ID") ?: "sidebar"
         val isHybridGrid = intent.getBooleanExtra("IS_HYBRID_GRID", false)
         if (isHybridGrid && !pageId.isNullOrEmpty()) {
             val cols = if (id.startsWith("widget:") || id.startsWith("popup_widget:")) 2 else 1
@@ -277,7 +306,8 @@ class AddElementActivity : ComponentActivity() {
                 pageId,
                 id,
                 cols = cols,
-                rows = rows
+                rows = rows,
+                containerId = containerId
             )
             val name = displayName ?: when {
                 id.startsWith("app:") -> id.removePrefix("app:")
@@ -296,7 +326,13 @@ class AddElementActivity : ComponentActivity() {
     }
     
     private fun finishWithId(id: String) {
-        val resultIntent = Intent().apply { putExtra("ELEMENT_ID", id) }
+        val containerId = intent.getStringExtra("CONTAINER_ID")
+        val resultIntent = Intent().apply {
+            putExtra("ELEMENT_ID", id)
+            if (containerId != null) {
+                putExtra("CONTAINER_ID", containerId)
+            }
+        }
         setResult(Activity.RESULT_OK, resultIntent)
 
         val handleId = intent.getStringExtra("handle_id")

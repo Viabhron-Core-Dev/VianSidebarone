@@ -69,7 +69,8 @@ class HybridGridPageView(
         override fun onReceive(context: Context?, intent: Intent?) {
             if (intent?.action == "ELEMENT_ADDED_TO_HYBRID" || intent?.action == "UPDATE_GRID") {
                 val targetPageId = intent.getStringExtra("PAGE_ID")
-                if (targetPageId == pageId) {
+                val targetContainerId = intent.getStringExtra("CONTAINER_ID")
+                if (targetPageId == pageId && (targetContainerId == null || targetContainerId == containerId)) {
                     val widgetId = intent.getIntExtra("WIDGET_ID", -1)
                     if (widgetId != -1) {
                         addWidgetIdToPrefs(widgetId)

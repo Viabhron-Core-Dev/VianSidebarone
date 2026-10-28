@@ -62,6 +62,19 @@ class HybridGridEditActivity : ComponentActivity() {
                 prefs.edit().putString(isolatedKey, legacy).apply()
             }
         }
+        val gridIsolatedKey = "handle_${containerId}_hybrid_grid_$pageId"
+        val gridLegacyKey = "hybrid_grid_$pageId"
+        if (!prefs.contains(gridIsolatedKey) && prefs.contains(gridLegacyKey) && (containerId == "handle_1_swipe_left" || containerId == "handle_1" || containerId == "sidebar")) {
+            val legacyGrid = prefs.getString(gridLegacyKey, null)
+            if (legacyGrid != null) {
+                prefs.edit().putString(gridIsolatedKey, legacyGrid).apply()
+            }
+        }
+        // Check and recover any orphaned elements from legacy scope into container-isolated scope
+        val recovered = com.example.feature.element.ElementPlacementHelper.recoverOrphanedLegacyElements(prefs, pageId, containerId, this)
+        if (recovered.isNotEmpty()) {
+            LogKeeper.writeLog("HybridGridEdit", "Recovered ${recovered.size} orphaned elements from legacy scope into container $containerId")
+        }
         appsManager = com.example.feature.sidebar.SidebarAppsManager(this, prefs, kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO), isolatedKey) {}
         appsManager.ensureLoaded()
 
@@ -78,6 +91,7 @@ class HybridGridEditActivity : ComponentActivity() {
                         onAddWidget = {
                             val intent = Intent(this@HybridGridEditActivity, AddElementActivity::class.java).apply {
                                 putExtra("PAGE_ID", pageId)
+                                putExtra("CONTAINER_ID", containerId)
                                 putExtra("PAGE_TYPE", "hybrid_grid")
                                 putExtra("IS_HYBRID_GRID", true)
                             }
@@ -119,6 +133,7 @@ class HybridGridEditActivity : ComponentActivity() {
                     
                     val bIntent = Intent("ELEMENT_ADDED_TO_HYBRID").apply {
                         putExtra("PAGE_ID", pageId)
+                        putExtra("CONTAINER_ID", containerId)
                         setPackage(packageName)
                     }
                     sendBroadcast(bIntent)
@@ -182,9 +197,11 @@ class HybridGridEditActivity : ComponentActivity() {
                 ))
                 saveHybridItems(prefs, pageId, parsedItems, this, containerId)
                 LogKeeper.writeLog("HybridGridEdit", "Added item: $elementId at ($targetX, $targetY)")
-                val intent = Intent("ELEMENT_ADDED_TO_HYBRID")
-                intent.putExtra("PAGE_ID", pageId)
-                intent.setPackage(packageName)
+                val intent = Intent("ELEMENT_ADDED_TO_HYBRID").apply {
+                    putExtra("PAGE_ID", pageId)
+                    putExtra("CONTAINER_ID", containerId)
+                    setPackage(packageName)
+                }
                 sendBroadcast(intent)
                 recreate()
             }
@@ -201,9 +218,11 @@ class HybridGridEditActivity : ComponentActivity() {
     override fun onDestroy() {
         super.onDestroy()
         try {
-            val updateIntent = Intent("UPDATE_GRID")
-            updateIntent.putExtra("PAGE_ID", pageId)
-            updateIntent.setPackage(packageName)
+            val updateIntent = Intent("UPDATE_GRID").apply {
+                putExtra("PAGE_ID", pageId)
+                putExtra("CONTAINER_ID", containerId)
+                setPackage(packageName)
+            }
             sendBroadcast(updateIntent)
             unregisterReceiver(receiver)
         } catch (e: Exception) {}
@@ -247,10 +266,14 @@ fun HybridGridEditor(
         }
     }
 
-    DisposableEffect(context, pageId) {
+    DisposableEffect(context, pageId, containerId) {
         val updateReceiver = object : android.content.BroadcastReceiver() {
             override fun onReceive(c: Context?, intent: Intent?) {
-                items = loadHybridLocalItems(prefs, pageId, containerId)
+                val targetPageId = intent?.getStringExtra("PAGE_ID")
+                val targetContainerId = intent?.getStringExtra("CONTAINER_ID")
+                if ((targetPageId == null || targetPageId == pageId) && (targetContainerId == null || targetContainerId == containerId)) {
+                    items = loadHybridLocalItems(prefs, pageId, containerId)
+                }
             }
         }
         val filter = android.content.IntentFilter("ELEMENT_ADDED_TO_HYBRID").apply {
@@ -639,6 +662,7 @@ fun saveHybridItems(prefs: android.content.SharedPreferences, pageId: String, it
         try {
             val intent = Intent("UPDATE_GRID").apply {
                 putExtra("PAGE_ID", pageId)
+                putExtra("CONTAINER_ID", containerId)
                 setPackage(context.packageName)
             }
             context.sendBroadcast(intent)

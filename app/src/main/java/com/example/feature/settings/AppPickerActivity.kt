@@ -31,6 +31,7 @@ class AppPickerActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         
         val pageId = intent.getStringExtra("PAGE_ID")
+        val containerId = intent.getStringExtra("CONTAINER_ID") ?: "sidebar"
         val isHybridGrid = intent.getBooleanExtra("IS_HYBRID_GRID", false)
 
         val layout = LinearLayout(this).apply {
@@ -178,11 +179,15 @@ class AppPickerActivity : ComponentActivity() {
                         com.example.feature.element.ElementPlacementHelper.addElementToHybridGrid(
                             this@AppPickerActivity,
                             pageId,
-                            elementId
+                            elementId,
+                            containerId = containerId
                         )
                         android.widget.Toast.makeText(this@AppPickerActivity, "Added: ${app.label}", android.widget.Toast.LENGTH_SHORT).show()
                     } else {
-                        val resultIntent = Intent().apply { putExtra("ELEMENT_ID", elementId) }
+                        val resultIntent = Intent().apply {
+                            putExtra("ELEMENT_ID", elementId)
+                            putExtra("CONTAINER_ID", containerId)
+                        }
                         setResult(Activity.RESULT_OK, resultIntent)
                         finish()
                     }
