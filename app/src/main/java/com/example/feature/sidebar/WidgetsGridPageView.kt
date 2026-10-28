@@ -103,7 +103,8 @@ class WidgetsGridPageView(
         override fun onReceive(context: Context?, intent: Intent?) {
             if (intent?.action == "WIDGET_ADDED_TO_GRID" || intent?.action == "UPDATE_GRID") {
                 val targetPageId = intent.getStringExtra("PAGE_ID")
-                if (targetPageId == pageId) {
+                val targetContainerId = intent.getStringExtra("CONTAINER_ID")
+                if (targetPageId == pageId && (targetContainerId == null || targetContainerId == containerId)) {
                     val widgetId = intent.getIntExtra("WIDGET_ID", -1)
                     if (widgetId != -1) {
                         addWidgetIdToPrefs(widgetId)
@@ -281,7 +282,7 @@ class WidgetsGridPageView(
                 if (wId != null && (cols <= 1 || rows <= 1)) {
                     val appWidgetManager = AppWidgetManager.getInstance(context)
                     val info = appWidgetManager.getAppWidgetInfo(wId)
-                    val totalCols = prefs.getInt("widgets_grid_cols_$pageId", 4)
+                    val totalCols = prefs.getInt(getWidgetsColsPrefKey(), 4)
                     val density = context.resources.displayMetrics.density
                     val cellW = if (width > 0) width / totalCols else (60 * density).toInt()
                     val (calcCols, calcRows) = com.example.calculateWidgetSpan(info, totalCols, cellW, density)
@@ -318,7 +319,7 @@ class WidgetsGridPageView(
             return
         }
         gridLayout.removeAllViews()
-        val totalCols = prefs.getInt("widgets_grid_cols_$pageId", 4)
+        val totalCols = prefs.getInt(getWidgetsColsPrefKey(), 4)
         
         val gridWidth = width
         val cellWidth = gridWidth / totalCols
@@ -441,7 +442,11 @@ class WidgetsGridPageView(
                                                     val newItems = items.toMutableList()
                                                     newItems.removeAll { it.id == item.id }
                                                     saveWidgetItems(newItems)
-                                                    context.sendBroadcast(Intent("WIDGET_ADDED_TO_GRID").apply { putExtra("PAGE_ID", pageId) })
+                                                    context.sendBroadcast(Intent("WIDGET_ADDED_TO_GRID").apply {
+                                                        putExtra("PAGE_ID", pageId)
+                                                        putExtra("CONTAINER_ID", containerId)
+                                                        setPackage(context.packageName)
+                                                    })
                                                 }
                                                 "App Info" -> {
                                                     try {

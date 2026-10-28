@@ -100,11 +100,7 @@ class DefaultSidebarPageFactory(
             "scheduler" -> HeavyPagePlaceholderView(context, config, containerId) { newHeight ->
                 onHeightChanged(newHeight)
             }
-            "notifications", "notification" -> NotificationPageView(
-                context,
-                onCloseSidebar = { onClose() },
-                onHideApp = { /* No-op */ }
-            ) { newHeight ->
+            "notifications", "notification" -> HeavyPagePlaceholderView(context, config, containerId) { newHeight ->
                 onHeightChanged(newHeight)
             }
             "resources_tracker" -> HeavyPagePlaceholderView(context, config, containerId) { newHeight ->

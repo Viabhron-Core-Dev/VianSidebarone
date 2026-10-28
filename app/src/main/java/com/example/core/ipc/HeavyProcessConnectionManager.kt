@@ -496,6 +496,109 @@ class HeavyProcessConnectionManager internal constructor(
     }
 
     private fun dispatchMainAction(request: MainCommandRequest): IpcResult {
+        if (request.action == MainActionType.CUSTOM && request.targetId == "NOTIFICATION_ACTION") {
+            val ctx = context ?: return IpcResult.error(IpcErrorCode.HEAVY_UNAVAILABLE, "Context is null")
+            val subAction = request.parameters["subAction"]
+            when (subAction) {
+                "GET_ACTIVE" -> {
+                    val listener = com.example.service.AppNotificationListener.instance
+                    val sbns = listener?.activeNotifications ?: emptyArray()
+                    val prefs = ctx.getSharedPreferences("NotificationPrefs", Context.MODE_PRIVATE)
+                    val sidebarHidden = prefs.getStringSet("sidebar_hidden_packages", emptySet()) ?: emptySet()
+                    val filtered = sbns.filter {
+                        it.packageName != ctx.packageName && !sidebarHidden.contains(it.packageName)
+                    }.sortedByDescending { it.postTime }
+                    val jsonArr = org.json.JSONArray()
+                    filtered.forEach { sbn ->
+                        jsonArr.put(com.example.feature.notification.NotificationItem.fromStatusBarNotification(sbn).toJson())
+                    }
+                    return IpcResult.success(data = mapOf("notifications" to jsonArr.toString()))
+                }
+                "CLEAR_ALL" -> {
+                    mainHandler.post {
+                        com.example.service.AppNotificationListener.instance?.cancelAllNotifications()
+                    }
+                    return IpcResult.success()
+                }
+                "DISMISS" -> {
+                    val key = request.parameters["key"]
+                    val pkg = request.parameters["package"]
+                    val tag = request.parameters["tag"]
+                    val id = request.parameters["id"]?.toIntOrNull()
+                    mainHandler.post {
+                        val listener = com.example.service.AppNotificationListener.instance
+                        if (key != null) {
+                            listener?.cancelNotification(key)
+                        } else if (pkg != null && id != null) {
+                            listener?.cancelNotification(pkg, tag, id)
+                        }
+                    }
+                    return IpcResult.success()
+                }
+                "OPEN" -> {
+                    val key = request.parameters["key"]
+                    val pkg = request.parameters["package"]
+                    mainHandler.post {
+                        val listener = com.example.service.AppNotificationListener.instance
+                        val sbn = listener?.activeNotifications?.find {
+                            (it.key ?: "${it.packageName}_${it.id}_${it.tag ?: ""}") == key
+                        }
+                        try {
+                            if (sbn?.notification?.contentIntent != null) {
+                                sbn.notification.contentIntent.send()
+                            } else if (pkg != null) {
+                                val launchIntent = ctx.packageManager.getLaunchIntentForPackage(pkg)
+                                if (launchIntent != null) {
+                                    launchIntent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                                    ctx.startActivity(launchIntent)
+                                }
+                            }
+                        } catch (e: Exception) {
+                            if (pkg != null) {
+                                val launchIntent = ctx.packageManager.getLaunchIntentForPackage(pkg)
+                                if (launchIntent != null) {
+                                    launchIntent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                                    ctx.startActivity(launchIntent)
+                                }
+                            }
+                        }
+                        com.example.feature.sidebar.SidebarWindowCoordinator.getInstance(ctx).closeSidebar()
+                    }
+                    return IpcResult.success()
+                }
+                "TRIGGER_ACTION" -> {
+                    val key = request.parameters["key"]
+                    val actionIdx = request.parameters["actionIndex"]?.toIntOrNull() ?: 0
+                    val replyText = request.parameters["replyText"]
+                    mainHandler.post {
+                        val listener = com.example.service.AppNotificationListener.instance
+                        val sbn = listener?.activeNotifications?.find {
+                            (it.key ?: "${it.packageName}_${it.id}_${it.tag ?: ""}") == key
+                        }
+                        val action = sbn?.notification?.actions?.getOrNull(actionIdx)
+                        if (action != null) {
+                            try {
+                                if (!replyText.isNullOrBlank() && !action.remoteInputs.isNullOrEmpty()) {
+                                    val replyIntent = android.content.Intent()
+                                    val bundle = android.os.Bundle()
+                                    for (ri in action.remoteInputs) {
+                                        bundle.putCharSequence(ri.resultKey, replyText)
+                                    }
+                                    android.app.RemoteInput.addResultsToIntent(action.remoteInputs, replyIntent, bundle)
+                                    action.actionIntent.send(ctx, 0, replyIntent)
+                                } else {
+                                    action.actionIntent.send()
+                                }
+                            } catch (e: Exception) {
+                                com.example.core.LogKeeper.writeLog("Notification", "Action send failed: ${e.message}")
+                            }
+                        }
+                    }
+                    return IpcResult.success()
+                }
+            }
+        }
+
         var finalResult = IpcResult.success()
         for (listener in listeners) {
             try {

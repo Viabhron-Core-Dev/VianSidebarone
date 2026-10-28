@@ -150,7 +150,22 @@ class SidebarAppsManager(
     }
 
     private val prefsListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
-        if (key == prefKey || key == "sidebar_apps" || (key != null && key.startsWith("sidebar_apps_"))) {
+        val isRelevant = if (key == prefKey) {
+            true
+        } else if (prefKey.startsWith("sidebar_apps_")) {
+            val rest = prefKey.removePrefix("sidebar_apps_")
+            val (containerId, _) = parseContainerAndPageId(rest)
+            val isDefault = (containerId == "sidebar" || containerId == "handle_1_swipe_left" || containerId == "handle_1" || containerId.isEmpty())
+            if (isDefault) {
+                key == "sidebar_apps" || (key != null && key.startsWith("sidebar_apps_") && !key.contains("_swipe_") && !key.contains("handle_2") && !key.contains("handle_3"))
+            } else {
+                false
+            }
+        } else {
+            false
+        }
+
+        if (isRelevant) {
             coroutineScope.launch {
                 loadActiveApps()
                 withContext(Dispatchers.Main) {
@@ -582,19 +597,21 @@ class SidebarAppsManager(
             }
             if (jsonStr == null && prefKey.startsWith("sidebar_apps_")) {
                 val rest = prefKey.removePrefix("sidebar_apps_")
-                // Check if rest itself was a legacy page ID directly under sidebar_apps_$rest
-                jsonStr = prefs.getString("sidebar_apps_$rest", null)
+                val (containerId, pageId) = parseContainerAndPageId(rest)
+                val isDefaultContainer = (containerId == "sidebar" || containerId == "handle_1_swipe_left" || containerId == "handle_1" || containerId.isEmpty())
 
-                if (jsonStr == null) {
-                    val (containerId, pageId) = parseContainerAndPageId(rest)
-                    if (pageId.isNotEmpty()) {
-                        val cleanHandle = com.example.core.PageManager.getCleanHandleId(containerId)
-                        jsonStr = prefs.getString("sidebar_apps_${cleanHandle}_$pageId", null)
-                            ?: prefs.getString("sidebar_apps_$pageId", null)
-                            ?: if (containerId == "sidebar" || containerId == "handle_1_swipe_left" || containerId == "handle_1") {
-                                prefs.getString("sidebar_apps", null)
-                            } else null
-                    }
+                if (isDefaultContainer) {
+                    // Check if rest itself was a legacy page ID directly under sidebar_apps_$rest
+                    jsonStr = prefs.getString("sidebar_apps_$rest", null)
+                }
+
+                if (jsonStr == null && pageId.isNotEmpty()) {
+                    val cleanHandle = com.example.core.PageManager.getCleanHandleId(containerId)
+                    jsonStr = prefs.getString("sidebar_apps_${cleanHandle}_$pageId", null)
+                        ?: if (isDefaultContainer) {
+                            prefs.getString("sidebar_apps_$pageId", null)
+                                ?: prefs.getString("sidebar_apps", null)
+                        } else null
                 }
             } else if (jsonStr == null && prefKey.startsWith("hg_")) {
                 val rest = prefKey.removePrefix("hg_")

@@ -65,6 +65,8 @@ class WidgetsGridEditActivity : ComponentActivity() {
                         onAddWidget = {
                             val intent = Intent(this@WidgetsGridEditActivity, WidgetPickerActivity::class.java).apply {
                                 putExtra("ACTION_TYPE", "RETURN_ID")
+                                putExtra("PAGE_ID", pageId)
+                                putExtra("CONTAINER_ID", containerId)
                             }
                             startActivityForResult(intent, 201)
                         }
@@ -136,9 +138,11 @@ class WidgetsGridEditActivity : ComponentActivity() {
                 saveItems(prefs, pageId, parsedItems, this, containerId)
                 LogKeeper.writeLog("WidgetsGridEdit", "Added item: $elementId at ($targetX, $targetY)")
                 
-                val intent = Intent("WIDGET_ADDED_TO_GRID")
-                intent.putExtra("PAGE_ID", pageId)
-                intent.setPackage(packageName)
+                val intent = Intent("WIDGET_ADDED_TO_GRID").apply {
+                    putExtra("PAGE_ID", pageId)
+                    putExtra("CONTAINER_ID", containerId)
+                    setPackage(packageName)
+                }
                 sendBroadcast(intent)
                 
                 // Refresh activity UI
@@ -147,12 +151,21 @@ class WidgetsGridEditActivity : ComponentActivity() {
         }
     }
 
+    override fun onBackPressed() {
+        val prefs = getSharedPreferences("FloatingReaderPrefs", Context.MODE_PRIVATE)
+        val currentFreshItems = loadLocalItems(prefs, pageId, containerId)
+        saveItems(prefs, pageId, currentFreshItems, this, containerId)
+        super.onBackPressed()
+    }
+
     override fun onDestroy() {
         super.onDestroy()
         try {
-            val updateIntent = Intent("UPDATE_GRID")
-            updateIntent.putExtra("PAGE_ID", pageId)
-            updateIntent.setPackage(packageName)
+            val updateIntent = Intent("UPDATE_GRID").apply {
+                putExtra("PAGE_ID", pageId)
+                putExtra("CONTAINER_ID", containerId)
+                setPackage(packageName)
+            }
             sendBroadcast(updateIntent)
             unregisterReceiver(receiver)
         } catch (e: Exception) {}
@@ -181,9 +194,14 @@ fun WidgetGridEditor(
     
     // Auto-save when cols change
     LaunchedEffect(cols) {
-        prefs.edit().putInt(widgetsColsKey, cols).commit()
-        com.example.core.OverlaySyncManager.syncInt(context, widgetsColsKey, cols)
-        saveItems(prefs, pageId, items, context, containerId)
+        val currentCols = prefs.getInt(widgetsColsKey, 4)
+        if (cols != currentCols) {
+            prefs.edit().putInt(widgetsColsKey, cols).commit()
+            com.example.core.OverlaySyncManager.syncInt(context, widgetsColsKey, cols)
+            val currentFreshItems = loadLocalItems(prefs, pageId, containerId)
+            items = currentFreshItems
+            saveItems(prefs, pageId, currentFreshItems, context, containerId)
+        }
     }
 
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
@@ -194,7 +212,8 @@ fun WidgetGridEditor(
         ) {
             Text("Edit Widgets Grid", fontSize = 20.sp, color = Color.White)
             Button(onClick = {
-                saveItems(prefs, pageId, items, context, containerId)
+                val currentFreshItems = loadLocalItems(prefs, pageId, containerId)
+                saveItems(prefs, pageId, currentFreshItems, context, containerId)
                 onClose()
             }) {
                 Text("Done")
@@ -491,6 +510,14 @@ fun saveItems(prefs: android.content.SharedPreferences, pageId: String, items: L
     prefs.edit().putString(key, jsonStr).commit()
     if (context != null) {
         com.example.core.OverlaySyncManager.syncString(context, key, jsonStr)
+        try {
+            val intent = Intent("UPDATE_GRID").apply {
+                putExtra("PAGE_ID", pageId)
+                putExtra("CONTAINER_ID", containerId)
+                setPackage(context.packageName)
+            }
+            context.sendBroadcast(intent)
+        } catch (e: Exception) {}
     }
     LogKeeper.writeLog("WidgetsGridEdit", "Saved ${items.size} items to prefs for page: $pageId in container: $containerId")
 }

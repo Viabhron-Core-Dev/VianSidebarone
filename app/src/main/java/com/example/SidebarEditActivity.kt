@@ -325,9 +325,13 @@ class SidebarEditActivity : ComponentActivity() {
         } else {
             var jsonStr = prefs.getString(myPrefKey, null)
             if (jsonStr == null) {
-                // Fallback to legacy/general keys if not found for specific handle
-                jsonStr = prefs.getString("sidebar_apps_${pageId}", null)
-                    ?: prefs.getString("sidebar_apps", null)
+                val containerId = intent.getStringExtra("CONTAINER_ID") ?: intent.getStringExtra("HANDLE_ID") ?: "sidebar"
+                val isDefaultContainer = (containerId == "sidebar" || containerId == "handle_1_swipe_left" || containerId == "handle_1")
+                if (isDefaultContainer) {
+                    // Fallback to legacy/general keys only if default container
+                    jsonStr = prefs.getString("sidebar_apps_${pageId}", null)
+                        ?: prefs.getString("sidebar_apps", null)
+                }
             }
             if (jsonStr != null && jsonStr.isNotEmpty()) {
                 val arr = JSONArray(jsonStr)
@@ -361,11 +365,14 @@ class SidebarEditActivity : ComponentActivity() {
         } else {
             val containerId = intent.getStringExtra("CONTAINER_ID") ?: intent.getStringExtra("HANDLE_ID") ?: "sidebar"
             val handleId = intent.getStringExtra("HANDLE_ID") ?: "sidebar"
+            val isDefaultContainer = (containerId == "sidebar" || containerId == "handle_1_swipe_left" || containerId == "handle_1")
             val appsJson = arr.toString()
             val editor = prefs.edit()
                 .putString(myPrefKey, appsJson)
-                .putString("sidebar_apps_$pageId", appsJson)
-                .putInt("handle_${containerId}_page_${pageId}_columns", totalCols)
+            if (isDefaultContainer) {
+                editor.putString("sidebar_apps_$pageId", appsJson)
+            }
+            editor.putInt("handle_${containerId}_page_${pageId}_columns", totalCols)
                 .putInt("handle_${containerId}_page_${pageId}_rows", totalRows)
             if (containerId != handleId) {
                 editor.putInt("handle_${handleId}_page_${pageId}_columns", totalCols)
@@ -373,7 +380,9 @@ class SidebarEditActivity : ComponentActivity() {
             }
             editor.commit()
             com.example.core.OverlaySyncManager.syncString(this, myPrefKey, appsJson)
-            com.example.core.OverlaySyncManager.syncString(this, "sidebar_apps_$pageId", appsJson)
+            if (isDefaultContainer) {
+                com.example.core.OverlaySyncManager.syncString(this, "sidebar_apps_$pageId", appsJson)
+            }
             com.example.core.OverlaySyncManager.syncInt(this, "handle_${containerId}_page_${pageId}_columns", totalCols)
             com.example.core.OverlaySyncManager.syncInt(this, "handle_${containerId}_page_${pageId}_rows", totalRows)
             if (containerId != handleId) {

@@ -31,6 +31,7 @@ import com.example.feature.sidebar.CalculatorPageView
 import com.example.feature.sidebar.CompassPageView
 import com.example.feature.sidebar.HybridGridPageView
 import com.example.feature.sidebar.MediaPlayerPageView
+import com.example.feature.sidebar.NotificationPageView
 import com.example.feature.sidebar.ResourcesTrackerPageView
 import com.example.feature.sidebar.SchedulerPageView
 import com.example.feature.sidebar.SidebarAppsManager
@@ -323,6 +324,22 @@ class HeavyPageHostManager private constructor(private val context: Context) {
                             context = context,
                             scope = hostScope,
                             containerId = containerId,
+                            onHeightChanged = { newH ->
+                                reportDesiredPageHeight(pageId, newH)
+                            }
+                        ).apply {
+                            applyThemeBackground()
+                        }
+                    }
+                    "notifications", "notification" -> {
+                        val containerId = command.payload["containerId"] ?: "sidebar"
+                        LogKeeper.log(context, TAG, "Instantiating NotificationPageView in :heavy for pageId='$pageId'")
+                        NotificationPageView(
+                            context = context,
+                            onCloseSidebar = {
+                                HeavyProcessHost.getInstance(context).requestCloseSidebar(containerId)
+                            },
+                            onHideApp = { /* No-op */ },
                             onHeightChanged = { newH ->
                                 reportDesiredPageHeight(pageId, newH)
                             }
@@ -729,6 +746,24 @@ class HeavyPageHostManager private constructor(private val context: Context) {
                             context = context,
                             scope = hostScope,
                             containerId = containerId,
+                            onHeightChanged = { newH ->
+                                reportDesiredPageHeight(pageId, newH)
+                            }
+                        ).apply {
+                            if (backgroundColor != 0) {
+                                applyThemeBackground(backgroundColor, isRight)
+                            }
+                        }
+                    }
+                    "notifications", "notification" -> {
+                        val containerId = params.getString("containerId") ?: "sidebar"
+                        LogKeeper.log(context, TAG, "Instantiating NotificationPageView in :heavy for pageId='$pageId', containerId='$containerId'")
+                        NotificationPageView(
+                            context = context,
+                            onCloseSidebar = {
+                                HeavyProcessHost.getInstance(context).requestCloseSidebar(containerId)
+                            },
+                            onHideApp = { /* No-op */ },
                             onHeightChanged = { newH ->
                                 reportDesiredPageHeight(pageId, newH)
                             }
