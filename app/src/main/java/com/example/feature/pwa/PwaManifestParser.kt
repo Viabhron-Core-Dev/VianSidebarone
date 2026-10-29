@@ -35,7 +35,8 @@ object PwaManifestParser {
         return try {
             val content = manifestFile.readText(Charsets.UTF_8)
             parseJson(content, fallbackName)
-        } catch (_: Throwable) {
+        } catch (e: Throwable) {
+            com.example.core.LogKeeper.writeLog("PWA", "Manifest file read/parse failed for '${manifestFile.name}', using fallback '$fallbackName': ${e.message}")
             PwaManifestData(name = fallbackName)
         }
     }
@@ -80,7 +81,8 @@ object PwaManifestParser {
                 backgroundColor = backgroundColor,
                 iconRelativePath = iconRelPath
             )
-        } catch (_: Throwable) {
+        } catch (e: Throwable) {
+            com.example.core.LogKeeper.writeLog("PWA", "Manifest JSON parsing failed, using fallback '$fallbackName': ${e.message}")
             PwaManifestData(name = fallbackName)
         }
     }

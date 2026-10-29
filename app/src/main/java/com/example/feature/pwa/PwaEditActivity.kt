@@ -7,6 +7,8 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -18,14 +20,19 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.lifecycleScope
+import com.example.core.IconCacheManager
+import com.example.core.SquircleHelper
 import com.example.data.AppDatabase
 import com.example.data.PwaEntity
+import com.example.feature.sidebar.ElementMetadataStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -35,7 +42,7 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * PwaEditActivity: Configuration and metadata editor for imported Offline PWAs.
+ * PwaEditActivity: Configuration, metadata, and orientation editor for imported Offline PWAs.
  */
 class PwaEditActivity : ComponentActivity() {
 
@@ -47,9 +54,14 @@ class PwaEditActivity : ComponentActivity() {
             return
         }
 
+        val prefs = getSharedPreferences("FloatingReaderPrefs", Context.MODE_PRIVATE)
+
         setContent {
             MaterialTheme(colorScheme = darkColorScheme()) {
                 var pwa by remember { mutableStateOf<PwaEntity?>(null) }
+                val initialOrientation = remember(pwaId) {
+                    prefs.getString("pwa_pref_${pwaId}_orientation", "manifest") ?: "manifest"
+                }
 
                 LaunchedEffect(pwaId) {
                     val entity = withContext(Dispatchers.IO) {
@@ -62,8 +74,9 @@ class PwaEditActivity : ComponentActivity() {
                 if (currentPwa != null) {
                     PwaEditScreen(
                         pwa = currentPwa,
+                        initialOrientation = initialOrientation,
                         onBack = { finish() },
-                        onSave = { updatedName ->
+                        onSave = { updatedName, selectedOrientation ->
                             lifecycleScope.launch {
                                 withContext(Dispatchers.IO) {
                                     AppDatabase.getDatabase(this@PwaEditActivity).pwaDao()
@@ -73,6 +86,19 @@ class PwaEditActivity : ComponentActivity() {
                                             iconPath = currentPwa.iconPath,
                                             updatedAt = System.currentTimeMillis()
                                         )
+                                    ElementMetadataStore.savePwaElement(
+                                        this@PwaEditActivity,
+                                        currentPwa.id,
+                                        updatedName,
+                                        currentPwa.iconPath
+                                    )
+                                    prefs.edit()
+                                        .putString("pwa_pref_${currentPwa.id}_orientation", selectedOrientation)
+                                        .apply()
+
+                                    if (!currentPwa.iconPath.isNullOrEmpty()) {
+                                        IconCacheManager.getPwaIcon(this@PwaEditActivity, currentPwa.id, currentPwa.iconPath)
+                                    }
                                 }
                                 Toast.makeText(this@PwaEditActivity, "Saved", Toast.LENGTH_SHORT).show()
                                 finish()
@@ -93,10 +119,12 @@ class PwaEditActivity : ComponentActivity() {
 @Composable
 fun PwaEditScreen(
     pwa: PwaEntity,
+    initialOrientation: String,
     onBack: () -> Unit,
-    onSave: (newName: String) -> Unit
+    onSave: (newName: String, orientation: String) -> Unit
 ) {
     var name by remember { mutableStateOf(pwa.name) }
+    var orientation by remember { mutableStateOf(initialOrientation) }
     val dateFormat = remember { SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()) }
 
     Scaffold(
@@ -104,12 +132,15 @@ fun PwaEditScreen(
             TopAppBar(
                 title = { Text("Edit PWA") },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    IconButton(onClick = onBack, modifier = Modifier.testTag("pwa_edit_back_button")) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 },
                 actions = {
-                    IconButton(onClick = { if (name.isNotBlank()) onSave(name.trim()) }) {
+                    IconButton(
+                        onClick = { if (name.isNotBlank()) onSave(name.trim(), orientation) },
+                        modifier = Modifier.testTag("pwa_edit_save_button")
+                    ) {
                         Icon(Icons.Default.Check, contentDescription = "Save", tint = MaterialTheme.colorScheme.primary)
                     }
                 }
@@ -135,7 +166,8 @@ fun PwaEditScreen(
                     if (!pwa.iconPath.isNullOrEmpty()) {
                         val file = File(pwa.iconPath)
                         if (file.exists()) {
-                            android.graphics.BitmapFactory.decodeFile(file.absolutePath)
+                            val raw = android.graphics.BitmapFactory.decodeFile(file.absolutePath)
+                            if (raw != null) SquircleHelper.toSquircleBitmap(raw) else null
                         } else null
                     } else null
                 }
@@ -143,14 +175,14 @@ fun PwaEditScreen(
                 Box(
                     modifier = Modifier
                         .size(64.dp)
-                        .background(Color(0xFF2A2A3C), RoundedCornerShape(12.dp)),
+                        .background(Color(0xFF2A2A3C), RoundedCornerShape(14.dp)),
                     contentAlignment = Alignment.Center
                 ) {
                     if (iconBitmap != null) {
                         Image(
                             bitmap = iconBitmap.asImageBitmap(),
                             contentDescription = pwa.name,
-                            modifier = Modifier.fillMaxSize().padding(8.dp)
+                            modifier = Modifier.fillMaxSize().padding(4.dp)
                         )
                     } else {
                         Text(
@@ -181,9 +213,57 @@ fun PwaEditScreen(
                 value = name,
                 onValueChange = { name = it },
                 label = { Text("App Name") },
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().testTag("pwa_edit_name_input"),
                 singleLine = true
             )
+
+            // Orientation Override Setting
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1E2E)),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(
+                        text = "Orientation",
+                        style = MaterialTheme.typography.titleSmall,
+                        color = Color.White
+                    )
+
+                    val options = listOf(
+                        "manifest" to "Follow Manifest (${pwa.orientation.ifBlank { "unspecified" }})",
+                        "unspecified" to "Auto / Unspecified",
+                        "portrait" to "Portrait",
+                        "landscape" to "Landscape"
+                    )
+
+                    options.forEach { (key, label) ->
+                        val isSelected = orientation == key
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f) else Color.Transparent)
+                                .clickable { orientation = key }
+                                .padding(horizontal = 12.dp, vertical = 10.dp)
+                                .testTag("pwa_orientation_$key"),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            RadioButton(
+                                selected = isSelected,
+                                onClick = { orientation = key },
+                                colors = RadioButtonDefaults.colors(selectedColor = MaterialTheme.colorScheme.primary)
+                            )
+                            Text(
+                                text = label,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = if (isSelected) Color.White else Color.LightGray
+                            )
+                        }
+                    }
+                }
+            }
 
             // Read-only Details Card
             Card(
@@ -207,8 +287,8 @@ fun PwaEditScreen(
             Spacer(modifier = Modifier.height(16.dp))
 
             Button(
-                onClick = { if (name.isNotBlank()) onSave(name.trim()) },
-                modifier = Modifier.fillMaxWidth().height(48.dp),
+                onClick = { if (name.isNotBlank()) onSave(name.trim(), orientation) },
+                modifier = Modifier.fillMaxWidth().height(48.dp).testTag("pwa_save_changes_button"),
                 shape = RoundedCornerShape(8.dp)
             ) {
                 Text("Save Changes")

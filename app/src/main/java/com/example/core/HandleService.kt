@@ -97,21 +97,28 @@ class HandleService : Service(), SharedPreferences.OnSharedPreferenceChangeListe
 
         fun startIfConfigured(context: Context) {
             try {
+                val isHeavy = LogKeeper.getProcessName(context).endsWith(":heavy")
                 val prefs = context.getSharedPreferences(HandleManager.PREFS_NAME, Context.MODE_PRIVATE)
                 val autoStart = prefs.getBoolean("auto_start_on_boot", true)
                 val canOverlay = Settings.canDrawOverlays(context)
+                val tag = if (isHeavy) "LauncherBridge" else "HandleService"
+                val prefix = if (isHeavy) "startIfConfigured requested from :heavy" else "startIfConfigured called"
                 LogKeeper.log(
                     context,
-                    "HandleService",
-                    "startIfConfigured called: autoStart=$autoStart, canDrawOverlays=$canOverlay"
+                    tag,
+                    "$prefix: autoStart=$autoStart, canDrawOverlays=$canOverlay"
                 )
                 if (autoStart && canOverlay) {
-                    LogKeeper.log(context, "HandleService", "startIfConfigured: launching service")
+                    if (isHeavy) {
+                        LogKeeper.log(context, tag, "Dispatching HandleService start to Main process")
+                    } else {
+                        LogKeeper.log(context, tag, "startIfConfigured: launching service")
+                    }
                     start(context)
                 } else {
                     LogKeeper.log(
                         context,
-                        "HandleService",
+                        tag,
                         "startIfConfigured skipped (autoStart=$autoStart, canOverlay=$canOverlay)"
                     )
                 }

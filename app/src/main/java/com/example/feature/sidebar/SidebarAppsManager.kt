@@ -219,31 +219,13 @@ class SidebarAppsManager(
 
     fun bindIcon(id: String, icon: android.widget.ImageView, prefs: android.content.SharedPreferences, coroutineScope: kotlinx.coroutines.CoroutineScope, onUpdate: () -> Unit) {
         val parsed = parseId(id) ?: return
-        val customIconFile = java.io.File(context.filesDir, "custom_icons/${id.replace(Regex("[^a-zA-Z0-9.-]"), "_")}.webp")
-        if (customIconFile.exists()) {
-            var customCached = iconCache.get("custom_${id}")
-            if (customCached == null) {
-                try {
-                    val rawBmp = android.graphics.BitmapFactory.decodeFile(customIconFile.absolutePath)
-                    customCached = if (rawBmp != null) {
-                        val density = context.resources.displayMetrics.density
-                        val targetSize = Math.round(56f * density).coerceIn(48, 192)
-                        if (rawBmp.width > targetSize || rawBmp.height > targetSize) {
-                            Bitmap.createScaledBitmap(rawBmp, targetSize, targetSize, true)
-                        } else {
-                            rawBmp
-                        }
-                    } else null
-                    if (customCached != null) iconCache.put("custom_${id}", customCached)
-                } catch (e: Exception) {}
-            }
-            if (customCached != null) {
-                icon.setImageDrawable(null)
-                icon.clearColorFilter()
-                icon.setBackgroundColor(android.graphics.Color.TRANSPARENT)
-                icon.setImageBitmap(customCached)
-                return
-            }
+        val customIcon = com.example.core.IconCacheManager.getCustomIcon(context, id)
+        if (customIcon != null) {
+            icon.setImageDrawable(null)
+            icon.clearColorFilter()
+            icon.setBackgroundColor(android.graphics.Color.TRANSPARENT)
+            icon.setImageBitmap(customIcon)
+            return
         }
         val customIconStr = prefs.getString("custom_icon_${id}", null)
         if (!customIconStr.isNullOrEmpty()) {
@@ -378,38 +360,27 @@ class SidebarAppsManager(
                 icon.setImageResource(android.R.drawable.ic_menu_gallery)
             }
         } else if (parsed is SidebarItem.Link) {
-            val cached = getIconBitmap(id)
+            val uuid = id.substringAfter("link:").substringBefore(":")
+            val cached = getIconBitmap(id) ?: com.example.core.IconCacheManager.getLinkIcon(context, uuid)
             if (cached != null) {
                 icon.setBackgroundColor(android.graphics.Color.TRANSPARENT)
                 icon.clearColorFilter()
                 icon.setImageBitmap(cached)
             } else {
                 icon.setBackgroundColor(android.graphics.Color.TRANSPARENT)
-                icon.setImageResource(com.example.R.drawable.ic_language)
-                icon.setColorFilter(android.graphics.Color.WHITE)
+                if (icon.drawable == null) {
+                    icon.setImageResource(com.example.R.drawable.ic_language)
+                    icon.setColorFilter(android.graphics.Color.WHITE)
+                }
                 coroutineScope.launch {
                     val meta = ElementMetadataStore.get(context, id)
                     val iconPath = meta?.iconPath
-                    var bitmap: Bitmap? = null
-                    if (!iconPath.isNullOrEmpty()) {
-                        val f = java.io.File(iconPath)
-                        if (f.exists() && f.length() > 0) {
-                            try {
-                                bitmap = BitmapFactory.decodeFile(f.absolutePath)
-                            } catch (_: Exception) {}
-                        }
-                    }
+                    var bitmap: Bitmap? = com.example.core.IconCacheManager.getLinkIcon(context, uuid, iconPath)
                     if (bitmap == null && meta != null && meta.target.isNotEmpty()) {
-                        val uuid = id.substringAfter("link:").substringBefore(":")
                         val downloaded = com.example.core.FaviconFetcher.fetchAndCacheSiteIcon(context, uuid, meta.target)
                         if (downloaded != null) {
-                            val f = java.io.File(downloaded)
-                            if (f.exists()) {
-                                try {
-                                    bitmap = BitmapFactory.decodeFile(f.absolutePath)
-                                    ElementMetadataStore.save(context, meta.copy(iconPath = downloaded))
-                                } catch (_: Exception) {}
-                            }
+                            bitmap = com.example.core.IconCacheManager.getLinkIcon(context, uuid, downloaded)
+                            ElementMetadataStore.save(context, meta.copy(iconPath = downloaded))
                         }
                     }
                     if (bitmap != null) {
@@ -422,36 +393,25 @@ class SidebarAppsManager(
                 }
             }
         } else if (parsed is SidebarItem.Pwa) {
-            val cached = getIconBitmap(id)
+            val cached = getIconBitmap(id) ?: com.example.core.IconCacheManager.getPwaIcon(context, parsed.pwaId, parsed.iconPath)
             if (cached != null) {
                 icon.setBackgroundColor(android.graphics.Color.TRANSPARENT)
                 icon.clearColorFilter()
                 icon.setImageBitmap(cached)
             } else {
                 icon.setBackgroundColor(android.graphics.Color.TRANSPARENT)
-                icon.setImageResource(com.example.R.drawable.ic_language)
-                icon.setColorFilter(android.graphics.Color.WHITE)
+                if (icon.drawable == null) {
+                    icon.setImageResource(com.example.R.drawable.ic_language)
+                    icon.setColorFilter(android.graphics.Color.WHITE)
+                }
                 coroutineScope.launch(Dispatchers.IO) {
-                    var bitmap: Bitmap? = null
-                    if (!parsed.iconPath.isNullOrEmpty()) {
-                        val f = java.io.File(parsed.iconPath)
-                        if (f.exists() && f.length() > 0) {
-                            try {
-                                bitmap = BitmapFactory.decodeFile(f.absolutePath)
-                            } catch (_: Exception) {}
-                        }
-                    }
+                    val pwaId = parsed.pwaId
+                    var bitmap: Bitmap? = com.example.core.IconCacheManager.getPwaIcon(context, pwaId, parsed.iconPath)
                     if (bitmap == null) {
-                        try {
-                            val db = com.example.data.AppDatabase.getDatabase(context)
-                            val pwa = db.pwaDao().getById(parsed.pwaId)
-                            if (pwa?.iconPath != null) {
-                                val f = java.io.File(pwa.iconPath)
-                                if (f.exists() && f.length() > 0) {
-                                    bitmap = BitmapFactory.decodeFile(f.absolutePath)
-                                }
-                            }
-                        } catch (_: Exception) {}
+                        val metaIconPath = ElementMetadataStore.get(context, id)?.iconPath
+                        if (!metaIconPath.isNullOrEmpty()) {
+                            bitmap = com.example.core.IconCacheManager.getPwaIcon(context, pwaId, metaIconPath)
+                        }
                     }
                     if (bitmap != null) {
                         iconCache.put(id, bitmap)
@@ -517,34 +477,39 @@ class SidebarAppsManager(
 
     fun getIconBitmap(id: String): Bitmap? {
         val customIconFile = java.io.File(context.filesDir, "custom_icons/${id.replace(Regex("[^a-zA-Z0-9.-]"), "_")}.webp")
-        if (customIconFile.exists()) {
-            var b = iconCache.get("custom_$id")
-            if (b == null) {
-                try {
-                    val rawBmp = android.graphics.BitmapFactory.decodeFile(customIconFile.absolutePath)
-                    b = if (rawBmp != null) {
-                        val density = context.resources.displayMetrics.density
-                        val targetSize = Math.round(56f * density).coerceIn(48, 192)
-                        if (rawBmp.width > targetSize || rawBmp.height > targetSize) {
-                            Bitmap.createScaledBitmap(rawBmp, targetSize, targetSize, true)
-                        } else {
-                            rawBmp
-                        }
-                    } else null
-                    if (b != null) iconCache.put("custom_$id", b)
-                } catch(e: Exception) {}
-            }
-            if (b != null) return b
-        }
+        val customIcon = com.example.core.IconCacheManager.getCustomIcon(context, id)
+        if (customIcon != null) return customIcon
+
         iconCache.get(id)?.let { return it }
+
+        if (id.startsWith("pwa:")) {
+            val pwaId = id.substringAfter("pwa:").substringBefore(":")
+            val bmp = com.example.core.IconCacheManager.getPwaIcon(context, pwaId)
+            if (bmp != null) {
+                iconCache.put(id, bmp)
+                return bmp
+            }
+        } else if (id.startsWith("link:")) {
+            val uuid = id.substringAfter("link:").substringBefore(":")
+            val bmp = com.example.core.IconCacheManager.getLinkIcon(context, uuid)
+            if (bmp != null) {
+                iconCache.put(id, bmp)
+                return bmp
+            }
+        }
 
         val meta = ElementMetadataStore.get(context, id)
         if (meta != null && meta.iconPath.isNotEmpty()) {
             val iconFile = java.io.File(meta.iconPath)
             if (iconFile.exists() && iconFile.length() > 0) {
                 try {
-                    val bmp = BitmapFactory.decodeFile(iconFile.absolutePath)
-                    if (bmp != null) {
+                    val rawBmp = BitmapFactory.decodeFile(iconFile.absolutePath)
+                    if (rawBmp != null) {
+                        val bmp = if (meta.type == "pwa" || meta.type == "link") {
+                            com.example.core.SquircleHelper.toSquircleBitmap(rawBmp)
+                        } else {
+                            rawBmp
+                        }
                         iconCache.put(id, bmp)
                         return bmp
                     }
@@ -575,6 +540,12 @@ class SidebarAppsManager(
             com.example.core.IconCacheManager.getCachedBitmap(context, parsed.packageName)?.let {
                 iconCache.put(parsed.packageName, it)
                 return it
+            }
+        } else if (parsed is SidebarItem.Pwa) {
+            val bmp = com.example.core.IconCacheManager.getPwaIcon(context, parsed.pwaId, parsed.iconPath)
+            if (bmp != null) {
+                iconCache.put(id, bmp)
+                return bmp
             }
         }
         val resId = when (parsed) {

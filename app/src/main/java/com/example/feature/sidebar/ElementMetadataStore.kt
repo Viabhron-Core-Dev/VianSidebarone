@@ -121,6 +121,18 @@ object ElementMetadataStore {
             }
         }
 
+        // 4. Canonical PWA prefix lookup: pwa:pwaId
+        if (id.startsWith("pwa:")) {
+            val pwaId = id.substringAfter("pwa:").substringBefore(":")
+            if (pwaId.isNotEmpty()) {
+                val pwaJson = prefs.getString(PREF_KEY_PREFIX + "pwa:$pwaId", null)
+                if (pwaJson != null) {
+                    val meta = ElementMetadata.fromJson(pwaJson)
+                    if (meta != null) return meta
+                }
+            }
+        }
+
         return null
     }
 
@@ -130,7 +142,7 @@ object ElementMetadataStore {
         val editor = prefs.edit()
         editor.putString(PREF_KEY_PREFIX + metadata.id, jsonStr)
 
-        // Also save canonical lookup key for apps and links
+        // Also save canonical lookup key for apps, links, and PWAs
         if (metadata.type == "app") {
             editor.putString(PREF_KEY_PREFIX + "app:${metadata.target}", jsonStr)
         } else if (metadata.type == "link") {
@@ -138,8 +150,31 @@ object ElementMetadataStore {
             if (uuid.isNotEmpty()) {
                 editor.putString(PREF_KEY_PREFIX + "link:$uuid", jsonStr)
             }
+        } else if (metadata.type == "pwa") {
+            val pwaId = metadata.id.substringAfter("pwa:").substringBefore(":")
+            if (pwaId.isNotEmpty()) {
+                editor.putString(PREF_KEY_PREFIX + "pwa:$pwaId", jsonStr)
+            }
         }
         editor.apply()
+    }
+
+    fun savePwaElement(
+        context: Context,
+        pwaId: String,
+        name: String,
+        iconPath: String? = null
+    ): ElementMetadata {
+        val elementId = "pwa:$pwaId"
+        val metadata = ElementMetadata(
+            id = elementId,
+            type = "pwa",
+            target = pwaId,
+            label = name,
+            iconPath = iconPath ?: ""
+        )
+        save(context, metadata)
+        return metadata
     }
 
     fun saveAppElement(context: Context, packageName: String, label: String, elementId: String = "app:$packageName"): ElementMetadata {

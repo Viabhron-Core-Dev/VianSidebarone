@@ -792,16 +792,13 @@ class AppsPageView(
                 true
             }
 
-            val customIconFile = java.io.File(context.filesDir, "custom_icons/${item.id.replace(Regex("[^a-zA-Z0-9.-]"), "_")}.webp")
-            if (customIconFile.exists()) {
-                val customCached = manager.iconCache.get("custom_${item.id}") ?: android.graphics.BitmapFactory.decodeFile(customIconFile.absolutePath)?.also { manager.iconCache.put("custom_${item.id}", it) }
-                if (customCached != null) {
-                    icon.setImageDrawable(null)
-                    icon.clearColorFilter()
-                    icon.setBackgroundColor(android.graphics.Color.TRANSPARENT)
-                    icon.setImageBitmap(customCached)
-                    return
-                }
+            val customIcon = com.example.core.IconCacheManager.getCustomIcon(context, item.id)
+            if (customIcon != null) {
+                icon.setImageDrawable(null)
+                icon.clearColorFilter()
+                icon.setBackgroundColor(android.graphics.Color.TRANSPARENT)
+                icon.setImageBitmap(customIcon)
+                return
             }
             val customIconStr = prefs.getString("custom_icon_${item.id}", null)
             if (!customIconStr.isNullOrEmpty()) {
@@ -975,10 +972,35 @@ class AppsPageView(
                 icon.setBackgroundColor(android.graphics.Color.TRANSPARENT)
                 val cached = manager.getIconBitmap(item.id)
                 if (cached != null) {
+                    icon.clearColorFilter()
                     icon.setImageBitmap(cached)
                 } else {
-                    icon.setImageResource(android.R.drawable.ic_menu_set_as)
-                    icon.setColorFilter(android.graphics.Color.WHITE)
+                    val uuid = item.id.substringAfter("link:").substringBefore(":")
+                    val bmp = com.example.core.IconCacheManager.getLinkIcon(context, uuid)
+                    if (bmp != null) {
+                        icon.clearColorFilter()
+                        icon.setImageBitmap(bmp)
+                    } else {
+                        icon.setImageResource(com.example.R.drawable.ic_language)
+                        icon.setColorFilter(android.graphics.Color.WHITE)
+                    }
+                }
+            } else if (item is SidebarItem.Pwa) {
+                icon.setBackgroundColor(android.graphics.Color.TRANSPARENT)
+                val cached = manager.getIconBitmap(item.id)
+                if (cached != null) {
+                    icon.clearColorFilter()
+                    icon.setImageBitmap(cached)
+                } else {
+                    val pwaId = item.pwaId
+                    val bmp = com.example.core.IconCacheManager.getPwaIcon(context, pwaId, item.iconPath)
+                    if (bmp != null) {
+                        icon.clearColorFilter()
+                        icon.setImageBitmap(bmp)
+                    } else {
+                        icon.setImageResource(com.example.R.drawable.ic_language)
+                        icon.setColorFilter(android.graphics.Color.WHITE)
+                    }
                 }
             }
         }

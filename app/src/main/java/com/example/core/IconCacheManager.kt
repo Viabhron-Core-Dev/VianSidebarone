@@ -107,7 +107,8 @@ object IconCacheManager {
             FileOutputStream(file).use { out ->
                 downsampled.compress(Bitmap.CompressFormat.WEBP, 85, out)
             }
-            memoryCache.put("link:$uuid", downsampled)
+            val squircle = SquircleHelper.toSquircleBitmap(downsampled)
+            memoryCache.put("link:$uuid", squircle)
             return file.absolutePath
         } catch (e: Exception) {
             return null
@@ -128,11 +129,102 @@ object IconCacheManager {
             FileOutputStream(file).use { out ->
                 scaled.compress(Bitmap.CompressFormat.WEBP, 90, out)
             }
-            memoryCache.put("link:$uuid", scaled)
+            val squircle = SquircleHelper.toSquircleBitmap(scaled)
+            memoryCache.put("link:$uuid", squircle)
             return file.absolutePath
         } catch (e: Exception) {
             return null
         }
+    }
+
+    fun getPwaIcon(context: Context, pwaId: String, iconPath: String? = null): Bitmap? {
+        val cacheKey = "pwa:$pwaId"
+        // 1. Fast memory lookup
+        memoryCache.get(cacheKey)?.let { return it }
+
+        // 2. Fast disk lookup
+        val path = iconPath ?: com.example.feature.sidebar.ElementMetadataStore.get(context, cacheKey)?.iconPath
+        if (!path.isNullOrEmpty()) {
+            val file = File(path)
+            if (file.exists() && file.length() > 0) {
+                try {
+                    val density = context.resources.displayMetrics.density
+                    val targetPx = Math.round(TARGET_ICON_SIZE_DP * density).coerceIn(48, 144)
+                    val rawBmp = BitmapFactory.decodeFile(file.absolutePath)
+                    if (rawBmp != null) {
+                        val scaled = if (rawBmp.width != targetPx || rawBmp.height != targetPx) {
+                            Bitmap.createScaledBitmap(rawBmp, targetPx, targetPx, true)
+                        } else {
+                            rawBmp
+                        }
+                        val squircle = SquircleHelper.toSquircleBitmap(scaled)
+                        memoryCache.put(cacheKey, squircle)
+                        return squircle
+                    }
+                } catch (_: Exception) {}
+            }
+        }
+        return null
+    }
+
+    fun putPwaIcon(pwaId: String, bitmap: Bitmap) {
+        val squircle = SquircleHelper.toSquircleBitmap(bitmap)
+        memoryCache.put("pwa:$pwaId", squircle)
+    }
+
+    fun evictPwaIcon(pwaId: String) {
+        memoryCache.remove("pwa:$pwaId")
+    }
+
+    fun getLinkIcon(context: Context, uuid: String, iconPath: String? = null): Bitmap? {
+        val cacheKey = "link:$uuid"
+        memoryCache.get(cacheKey)?.let { return it }
+
+        val path = iconPath ?: com.example.feature.sidebar.ElementMetadataStore.get(context, cacheKey)?.iconPath
+        val file = if (!path.isNullOrEmpty()) File(path) else File(getCacheDir(context), "link_${uuid.replace(Regex("[^a-zA-Z0-9._-]"), "_")}.webp")
+        if (file.exists() && file.length() > 0) {
+            try {
+                val density = context.resources.displayMetrics.density
+                val targetPx = Math.round(TARGET_ICON_SIZE_DP * density).coerceIn(48, 144)
+                val rawBmp = BitmapFactory.decodeFile(file.absolutePath)
+                if (rawBmp != null) {
+                    val scaled = if (rawBmp.width != targetPx || rawBmp.height != targetPx) {
+                        Bitmap.createScaledBitmap(rawBmp, targetPx, targetPx, true)
+                    } else {
+                        rawBmp
+                    }
+                    val squircle = SquircleHelper.toSquircleBitmap(scaled)
+                    memoryCache.put(cacheKey, squircle)
+                    return squircle
+                }
+            } catch (_: Exception) {}
+        }
+        return null
+    }
+
+    fun getCustomIcon(context: Context, targetId: String): Bitmap? {
+        val cacheKey = "custom_$targetId"
+        memoryCache.get(cacheKey)?.let { return it }
+
+        val file = getCustomIconFile(context, targetId)
+        if (file.exists() && file.length() > 0) {
+            try {
+                val density = context.resources.displayMetrics.density
+                val targetPx = Math.round(TARGET_ICON_SIZE_DP * density).coerceIn(48, 144)
+                val rawBmp = BitmapFactory.decodeFile(file.absolutePath)
+                if (rawBmp != null) {
+                    val scaled = if (rawBmp.width != targetPx || rawBmp.height != targetPx) {
+                        Bitmap.createScaledBitmap(rawBmp, targetPx, targetPx, true)
+                    } else {
+                        rawBmp
+                    }
+                    val squircle = SquircleHelper.toSquircleBitmap(scaled)
+                    memoryCache.put(cacheKey, squircle)
+                    return squircle
+                }
+            } catch (_: Exception) {}
+        }
+        return null
     }
 
     fun getCachedBitmap(context: Context, packageName: String): Bitmap? {
@@ -263,9 +355,10 @@ object IconCacheManager {
                 finalBmp.compress(Bitmap.CompressFormat.WEBP, 85, out)
             }
 
-            memoryCache.put("custom_$targetId", finalBmp)
-            memoryCache.put(targetId, finalBmp)
-            return@withContext finalBmp
+            val squircle = SquircleHelper.toSquircleBitmap(finalBmp)
+            memoryCache.put("custom_$targetId", squircle)
+            memoryCache.put(targetId, squircle)
+            return@withContext squircle
         } catch (e: Exception) {
             LogKeeper.writeLog(TAG, "Error saving custom icon: ${e.message}")
             return@withContext null

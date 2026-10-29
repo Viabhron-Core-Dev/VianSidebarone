@@ -76,9 +76,17 @@ class PwaListActivity : ComponentActivity() {
                     isPicking = isPicking,
                     onBack = { finish() },
                     onSelectForGrid = { pwa ->
+                        com.example.feature.sidebar.ElementMetadataStore.savePwaElement(
+                            this@PwaListActivity,
+                            pwa.id,
+                            pwa.name,
+                            pwa.iconPath
+                        )
                         val resultIntent = Intent().apply {
                             putExtra("ELEMENT_ID", "pwa:${pwa.id}")
+                            putExtra("DISPLAY_NAME", pwa.name)
                             putExtra("PWA_NAME", pwa.name)
+                            putExtra("ICON_PATH", pwa.iconPath)
                             putExtra("CONTAINER_ID", containerId)
                             putExtra("PAGE_ID", pageId)
                         }

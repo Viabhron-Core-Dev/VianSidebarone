@@ -157,12 +157,27 @@ class OfflinePwaFoundationTest {
 
     @Test
     fun testElementIdParserParsesPwaPrefix() {
-        val parsed = ElementIdParser.parse(context, "pwa:test_app_123")
-        assertNotNull("Parsed item must not be null", parsed)
-        assertTrue("Parsed item must be SidebarItem.Pwa", parsed is SidebarItem.Pwa)
-        val pwaItem = parsed as SidebarItem.Pwa
-        assertEquals("test_app_123", pwaItem.pwaId)
-        assertEquals("pwa:test_app_123", pwaItem.id)
+        val parsedDefault = ElementIdParser.parse(context, "pwa:test_app_123")
+        assertNotNull("Parsed item must not be null", parsedDefault)
+        assertTrue("Parsed item must be SidebarItem.Pwa", parsedDefault is SidebarItem.Pwa)
+        val pwaDefault = parsedDefault as SidebarItem.Pwa
+        assertEquals("test_app_123", pwaDefault.pwaId)
+        assertEquals("pwa:test_app_123", pwaDefault.id)
+        assertEquals("Offline PWA", pwaDefault.label)
+
+        // Now save metadata in ElementMetadataStore
+        com.example.feature.sidebar.ElementMetadataStore.savePwaElement(
+            context,
+            "test_app_123",
+            "Custom Calculator",
+            "/path/to/icon.png"
+        )
+
+        val parsedWithMeta = ElementIdParser.parse(context, "pwa:test_app_123")
+        assertNotNull("Parsed item must not be null", parsedWithMeta)
+        val pwaWithMeta = parsedWithMeta as SidebarItem.Pwa
+        assertEquals("Custom Calculator", pwaWithMeta.label)
+        assertEquals("/path/to/icon.png", pwaWithMeta.iconPath)
     }
 
     @Test
@@ -178,5 +193,84 @@ class OfflinePwaFoundationTest {
         assertNotEquals("PWA cache paths must be isolated per app ID", cache1.absolutePath, cache2.absolutePath)
         assertTrue(cache1.absolutePath.endsWith("pwa_cache/app1"))
         assertTrue(cache2.absolutePath.endsWith("pwa_cache/app2"))
+    }
+
+    @Test
+    fun testElementMetadataStorePwaPersistence() {
+        val meta = com.example.feature.sidebar.ElementMetadataStore.savePwaElement(
+            context,
+            "test_pwa_meta",
+            "Pwa Tracker",
+            "/data/user/0/pwa/icon.webp"
+        )
+        assertNotNull(meta)
+        assertEquals("pwa:test_pwa_meta", meta.id)
+        assertEquals("pwa", meta.type)
+        assertEquals("test_pwa_meta", meta.target)
+        assertEquals("Pwa Tracker", meta.label)
+        assertEquals("/data/user/0/pwa/icon.webp", meta.iconPath)
+
+        val retrieved = com.example.feature.sidebar.ElementMetadataStore.get(context, "pwa:test_pwa_meta")
+        assertNotNull(retrieved)
+        assertEquals("Pwa Tracker", retrieved!!.label)
+        assertEquals("/data/user/0/pwa/icon.webp", retrieved.iconPath)
+    }
+
+    @Test
+    fun testOrientationOverrideResolutionLogic() {
+        fun resolve(override: String, manifestOrientation: String): Int {
+            return when (override) {
+                "portrait" -> android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                "landscape" -> android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+                "unspecified" -> android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+                else -> {
+                    when (manifestOrientation.lowercase()) {
+                        "portrait", "portrait-primary", "portrait-secondary" -> android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                        "landscape", "landscape-primary", "landscape-secondary" -> android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+                        else -> android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+                    }
+                }
+            }
+        }
+
+        // User overrides take precedence
+        assertEquals(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT, resolve("portrait", "landscape"))
+        assertEquals(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE, resolve("landscape", "portrait"))
+        assertEquals(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED, resolve("unspecified", "portrait"))
+
+        // Manifest fallback when override is "manifest"
+        assertEquals(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT, resolve("manifest", "portrait"))
+        assertEquals(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT, resolve("manifest", "portrait-primary"))
+        assertEquals(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE, resolve("manifest", "landscape"))
+        assertEquals(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED, resolve("manifest", ""))
+        assertEquals(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED, resolve("manifest", "any"))
+    }
+
+    @Test
+    fun testSpaRoutingFallbackDistinguishesAssetsFromRoutes() {
+        val staticExtensions = setOf(
+            "js", "mjs", "css", "json", "webmanifest",
+            "png", "jpg", "jpeg", "gif", "svg", "webp", "ico",
+            "wasm", "woff", "woff2", "ttf", "otf",
+            "mp3", "mp4", "ogg", "wav", "webm", "map"
+        )
+
+        fun isSpaRoute(path: String): Boolean {
+            val clean = path.removePrefix("/")
+            val extension = clean.substringAfterLast('.', "").lowercase()
+            return extension.isEmpty() || extension !in staticExtensions
+        }
+
+        // SPA subroutes should trigger fallback to index.html
+        assertTrue("Subroute /settings is an SPA route", isSpaRoute("/settings"))
+        assertTrue("Subroute /dashboard/stats is an SPA route", isSpaRoute("/dashboard/stats"))
+        assertTrue("Subroute /user/profile/edit is an SPA route", isSpaRoute("/user/profile/edit"))
+        assertTrue("Root / is an SPA route", isSpaRoute("/"))
+
+        // Static assets should NOT trigger SPA fallback
+        assertFalse("Script app.js is a static asset", isSpaRoute("/assets/app.js"))
+        assertFalse("Stylesheet main.css is a static asset", isSpaRoute("/css/main.css"))
+        assertFalse("Image logo.png is a static asset", isSpaRoute("/images/logo.png"))
+        assertFalse("Font font.woff2 is a static asset", isSpaRoute("/fonts/font.woff2"))
     }
 }

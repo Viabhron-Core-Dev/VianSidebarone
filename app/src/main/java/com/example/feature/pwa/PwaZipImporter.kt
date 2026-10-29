@@ -2,8 +2,10 @@ package com.example.feature.pwa
 
 import android.content.Context
 import android.net.Uri
+import com.example.core.LogKeeper
 import com.example.data.AppDatabase
 import com.example.data.PwaEntity
+import com.example.feature.sidebar.ElementMetadataStore
 import java.io.File
 import java.io.FileOutputStream
 import java.io.InputStream
@@ -38,6 +40,9 @@ object PwaZipImporter {
         originalFileName: String,
         targetPwaId: String? = null
     ): PwaEntity {
+        val startTime = System.currentTimeMillis()
+        LogKeeper.log(context, "PWA", "PWA import started for file: $originalFileName")
+
         val pwaId = targetPwaId ?: ("pwa_" + UUID.randomUUID().toString().replace("-", "").take(16))
         val pwaDir = File(context.filesDir, "pwa/$pwaId")
         if (!pwaDir.exists()) pwaDir.mkdirs()
@@ -49,7 +54,12 @@ object PwaZipImporter {
         // 2. Unpack to assets directory
         val rawUnpackDir = File(pwaDir, "unpacked")
         if (!rawUnpackDir.exists()) rawUnpackDir.mkdirs()
-        unzip(retainedZipFile, rawUnpackDir)
+        try {
+            unzip(retainedZipFile, rawUnpackDir)
+        } catch (e: Exception) {
+            LogKeeper.logError(context, "PWA", "ZIP unpack failed for $originalFileName", e)
+            throw e
+        }
 
         // 3. Locate web root (directory containing index.html or manifest.json)
         val effectiveWebRoot = locateWebRoot(rawUnpackDir)
@@ -75,6 +85,12 @@ object PwaZipImporter {
 
         // 6. Verify startUrl exists or fallback to index.html
         val resolvedStartUrl = verifyStartUrl(effectiveWebRoot, manifestData.startUrl)
+
+        // Cache metadata into ElementMetadataStore for fast zero-database grid resolution
+        ElementMetadataStore.savePwaElement(context, pwaId, manifestData.name, iconFile?.absolutePath)
+
+        val duration = System.currentTimeMillis() - startTime
+        LogKeeper.log(context, "PWA", "PWA import finished: pwaId=$pwaId, name='${manifestData.name}', size=${packageSize}B, duration=${duration}ms")
 
         // 7. Create PwaEntity
         return PwaEntity(
@@ -104,6 +120,15 @@ object PwaZipImporter {
         try {
             AppDatabase.getDatabase(context).pwaDao().insert(entity)
         } catch (_: Throwable) {}
+        com.example.feature.sidebar.ElementMetadataStore.savePwaElement(
+            context,
+            entity.id,
+            entity.name,
+            entity.iconPath
+        )
+        if (!entity.iconPath.isNullOrEmpty()) {
+            com.example.core.IconCacheManager.getPwaIcon(context, entity.id, entity.iconPath)
+        }
         return entity
     }
 

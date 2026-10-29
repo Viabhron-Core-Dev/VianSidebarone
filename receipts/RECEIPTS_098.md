@@ -202,3 +202,57 @@ Capped at 500 lines per file.
 * How it was verified: local build only (`gradle :app:testDebugUnitTest --tests "com.example.feature.pwa.OfflinePwaFoundationTest"` passed; all project unit tests passed in 7s; `compile_applet` passed cleanly).
 * Any deviation from what was requested, and why: None. No floating PWA mini-windows created yet; AI app integration kept on hold; Internet Speed Monitor, Notifications, Media, Calculator, Compass, Scheduler, and other modules left untouched.
 * Any known issue or follow-up needed: Ready for on-device manual verification.
+
+## Entry 100 - Offline PWA Startup Optimization and LogKeeper Diagnostics
+* Timestamp: 2026-10-29T21:46:00Z
+* One-line summary: Audited startup paths, offloaded PWA metadata resolution to ElementMetadataStore to prevent Room/SQLite access from Main and UI threads, made startIfConfigured process-aware, and connected full PWA runtime diagnostics to LogKeeper.
+* Exact files touched:
+  - app/src/main/java/com/example/feature/sidebar/ElementMetadataStore.kt
+  - app/src/main/java/com/example/feature/element/ElementIdParser.kt
+  - app/src/main/java/com/example/feature/sidebar/SidebarAppsManager.kt
+  - app/src/main/java/com/example/feature/pwa/PwaZipImporter.kt
+  - app/src/main/java/com/example/feature/pwa/PwaManifestParser.kt
+  - app/src/main/java/com/example/feature/pwa/PwaListActivity.kt
+  - app/src/main/java/com/example/feature/pwa/PwaEditActivity.kt
+  - app/src/main/java/com/example/feature/pwa/PwaPlayerActivity.kt
+  - app/src/main/java/com/example/core/HandleService.kt
+  - app/src/test/java/com/example/feature/pwa/OfflinePwaFoundationTest.kt
+  - receipts/RECEIPTS_098.md
+* What was actually done:
+  - Identified startup slowdown root cause: `ElementIdParser.parsePwa` and `SidebarAppsManager.bindIcon` were performing synchronous queries to `AppDatabase.getDatabase()`, triggering SQLite database builder, schema verification, and `MIGRATION_9_10` execution directly on the UI thread and across process boundaries.
+  - Added PWA caching support to `ElementMetadataStore` (`savePwaElement`, canonical prefix lookup in `FloatingReaderPrefs`).
+  - Offloaded `ElementIdParser.parsePwa` and `SidebarAppsManager.bindIcon` to read from `ElementMetadataStore`, completely removing Room database queries from element ID parsing and sidebar icon binding.
+  - Updated `PwaZipImporter`, `PwaListActivity`, and `PwaEditActivity` to synchronize PWA metadata directly with `ElementMetadataStore`.
+  - Updated `HandleService.startIfConfigured` to be process-aware, using tag `"LauncherBridge"` when forwarding the start intent from `:heavy` to prevent misleading `"HandleService"` lifecycle logs in `:heavy`.
+  - Added comprehensive PWA LogKeeper diagnostics: import start/finish with duration, zip unpack failures, manifest parse failures, PWA player launch with PWA ID, page started, page finished, WebView load errors (onReceivedError & onReceivedHttpError), missing local assets, blocked path traversal requests, JS console warnings/errors via `WebChromeClient.onConsoleMessage`, and PWA runtime exit/cleanup.
+* How it was verified: local build only (`gradle :app:testDebugUnitTest --tests "com.example.feature.pwa.OfflinePwaFoundationTest"` passed; all project unit tests passed in 4s; `compile_applet` passed cleanly).
+* Any deviation from what was requested, and why: None. Internet Speed Monitor, Notifications, Media, Calculator, Compass, Scheduler, and other modules left untouched.
+* Any known issue or follow-up needed: Ready for on-device manual testing.
+
+## Entry 101 - PWA Presentation Caching, Squircle Layer, Virtual Origin Runtime, and Diagnostics
+* Timestamp: 2026-10-29T22:08:00Z
+* One-line summary: Resolved PWA icon reload flash via process-wide IconCacheManager presentation caching, added continuous squircle clipping for web/custom elements, migrated PWA runtime to isolated virtual origin with SPA routing fallback, added orientation customization, and instrumented 10s watchdog diagnostics.
+* Exact files touched:
+  - app/src/main/java/com/example/core/SquircleHelper.kt
+  - app/src/main/java/com/example/core/IconCacheManager.kt
+  - app/src/main/java/com/example/feature/sidebar/SidebarAppsManager.kt
+  - app/src/main/java/com/example/feature/sidebar/AppsPageView.kt
+  - app/src/main/java/com/example/feature/pwa/PwaZipImporter.kt
+  - app/src/main/java/com/example/feature/pwa/PwaEditActivity.kt
+  - app/src/main/java/com/example/feature/pwa/PwaPlayerActivity.kt
+  - app/src/test/java/com/example/feature/pwa/OfflinePwaFoundationTest.kt
+  - receipts/RECEIPTS_098.md
+* What was actually done:
+  - Created `SquircleHelper` with standard Android M3 superellipse curvature (`PorterDuff.Mode.SRC_IN`) for presentation-time clipping of PWA, Link, and custom icons without modifying raw stored bitmaps or altering system adaptive app icons.
+  - Upgraded `IconCacheManager` to store and serve squircle-clipped bitmaps for `pwa:$pwaId`, `link:$uuid`, and `custom_$targetId` synchronously from the process-wide `memoryCache`.
+  - Fixed PWA and Link icon reload flashing in `SidebarAppsManager` and `AppsPageView`: eliminated the unconditional premature reset to `ic_language` when an image is already loaded or available in `IconCacheManager`.
+  - Migrated `PwaPlayerActivity` from raw `file://` loading to dedicated virtual domain origin `https://pwa-${pwaId}.local/`, eliminating ES module/fetch CORS restrictions and establishing 100% origin isolation for DOM storage, IndexedDB, and Cache Storage.
+  - Implemented SPA client-side routing fallback in `PwaPlayerActivity.shouldInterceptRequest`: automatically maps non-static subroutes to `index.html`.
+  - Added orientation customization in `PwaEditActivity` (Follow Manifest, Auto/Unspecified, Portrait, Landscape) with persistence in `FloatingReaderPrefs` and dynamic resolution on launch.
+  - Locked down Android Back behavior in `PwaPlayerActivity`: navigates WebView history when `canGoBack()` is true with `PWA_BACK webHistory=true -> goBack` logging, and cleanly exits at root with `PWA_BACK root -> finish`.
+  - Added 10-second `PWA_LOAD_STALLED` loading watchdog and deep asset/console diagnostics to LogKeeper.
+  - Added unit tests in `OfflinePwaFoundationTest` verifying PWA metadata persistence, orientation resolution logic, and SPA route identification.
+* How it was verified: local build only (`gradle :app:testDebugUnitTest --tests "com.example.feature.pwa.OfflinePwaFoundationTest"` passed; all 307 project unit tests passed in 8s; `compile_applet` passed cleanly).
+* Any deviation from what was requested, and why: None. Internet Speed Monitor, Notifications, Media, Calculator, Compass, Scheduler, and other modules left untouched.
+* Any known issue or follow-up needed: Ready for on-device manual testing.
+
