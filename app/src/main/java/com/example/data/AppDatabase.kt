@@ -5,7 +5,7 @@ import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
 
-@Database(entities = [NotificationHistory::class, EpubBook::class, TrackerBook::class, QuickNote::class, LogEntry::class, SchedulerTask::class, AppyworkProject::class, AppyworkFileNode::class], version = 9, exportSchema = false)
+@Database(entities = [NotificationHistory::class, EpubBook::class, TrackerBook::class, QuickNote::class, LogEntry::class, SchedulerTask::class, AppyworkProject::class, AppyworkFileNode::class, PwaEntity::class], version = 10, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun epubDao(): EpubDao
     abstract fun trackerDao(): TrackerDao
@@ -14,6 +14,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun schedulerTaskDao(): SchedulerTaskDao
     abstract fun appyworkDao(): AppyworkDao
     abstract fun notificationHistoryDao(): NotificationHistoryDao
+    abstract fun pwaDao(): PwaDao
 
     companion object {
         @Volatile
@@ -58,13 +59,41 @@ abstract class AppDatabase : RoomDatabase() {
                 database.execSQL("CREATE TABLE IF NOT EXISTS `notification_history` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `packageName` TEXT NOT NULL, `appName` TEXT NOT NULL, `title` TEXT NOT NULL, `text` TEXT NOT NULL, `timestamp` INTEGER NOT NULL)")
             }
         }
+
+        private val MIGRATION_9_10 = object : androidx.room.migration.Migration(9, 10) {
+            override fun migrate(database: androidx.sqlite.db.SupportSQLiteDatabase) {
+                database.execSQL("""
+                    CREATE TABLE IF NOT EXISTS `pwa_apps` (
+                        `id` TEXT PRIMARY KEY NOT NULL,
+                        `name` TEXT NOT NULL,
+                        `shortName` TEXT NOT NULL,
+                        `description` TEXT NOT NULL,
+                        `startUrl` TEXT NOT NULL,
+                        `scope` TEXT NOT NULL,
+                        `displayMode` TEXT NOT NULL,
+                        `orientation` TEXT NOT NULL,
+                        `themeColor` TEXT NOT NULL,
+                        `backgroundColor` TEXT NOT NULL,
+                        `iconPath` TEXT,
+                        `zipPath` TEXT NOT NULL,
+                        `unpackedPath` TEXT NOT NULL,
+                        `packageSize` INTEGER NOT NULL,
+                        `version` TEXT NOT NULL,
+                        `createdAt` INTEGER NOT NULL,
+                        `updatedAt` INTEGER NOT NULL,
+                        `lastLaunchedAt` INTEGER NOT NULL
+                    )
+                """.trimIndent())
+            }
+        }
+
         fun getDatabase(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
                     context.applicationContext,
                     AppDatabase::class.java,
                     "litereader_db"
-                ).addMigrations(MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9).fallbackToDestructiveMigration().build()
+                ).addMigrations(MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10).fallbackToDestructiveMigration().build()
                 INSTANCE = instance
                 instance
             }

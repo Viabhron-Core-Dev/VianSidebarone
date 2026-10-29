@@ -59,6 +59,16 @@ object ElementActionDispatcher {
                     CustomTabLauncher.openLink(context, item.url, item.browserPackage)
                 }
 
+                is SidebarItem.Pwa -> {
+                    LogKeeper.log(context, TAG, "Launching PWA element: ${item.pwaId}")
+                    val pwaIntent = Intent(context, com.example.feature.pwa.PwaPlayerActivity::class.java).apply {
+                        putExtra("PWA_ID", item.pwaId)
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    context.startActivity(pwaIntent)
+                    true
+                }
+
                 is SidebarItem.QuickTile -> {
                     LogKeeper.log(context, TAG, "Triggering QuickTile element: ${item.action}")
                     QuickTileHandler.handleQuickTileAction(context, item.action)

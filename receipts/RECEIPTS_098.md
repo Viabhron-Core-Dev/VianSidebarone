@@ -150,3 +150,55 @@ Capped at 500 lines per file.
 * How it was verified: local build only (`gradle :app:testDebugUnitTest --tests "com.example.feature.sidebar.HeavyAppTrackerSplitTest" --tests "com.example.feature.sidebar.HeavyMediaPlayerSplitTest" --tests "com.example.feature.sidebar.HeavySchedulerSplitTest" --tests "com.example.feature.sidebar.HeavyCompassSplitTest"` passed with 26/26 tests; `compile_applet` passed cleanly; transient keystore files purged per Credential Immunity Rule).
 * Any deviation from what was requested, and why: None. Retained `setZOrderOnTop(true)` and Main/Heavy process split. Internet Speed Monitor, Scheduler, Calculator, Apps, Widgets, Compass, and Notifications untouched.
 * Any known issue or follow-up needed: Ready for physical device verification of restored App Tracker UI, smooth horizontal swiping, and clean omission of Media Player.
+
+---
+
+* Timestamp: 2026-10-28T15:30:00-07:00
+* One-line summary of what was requested: Fix Notification Sidebar page and Edit screen app filters to include System Apps with All Apps, User Apps, and System Apps category filtering.
+* Exact files touched:
+  - app/src/main/java/com/example/feature/notification/NotificationAppFilterHelper.kt
+  - app/src/main/java/com/example/NotificationHistoryActivity.kt
+  - app/src/test/java/com/example/feature/notification/NotificationAppFilterHelperTest.kt
+  - receipts/RECEIPTS_098.md
+* What was actually done:
+  - Created `NotificationAppFilterHelper.kt` declaring `NotificationAppItem`, `NotificationAppFilterCategory`, system app detection via `(appInfo.flags and ApplicationInfo.FLAG_SYSTEM) != 0`, and filtering logic.
+  - Refactored `NotificationHistoryActivity.kt` filter dialogs into a unified, reusable `NotificationAppFilterDialog` component providing FilterChips for "All Apps", "User Apps", and "System Apps".
+  - Updated both Notification Sidebar page filter (`sidebar_hidden_packages`) and Notification Edit screen filter (`history_hidden_packages`) to load all installed packages and support category switching.
+  - Created unit tests in `NotificationAppFilterHelperTest.kt` verifying category filtering and system app metadata classification.
+* How it was verified: local build only (`gradle :app:testDebugUnitTest --tests "com.example.feature.notification.NotificationAppFilterHelperTest"` passed with 5/5 tests; full unit test suite passed; `compile_applet` passed cleanly).
+* Any deviation from what was requested, and why: None. Notification data/IPC, listener behavior, Heavy/Main architecture, Notification UI/layout, Notification history, and Internet Speed Monitor untouched.
+
+
+## Entry 099 - Offline PWA Foundation Implementation
+* Timestamp: 2026-10-29T10:51:00Z
+* One-line summary: Implemented real Offline PWA foundation with Room storage, zip import pipeline, Add Element picker integration, and full-screen Heavy runtime player.
+* Exact files touched:
+  - app/src/main/java/com/example/data/PwaEntity.kt
+  - app/src/main/java/com/example/data/PwaDao.kt
+  - app/src/main/java/com/example/data/AppDatabase.kt
+  - app/src/main/java/com/example/feature/pwa/PwaManifestParser.kt
+  - app/src/main/java/com/example/feature/pwa/PwaZipImporter.kt
+  - app/src/main/java/com/example/feature/pwa/PwaStorageManager.kt
+  - app/src/main/java/com/example/feature/pwa/PwaPlayerActivity.kt
+  - app/src/main/java/com/example/feature/pwa/PwaEditActivity.kt
+  - app/src/main/java/com/example/feature/pwa/PwaListActivity.kt
+  - app/src/main/java/com/example/feature/sidebar/SidebarItem.kt
+  - app/src/main/java/com/example/feature/element/ElementIdParser.kt
+  - app/src/main/java/com/example/feature/element/ElementActionDispatcher.kt
+  - app/src/main/java/com/example/feature/sidebar/HybridGridPageView.kt
+  - app/src/main/java/com/example/feature/settings/AddElementActivity.kt
+  - app/src/main/java/com/example/feature/sidebar/SidebarAppsManager.kt
+  - app/src/main/AndroidManifest.xml
+  - app/src/test/java/com/example/feature/pwa/OfflinePwaFoundationTest.kt
+* What was actually done:
+  - Added Room schema (`PwaEntity`, `PwaDao`, AppDatabase version bump to 10 with MIGRATION_9_10) to persist PWA metadata and physical paths.
+  - Implemented secure zip importer (`PwaZipImporter`) retaining original `dist.zip` package permanently, safely unpacking assets, and extracting manifest metadata (`PwaManifestParser`).
+  - Implemented storage management (`PwaStorageManager`) with path isolation and recursive cleanup on deletion.
+  - Built PWA library UI (`PwaListActivity` & `PwaEditActivity`) with search, sort, multi-delete, editing, zip import launcher, and element picker result propagation.
+  - Replaced "Empty item" in `AddElementActivity` with "Offline PWA", connecting directly into grid placement via `ElementPlacementHelper.addElementToHybridGrid(...)` using container-scoped hierarchy.
+  - Added `SidebarItem.Pwa`, parser resolution in `ElementIdParser`, launcher in `ElementActionDispatcher`, click execution in `HybridGridPageView`, and icon binding in `SidebarAppsManager`.
+  - Registered full-screen runtime `PwaPlayerActivity` in `:heavy` with offline asset interception (`shouldInterceptRequest`), isolated storage paths, floating close pill, and back-press handling.
+  - Created and ran unit tests in `OfflinePwaFoundationTest.kt` verifying manifest parsing, zip retention, unpack integrity, directory cleanup, and element ID parsing.
+* How it was verified: local build only (`gradle :app:testDebugUnitTest --tests "com.example.feature.pwa.OfflinePwaFoundationTest"` passed; all project unit tests passed in 7s; `compile_applet` passed cleanly).
+* Any deviation from what was requested, and why: None. No floating PWA mini-windows created yet; AI app integration kept on hold; Internet Speed Monitor, Notifications, Media, Calculator, Compass, Scheduler, and other modules left untouched.
+* Any known issue or follow-up needed: Ready for on-device manual verification.

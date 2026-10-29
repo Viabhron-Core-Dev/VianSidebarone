@@ -421,6 +421,47 @@ class SidebarAppsManager(
                     }
                 }
             }
+        } else if (parsed is SidebarItem.Pwa) {
+            val cached = getIconBitmap(id)
+            if (cached != null) {
+                icon.setBackgroundColor(android.graphics.Color.TRANSPARENT)
+                icon.clearColorFilter()
+                icon.setImageBitmap(cached)
+            } else {
+                icon.setBackgroundColor(android.graphics.Color.TRANSPARENT)
+                icon.setImageResource(com.example.R.drawable.ic_language)
+                icon.setColorFilter(android.graphics.Color.WHITE)
+                coroutineScope.launch(Dispatchers.IO) {
+                    var bitmap: Bitmap? = null
+                    if (!parsed.iconPath.isNullOrEmpty()) {
+                        val f = java.io.File(parsed.iconPath)
+                        if (f.exists() && f.length() > 0) {
+                            try {
+                                bitmap = BitmapFactory.decodeFile(f.absolutePath)
+                            } catch (_: Exception) {}
+                        }
+                    }
+                    if (bitmap == null) {
+                        try {
+                            val db = com.example.data.AppDatabase.getDatabase(context)
+                            val pwa = db.pwaDao().getById(parsed.pwaId)
+                            if (pwa?.iconPath != null) {
+                                val f = java.io.File(pwa.iconPath)
+                                if (f.exists() && f.length() > 0) {
+                                    bitmap = BitmapFactory.decodeFile(f.absolutePath)
+                                }
+                            }
+                        } catch (_: Exception) {}
+                    }
+                    if (bitmap != null) {
+                        iconCache.put(id, bitmap)
+                        withContext(Dispatchers.Main) {
+                            icon.clearColorFilter()
+                            icon.setImageBitmap(bitmap)
+                        }
+                    }
+                }
+            }
         } else if (parsed is SidebarItem.Folder) {
             icon.setImageDrawable(null)
             icon.clearColorFilter()

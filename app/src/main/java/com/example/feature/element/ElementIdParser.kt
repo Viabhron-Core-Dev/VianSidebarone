@@ -47,6 +47,7 @@ object ElementIdParser {
                 id.startsWith("folder:") -> parseFolder(id)
                 id.startsWith("link:") -> parseLink(context, id)
                 id.startsWith("spacer:") -> parseSpacer(id)
+                id.startsWith("pwa:") -> parsePwa(context, id)
                 else -> null
             }
         } catch (e: Throwable) {
@@ -252,5 +253,21 @@ object ElementIdParser {
             height = spacerDataStr.toIntOrNull() ?: 50
         }
         return SidebarItem.Spacer(uuid, height, "spacer:$uuid")
+    }
+
+    private fun parsePwa(context: Context, id: String): SidebarItem.Pwa {
+        val pwaId = id.substringAfter("pwa:").substringBefore(":")
+        val entity = try {
+            com.example.data.AppDatabase.getDatabase(context).pwaDao().getById(pwaId)
+        } catch (_: Throwable) { null }
+
+        val label = entity?.name ?: "PWA"
+        val iconPath = entity?.iconPath
+        return SidebarItem.Pwa(
+            pwaId = pwaId,
+            label = label,
+            iconPath = iconPath,
+            id = id
+        )
     }
 }

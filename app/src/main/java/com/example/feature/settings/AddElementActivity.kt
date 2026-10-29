@@ -221,13 +221,15 @@ class AddElementActivity : ComponentActivity() {
             }
             startActivityForResult(linkIntent, 302)
         }
-        addItem(android.R.drawable.ic_menu_close_clear_cancel, "Empty item") {
-            val uuid = java.util.UUID.randomUUID().toString()
-            val spacerJson = JSONObject().apply {
-                put("heightDp", 56)
+        addItem(com.example.R.drawable.ic_language, "Offline PWA") {
+            val pwaIntent = Intent(this, com.example.feature.pwa.PwaListActivity::class.java).apply {
+                putExtra("PAGE_ID", pageId)
+                putExtra("CONTAINER_ID", containerId)
+                putExtra("IS_HYBRID_GRID", isHybridGrid)
+                putExtra("PAGE_TYPE", pageType)
+                putExtra("IS_PICKING", true)
             }
-            val spacerId = "spacer:$uuid:${spacerJson.toString()}"
-            handleElementSelected(spacerId, "Spacer")
+            startActivityForResult(pwaIntent, 600)
         }
         
         addHeader("Android actions")
@@ -281,9 +283,6 @@ class AddElementActivity : ComponentActivity() {
         addItem(android.R.drawable.ic_menu_edit, "Work Notes") {
             handleElementSelected("system:work_notes", "Work Notes")
         }
-        addItem(android.R.drawable.ic_menu_add, "PWA Loader") {
-//             startActivityForResult(Intent(this, PwaPickerActivity::class.java), 800)
-        }
         addItem(android.R.drawable.ic_menu_gallery, "Page Window") {
 //             startActivityForResult(Intent(this, PageWindowPickerActivity::class.java), 900)
         }
@@ -311,6 +310,7 @@ class AddElementActivity : ComponentActivity() {
             )
             val name = displayName ?: when {
                 id.startsWith("app:") -> id.removePrefix("app:")
+                id.startsWith("pwa:") -> "Offline PWA"
                 id.startsWith("link:") -> "Link"
                 id.startsWith("system:") -> id.removePrefix("system:").replace("_", " ").replaceFirstChar { it.uppercase() }
                 id.startsWith("widget:") -> "Widget"
@@ -361,6 +361,7 @@ class AddElementActivity : ComponentActivity() {
         com.example.core.LogKeeper.writeLog("AddElementActivity", "onActivityResult req=$requestCode res=$resultCode data=$data")
         if (resultCode == Activity.RESULT_OK && data != null) {
             val id = data.getStringExtra("ELEMENT_ID")
+            val displayName = data.getStringExtra("DISPLAY_NAME")
             if (id != null) {
                 val finalId = if (requestCode == 500 && id.startsWith("widget:")) {
                     "popup_widget:" + id.removePrefix("widget:")
@@ -369,7 +370,7 @@ class AddElementActivity : ComponentActivity() {
                 } else {
                     id
                 }
-                handleElementSelected(finalId)
+                handleElementSelected(finalId, displayName)
             } else {
                 com.example.core.LogKeeper.writeLog("AddElementActivity", "ELEMENT_ID was null in data!")
             }

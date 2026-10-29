@@ -178,6 +178,13 @@ sealed class SidebarItem {
         override var id: String = "floating_trigger:$targetId"
     ) : SidebarItem()
 
+    data class Pwa(
+        val pwaId: String,
+        override val label: String,
+        val iconPath: String? = null,
+        override var id: String = "pwa:$pwaId"
+    ) : SidebarItem()
+
     data class IntentAction(
         val uri: String,
         override val label: String,

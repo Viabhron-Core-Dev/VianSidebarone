@@ -32,6 +32,12 @@ import java.util.Date
 import java.util.Locale
 import android.content.Intent
 import androidx.core.content.FileProvider
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.ui.unit.sp
+import com.example.feature.notification.NotificationAppFilterCategory
+import com.example.feature.notification.NotificationAppFilterHelper
+import com.example.feature.notification.NotificationAppItem
 
 class NotificationHistoryActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -182,138 +188,128 @@ fun NotificationHistoryScreen(onBack: () -> Unit, onExport: (List<NotificationHi
         }
         
         if (showSidebarFilterDialog) {
-            androidx.compose.ui.window.Dialog(onDismissRequest = { showSidebarFilterDialog = false }) {
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .fillMaxHeight(0.8f)
-                        .padding(16.dp),
-                    shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-                ) {
-                    Column(modifier = Modifier.padding(24.dp).fillMaxSize()) {
-                        Text(
-                            text = "Sidebar Notification Filter",
-                            style = MaterialTheme.typography.titleLarge,
-                            modifier = Modifier.padding(bottom = 4.dp)
-                        )
-                        Text(
-                            text = "Unchecked apps will be hidden from live Sidebar Notifications.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = Color.Gray,
-                            modifier = Modifier.padding(bottom = 16.dp)
-                        )
-                        
-                        val launcherApps = context.getSystemService(Context.LAUNCHER_APPS_SERVICE) as android.content.pm.LauncherApps
-                        val appsInHistory = remember {
-                            val apps = try { launcherApps.getActivityList(null, android.os.Process.myUserHandle()) } catch(e: Exception) { emptyList() }
-                            apps.map { 
-                                it.applicationInfo.packageName to it.label.toString()
-                            }.distinctBy { it.first }.sortedBy { it.second }
-                        }
-                        
-                        LazyColumn(modifier = Modifier.weight(1f)) {
-                            items(appsInHistory) { (pkg, name) ->
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(vertical = 4.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Checkbox(
-                                        checked = !sidebarHiddenPackages.contains(pkg),
-                                        onCheckedChange = { checked ->
-                                            val newHidden = sidebarHiddenPackages.toMutableSet()
-                                            if (checked) {
-                                                newHidden.remove(pkg)
-                                            } else {
-                                                newHidden.add(pkg)
-                                            }
-                                            sidebarHiddenPackages = newHidden
-                                            prefs.edit().putStringSet("sidebar_hidden_packages", newHidden).apply()
-                                        }
-                                    )
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text(name)
-                                }
-                            }
-                        }
-                        
-                        Row(
-                            modifier = Modifier.fillMaxWidth().padding(top = 16.dp),
-                            horizontalArrangement = Arrangement.End
-                        ) {
-                            TextButton(onClick = { showSidebarFilterDialog = false }) {
-                                Text("Done")
-                            }
-                        }
-                    }
-                }
-            }
+            NotificationAppFilterDialog(
+                title = "Sidebar Notification Filter",
+                subtitle = "Unchecked apps will be hidden from live Sidebar Notifications.",
+                hiddenPackages = sidebarHiddenPackages,
+                onHiddenPackagesChanged = { newHidden ->
+                    sidebarHiddenPackages = newHidden
+                    prefs.edit().putStringSet("sidebar_hidden_packages", newHidden).apply()
+                },
+                onDismiss = { showSidebarFilterDialog = false }
+            )
         }
 
         if (showFilterDialog) {
-            androidx.compose.ui.window.Dialog(onDismissRequest = { showFilterDialog = false }) {
-                Card(
+            NotificationAppFilterDialog(
+                title = "Filter Apps in History",
+                subtitle = "Unchecked apps will be hidden from notification history.",
+                hiddenPackages = hiddenPackages,
+                onHiddenPackagesChanged = { newHidden ->
+                    hiddenPackages = newHidden
+                    prefs.edit().putStringSet("history_hidden_packages", newHidden).apply()
+                },
+                onDismiss = { showFilterDialog = false }
+            )
+        }
+    }
+}
+
+@Composable
+fun NotificationAppFilterDialog(
+    title: String,
+    subtitle: String? = null,
+    hiddenPackages: Set<String>,
+    onHiddenPackagesChanged: (Set<String>) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+    var filterCategory by remember { mutableStateOf(NotificationAppFilterCategory.ALL) }
+    val allApps = remember { NotificationAppFilterHelper.loadAllNotificationApps(context) }
+    val displayedApps = remember(allApps, filterCategory) {
+        NotificationAppFilterHelper.filterApps(allApps, filterCategory)
+    }
+
+    androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .fillMaxHeight(0.8f)
+                .padding(16.dp),
+            shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        ) {
+            Column(modifier = Modifier.padding(24.dp).fillMaxSize()) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleLarge,
+                    modifier = Modifier.padding(bottom = if (subtitle != null) 4.dp else 12.dp)
+                )
+                if (subtitle != null) {
+                    Text(
+                        text = subtitle,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color.Gray,
+                        modifier = Modifier.padding(bottom = 12.dp)
+                    )
+                }
+
+                Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .fillMaxHeight(0.8f)
-                        .padding(16.dp),
-                    shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                        .padding(bottom = 8.dp)
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Column(modifier = Modifier.padding(24.dp).fillMaxSize()) {
-                        Text(
-                            text = "Filter Apps in History",
-                            style = MaterialTheme.typography.titleLarge,
-                            modifier = Modifier.padding(bottom = 16.dp)
-                        )
-                        
-                        val pm = context.packageManager
-                        val appsInHistory = remember {
-                            val launcherApps = context.getSystemService(Context.LAUNCHER_APPS_SERVICE) as android.content.pm.LauncherApps
-                            val apps = try { launcherApps.getActivityList(null, android.os.Process.myUserHandle()) } catch(e: Exception) { emptyList() }
-                            apps.map { 
-                                it.applicationInfo.packageName to it.label.toString()
-                            }.distinctBy { it.first }.sortedBy { it.second }
+                    FilterChip(
+                        selected = filterCategory == NotificationAppFilterCategory.ALL,
+                        onClick = { filterCategory = NotificationAppFilterCategory.ALL },
+                        label = { Text("All Apps", fontSize = 12.sp) }
+                    )
+                    FilterChip(
+                        selected = filterCategory == NotificationAppFilterCategory.USER,
+                        onClick = { filterCategory = NotificationAppFilterCategory.USER },
+                        label = { Text("User Apps", fontSize = 12.sp) }
+                    )
+                    FilterChip(
+                        selected = filterCategory == NotificationAppFilterCategory.SYSTEM,
+                        onClick = { filterCategory = NotificationAppFilterCategory.SYSTEM },
+                        label = { Text("System Apps", fontSize = 12.sp) }
+                    )
+                }
 
-                        }
-                        
-                        LazyColumn(modifier = Modifier.weight(1f)) {
-                            items(appsInHistory) { (pkg, name) ->
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(vertical = 4.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Checkbox(
-                                        checked = !hiddenPackages.contains(pkg),
-                                        onCheckedChange = { checked ->
-                                            val newHidden = hiddenPackages.toMutableSet()
-                                            if (checked) {
-                                                newHidden.remove(pkg)
-                                            } else {
-                                                newHidden.add(pkg)
-                                            }
-                                            hiddenPackages = newHidden
-                                            prefs.edit().putStringSet("history_hidden_packages", newHidden).apply()
-                                        }
-                                    )
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text(name)
-                                }
-                            }
-                        }
-                        
+                LazyColumn(modifier = Modifier.weight(1f)) {
+                    items(displayedApps, key = { it.packageName }) { app ->
                         Row(
-                            modifier = Modifier.fillMaxWidth().padding(top = 16.dp),
-                            horizontalArrangement = Arrangement.End
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            TextButton(onClick = { showFilterDialog = false }) {
-                                Text("Done")
-                            }
+                            Checkbox(
+                                checked = !hiddenPackages.contains(app.packageName),
+                                onCheckedChange = { checked ->
+                                    val newHidden = hiddenPackages.toMutableSet()
+                                    if (checked) {
+                                        newHidden.remove(app.packageName)
+                                    } else {
+                                        newHidden.add(app.packageName)
+                                    }
+                                    onHiddenPackagesChanged(newHidden)
+                                }
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(app.appName)
                         }
+                    }
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(top = 16.dp),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    TextButton(onClick = onDismiss) {
+                        Text("Done")
                     }
                 }
             }

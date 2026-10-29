@@ -580,6 +580,9 @@ class HybridGridPageView(
                                     is SidebarItem.Link -> {
                                         com.example.feature.element.ElementActionDispatcher.execute(context, parsed)
                                     }
+                                    is SidebarItem.Pwa -> {
+                                        com.example.feature.element.ElementActionDispatcher.execute(context, parsed)
+                                    }
                                     is SidebarItem.QuickTile -> {
                                         com.example.core.LogKeeper.writeLog("HybridGrid", "QuickTile action: ${parsed.action}")
                                         QuickTileHandler.handleQuickTileAction(context, parsed.action)
