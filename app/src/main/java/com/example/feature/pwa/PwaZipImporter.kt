@@ -61,6 +61,57 @@ object PwaZipImporter {
             throw e
         }
 
+        // Check if this is a portable PWA backup archive (.zip containing pwa_metadata.json + package.zip)
+        val backupMetaFile = File(rawUnpackDir, "pwa_metadata.json")
+        val innerPackageZip = File(rawUnpackDir, "package.zip")
+        var backupCustomIconFile: File? = null
+
+        if (backupMetaFile.exists() && innerPackageZip.exists()) {
+            LogKeeper.log(context, "PWA", "Detected portable PWA backup archive. Unpacking inner package...")
+            try {
+                val backupIcon = File(rawUnpackDir, "custom_icon.webp")
+                if (backupIcon.exists() && backupIcon.length() > 0) {
+                    val destCustomIcon = com.example.core.IconCacheManager.getCustomIconFile(context, "pwa_$pwaId")
+                    backupIcon.copyTo(destCustomIcon, overwrite = true)
+                    backupCustomIconFile = destCustomIcon
+                }
+
+                // Restore user preferences
+                val metaJson = org.json.JSONObject(backupMetaFile.readText(Charsets.UTF_8))
+                val orientationPref = metaJson.optString("orientationPreference", "manifest")
+                val closeButtonPref = metaJson.optString("closeButtonPreference", "show")
+                val prefs = context.getSharedPreferences("FloatingReaderPrefs", Context.MODE_PRIVATE)
+                prefs.edit()
+                    .putString("pwa_pref_${pwaId}_orientation", orientationPref)
+                    .putString("pwa_pref_${pwaId}_close_button", closeButtonPref)
+                    .commit()
+                com.example.core.OverlaySyncManager.syncString(context, "pwa_pref_${pwaId}_orientation", orientationPref)
+                com.example.core.OverlaySyncManager.syncString(context, "pwa_pref_${pwaId}_close_button", closeButtonPref)
+
+                // Restore capability permission policy
+                val restoredPolicy = PwaPermissionPolicy(
+                    internetAllowed = metaJson.optBoolean("permissionInternet", false),
+                    filesAllowed = metaJson.optBoolean("permissionFiles", false),
+                    cameraAllowed = metaJson.optBoolean("permissionCamera", false),
+                    microphoneAllowed = metaJson.optBoolean("permissionMicrophone", false),
+                    locationAllowed = metaJson.optBoolean("permissionLocation", false),
+                    soundAllowed = metaJson.optBoolean("permissionSound", false)
+                )
+                PwaPermissionManager.savePolicy(context, pwaId, restoredPolicy)
+
+                // Replace retained package with the inner original package
+                val tempZip = File(pwaDir, "temp_package.zip")
+                innerPackageZip.copyTo(tempZip, overwrite = true)
+                rawUnpackDir.deleteRecursively()
+                rawUnpackDir.mkdirs()
+                unzip(tempZip, rawUnpackDir)
+                tempZip.copyTo(retainedZipFile, overwrite = true)
+                tempZip.delete()
+            } catch (e: Exception) {
+                LogKeeper.logError(context, "PWA", "Error parsing backup archive bundle: ${e.message}", e)
+            }
+        }
+
         // 3. Locate web root (directory containing index.html or manifest.json)
         val effectiveWebRoot = locateWebRoot(rawUnpackDir)
 
@@ -81,7 +132,8 @@ object PwaZipImporter {
         }
 
         // 5. Locate and extract application icon
-        val iconFile = resolveAndCopyIcon(effectiveWebRoot, pwaDir, manifestData.iconRelativePath)
+        val resolvedDefaultIcon = resolveAndCopyIcon(effectiveWebRoot, pwaDir, manifestData.iconRelativePath)
+        val iconFile = backupCustomIconFile ?: resolvedDefaultIcon
 
         // 6. Verify startUrl exists or fallback to index.html
         val resolvedStartUrl = verifyStartUrl(effectiveWebRoot, manifestData.startUrl)

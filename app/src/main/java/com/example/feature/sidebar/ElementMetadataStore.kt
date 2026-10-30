@@ -196,10 +196,11 @@ object ElementMetadataStore {
         url: String,
         label: String,
         elementId: String = "link:$uuid",
+        iconPath: String? = null,
         browserPackage: String? = null,
         account: String? = null
     ): ElementMetadata {
-        val initialIconPath = IconCacheManager.captureAndSaveLinkIcon(context, uuid) ?: ""
+        val initialIconPath = if (!iconPath.isNullOrEmpty()) iconPath else (IconCacheManager.captureAndSaveLinkIcon(context, uuid) ?: "")
         val metadata = ElementMetadata(
             id = elementId,
             type = "link",
@@ -212,20 +213,22 @@ object ElementMetadataStore {
         save(context, metadata)
         addSavedLinkId(context, uuid)
 
-        scope.launch {
-            try {
-                val siteIconPath = com.example.core.FaviconFetcher.fetchAndCacheSiteIcon(context, uuid, url)
-                if (!siteIconPath.isNullOrEmpty()) {
-                    val updated = metadata.copy(iconPath = siteIconPath)
-                    save(context, updated)
-                    val updateIntent = android.content.Intent("com.example.UPDATE_SIDEBAR_ICONS").apply {
-                        putExtra("item_id", elementId)
-                        setPackage(context.packageName)
+        if (iconPath.isNullOrEmpty()) {
+            scope.launch {
+                try {
+                    val siteIconPath = com.example.core.FaviconFetcher.fetchAndCacheSiteIcon(context, uuid, url)
+                    if (!siteIconPath.isNullOrEmpty()) {
+                        val updated = metadata.copy(iconPath = siteIconPath)
+                        save(context, updated)
+                        val updateIntent = android.content.Intent("com.example.UPDATE_SIDEBAR_ICONS").apply {
+                            putExtra("item_id", elementId)
+                            setPackage(context.packageName)
+                        }
+                        context.sendBroadcast(updateIntent)
                     }
-                    context.sendBroadcast(updateIntent)
+                } catch (e: Exception) {
+                    LogKeeper.writeLog(TAG, "Favicon fetch failed for $url: ${e.message}")
                 }
-            } catch (e: Exception) {
-                LogKeeper.writeLog(TAG, "Favicon fetch failed for $url: ${e.message}")
             }
         }
 

@@ -46,17 +46,17 @@ object SidebarActionMenuHelper {
         val context = anchorView.context
         val density = context.resources.displayMetrics.density
 
-        val pillWidthPx = (140 * density).toInt()
-        val pillHeightPx = (38 * density).toInt()
-        val cornerRadiusPx = 19f * density
-        val padHorizontalPx = (14 * density).toInt()
-        val iconSizePx = (18 * density).toInt()
-        val marginVerticalPx = (6 * density).toInt()
+        val pillWidthPx = (176 * density).toInt()
+        val pillHeightPx = (52 * density).toInt()
+        val cornerRadiusPx = 26f * density
+        val padHorizontalPx = (18 * density).toInt()
+        val iconSizePx = (24 * density).toInt()
+        val marginVerticalPx = (8 * density).toInt()
 
         val rootLayout = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
-            setPadding((4 * density).toInt(), (4 * density).toInt(), (4 * density).toInt(), (4 * density).toInt())
+            setPadding((6 * density).toInt(), (6 * density).toInt(), (6 * density).toInt(), (6 * density).toInt())
         }
 
         var popup: PopupWindow? = null
@@ -84,7 +84,7 @@ object SidebarActionMenuHelper {
                 if (item.iconResId != null && item.iconResId != 0) {
                     val iconView = ImageView(context).apply {
                         layoutParams = LinearLayout.LayoutParams(iconSizePx, iconSizePx).apply {
-                            marginEnd = (10 * density).toInt()
+                            marginEnd = (14 * density).toInt()
                         }
                         setImageResource(item.iconResId)
                         setColorFilter(Color.BLACK)
@@ -98,7 +98,8 @@ object SidebarActionMenuHelper {
                     layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
                     text = item.title
                     setTextColor(Color.BLACK)
-                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
+                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
+                    typeface = android.graphics.Typeface.DEFAULT_BOLD
                     maxLines = 1
                     ellipsize = android.text.TextUtils.TruncateAt.END
                     gravity = Gravity.CENTER_VERTICAL or Gravity.START

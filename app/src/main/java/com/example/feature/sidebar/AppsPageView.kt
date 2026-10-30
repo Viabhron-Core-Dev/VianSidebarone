@@ -751,20 +751,23 @@ class AppsPageView(
                         }
                     )
                 }
-                menuItems.add(
-                    SidebarActionMenuHelper.ActionMenuItem(
-                        title = "Change Icon",
-                        iconResId = android.R.drawable.ic_menu_gallery
-                    ) {
-                        val intent = android.content.Intent(context, com.example.IconPickerActivity::class.java).apply {
-                            putExtra("item_id", item.id)
-                            addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                val isApp = item is SidebarItem.App
+                if (isApp) {
+                    menuItems.add(
+                        SidebarActionMenuHelper.ActionMenuItem(
+                            title = "Edit",
+                            iconResId = android.R.drawable.ic_menu_edit
+                        ) {
+                            val intent = android.content.Intent(context, com.example.IconPickerActivity::class.java).apply {
+                                putExtra("item_id", item.id)
+                                addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                            }
+                            context.startActivity(intent)
+                            currentFolderPopup?.dismiss()
+                            onCloseSidebar()
                         }
-                        context.startActivity(intent)
-                        currentFolderPopup?.dismiss()
-                        onCloseSidebar()
-                    }
-                )
+                    )
+                }
                 val customIconFile = java.io.File(context.filesDir, "custom_icons/${item.id.replace(Regex("[^a-zA-Z0-9.-]"), "_")}.webp")
                 if (customIconFile.exists()) {
                     menuItems.add(

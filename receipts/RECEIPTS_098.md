@@ -282,3 +282,67 @@ Capped at 500 lines per file.
 * Any deviation from what was requested, and why: None. Internet Speed Monitor, Notifications, Media, Calculator, Compass, Scheduler, and launcher components remained completely untouched.
 * Any known issue or follow-up needed: Ready for on-device manual testing.
 
+## Entry 103
+* Timestamp: 2026-10-30T19:18:00Z
+* One-line summary: Overhauled long-press action menus to match the Library popup visual reference (176dp x 52dp white pills), replaced separate Change Icon with single unified Edit action, implemented PWA and Link icon customization with instant grid refresh, fixed cross-process PWA settings propagation, added SAF portable backup export/import, and enabled continuous widget adding.
+* Exact files touched:
+  - app/src/main/java/com/example/feature/sidebar/SidebarActionMenuHelper.kt
+  - app/src/main/java/com/example/feature/element/ElementViewRenderer.kt
+  - app/src/main/java/com/example/feature/element/ElementActionDispatcher.kt
+  - app/src/main/java/com/example/feature/pwa/PwaPlayerActivity.kt
+  - app/src/main/java/com/example/feature/pwa/PwaEditActivity.kt
+  - app/src/main/java/com/example/feature/pwa/PwaListActivity.kt
+  - app/src/main/java/com/example/feature/pwa/PwaStorageManager.kt
+  - app/src/main/java/com/example/feature/pwa/PwaZipImporter.kt
+  - app/src/main/java/com/example/feature/sidebar/ElementMetadataStore.kt
+  - app/src/main/java/com/example/feature/settings/LinkPickerActivity.kt
+  - app/src/main/java/com/example/WidgetPickerActivity.kt
+  - app/src/test/java/com/example/feature/pwa/OfflinePwaFoundationTest.kt
+  - receipts/RECEIPTS_098.md
+* What was actually done:
+  - Overhauled `SidebarActionMenuHelper` visual styling to match Library popup: updated pill dimensions to 176dp width, 52dp height, 26dp corner radius, 18dp horizontal padding, 24dp icons, 16sp bold text, and 8dp vertical gap.
+  - Eliminated separate "Change Icon" and "Reset Icon" menu items in favor of a single unified "Edit" action for customizable elements across `HybridGridPageView`, `AppsPageView`, and `ElementViewRenderer` (routing Apps to `IconPickerActivity`, PWAs to `PwaEditActivity`, Links to `LinkPickerActivity`, and Force Stop to `AppTrackerSettingsActivity`).
+  - Fixed root cause of slow/stale PWA settings propagation across Main and `:heavy` processes by passing `PREF_ORIENTATION` and `PREF_CLOSE_BUTTON` in Intent launch extras, using synchronous SharedPreferences `.commit()`, and broadcasting via `OverlaySyncManager.syncString()`.
+  - Removed duplicate bottom "Save Changes" button in `PwaEditActivity` so the top-bar checkmark (✓) is the sole confirmation action.
+  - Added full icon customization inside `PwaEditActivity` (SAF image picker, squircle preview, and Reset option) and `LinkPickerActivity` (`AddEditLinkDialog`), updating disk storage, cache manager, and broadcasting `UPDATE_SIDEBAR_ICONS` so the grid updates instantly without restart.
+  - Added SAF portable PWA backup export (`exportPwaBackup` creating a ZIP with `package.zip`, `pwa_metadata.json`, and `custom_icon.webp`) and seamless backup archive restore in `PwaZipImporter` via `OpenDocument`.
+  - Enabled continuous additions in `WidgetPickerActivity` (`ADD_TO_WIDGETS_GRID`) by allocating the next widget ID and keeping the picker open until the user presses Back.
+  - Added unit tests in `OfflinePwaFoundationTest` verifying backup archive restoration and preferences.
+* How it was verified: local build only (`gradle :app:testDebugUnitTest` passed all 308 tests; `compile_applet` passed cleanly).
+* Any deviation from what was requested, and why: None. Internet Speed Monitor, Notifications, Media, Calculator, Compass, Scheduler, and launcher components remained completely untouched.
+* Any known issue or follow-up needed: Ready for physical device testing.
+
+### Entry 104
+* Timestamp: 2026-10-30T19:42:00Z
+* One-line summary: Implemented Offline PWA Mini App management architecture (Mini App Info screen, real capability enforcement, SAF file grants, and Danger Zone deletion).
+* Exact files touched:
+  - app/src/main/java/com/example/feature/pwa/PwaPermissionManager.kt
+  - app/src/main/java/com/example/feature/pwa/PwaEditActivity.kt
+  - app/src/main/java/com/example/feature/pwa/PwaPlayerActivity.kt
+  - app/src/main/java/com/example/feature/pwa/PwaStorageManager.kt
+  - app/src/main/java/com/example/feature/pwa/PwaZipImporter.kt
+  - app/src/main/java/com/example/feature/element/ElementActionDispatcher.kt
+  - app/src/main/java/com/example/feature/pwa/PwaListActivity.kt
+  - app/src/test/java/com/example/feature/pwa/OfflinePwaFoundationTest.kt
+  - receipts/RECEIPTS_098.md
+* What was actually done:
+  - Created `PwaPermissionManager.kt` defining zero-trust `PwaPermissionPolicy` (all capabilities default strictly to false/OFF: Internet, Files, Camera, Microphone, Location, Sound), synchronous SharedPreferences persistence, multi-process `OverlaySyncManager` synchronization, and SAF persistable URI grant tracking (get, add, revoke).
+  - Overhauled `PwaEditActivity.kt` into the dedicated "Mini App Info" management screen organized into five clean sections:
+    1. Appearance: Editable Name, Icon preview with SAF image picker and Reset button, Orientation radio options (Follow Manifest, Auto, Portrait, Landscape), and Close Button options (Show, Hide).
+    2. Permissions & Access: Sandbox capability policies defaulting to OFF. When Files (SAF) is enabled, shows active granted URIs with a Revoke button per grant and an "Add File Grant" button.
+    3. Storage / Package: Read-only metadata including entrypoint, display mode, package size, version, origin domain (`https://pwa-${id}.local/`), import date, and last launch timestamp.
+    4. Backup & Export: Portable backup ZIP archive creation containing package.zip, pwa_metadata.json, custom icons, and capability policies.
+    5. Danger Zone: "Delete Mini App" with confirmation AlertDialog permanently removing package files, unpacked assets, isolated WebView storage, and Room database record.
+    Sole confirmation action is the top-bar checkmark (✓); no duplicate bottom buttons.
+  - Implemented real capability enforcement in `PwaPlayerActivity.kt`:
+    - Internet: Local assets from virtual domain origin (`https://pwa-${id}.local/`) always load; external requests return 403 Forbidden via `shouldInterceptRequest` and external navigation is blocked via `shouldOverrideUrlLoading` when disabled.
+    - Files: `WebChromeClient.onShowFileChooser` prompts Android SAF document picker when enabled and records persistable URI grants; blocks input with notification when disabled.
+    - Camera & Microphone: `WebChromeClient.onPermissionRequest` grants or denies HTML5/WebRTC media requests based on policy and Android runtime permissions (`Manifest.permission.CAMERA` and `RECORD_AUDIO`).
+    - Location: `WebChromeClient.onGeolocationPermissionsShowPrompt` checks location policy and requests Android `ACCESS_FINE_LOCATION`/`ACCESS_COARSE_LOCATION` before granting.
+    - Sound: Enforces user gesture requirement and evaluates audio suppression JavaScript in WebView to mute `HTMLMediaElement` and suspend `AudioContext` when disabled.
+  - Updated `PwaStorageManager.kt` and `PwaZipImporter.kt` to serialize capability policies to `pwa_metadata.json` and restore them when importing backup archives.
+  - Updated `ElementActionDispatcher.kt` and `PwaListActivity.kt` to pass resolved capability policy flags directly via launch Intent extras to eliminate multi-process cache lag in `:heavy`.
+  - Added unit tests in `OfflinePwaFoundationTest.kt` verifying default-off security, policy persistence, per-PWA isolation, and SAF grant tracking.
+* How it was verified: local build only (`gradle :app:testDebugUnitTest` passed all 313 unit tests; `compile_applet` passed cleanly).
+* Any deviation from what was requested, and why: None. PWAs remain full-screen Heavy-process apps; floating PWA windows, eReader, Dictionary, AI features, and launcher integration were intentionally avoided. Internet Speed Monitor, Notifications, Media, Calculator, Compass, and Scheduler remained completely untouched.
+* Any known issue or follow-up needed: Ready for on-device physical testing.

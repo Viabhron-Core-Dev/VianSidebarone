@@ -61,8 +61,20 @@ object ElementActionDispatcher {
 
                 is SidebarItem.Pwa -> {
                     LogKeeper.log(context, TAG, "Launching PWA element: ${item.pwaId}")
+                    val prefs = context.getSharedPreferences("FloatingReaderPrefs", Context.MODE_PRIVATE)
+                    val orientation = prefs.getString("pwa_pref_${item.pwaId}_orientation", "manifest") ?: "manifest"
+                    val closeButton = prefs.getString("pwa_pref_${item.pwaId}_close_button", "show") ?: "show"
+                    val policy = com.example.feature.pwa.PwaPermissionManager.getPolicy(context, item.pwaId)
                     val pwaIntent = Intent(context, com.example.feature.pwa.PwaPlayerActivity::class.java).apply {
                         putExtra("PWA_ID", item.pwaId)
+                        putExtra("PREF_ORIENTATION", orientation)
+                        putExtra("PREF_CLOSE_BUTTON", closeButton)
+                        putExtra("PERM_INTERNET", policy.internetAllowed)
+                        putExtra("PERM_FILES", policy.filesAllowed)
+                        putExtra("PERM_CAMERA", policy.cameraAllowed)
+                        putExtra("PERM_MICROPHONE", policy.microphoneAllowed)
+                        putExtra("PERM_LOCATION", policy.locationAllowed)
+                        putExtra("PERM_SOUND", policy.soundAllowed)
                         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                     }
                     context.startActivity(pwaIntent)

@@ -1,15 +1,21 @@
 package com.example.feature.pwa
 
+import android.Manifest
 import android.annotation.SuppressLint
 import android.content.Context
+import android.content.Intent
 import android.content.pm.ActivityInfo
+import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Color
+import android.net.Uri
 import android.os.Bundle
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
-import android.webkit.MimeTypeMap
+import android.webkit.GeolocationPermissions
+import android.webkit.PermissionRequest
+import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
@@ -19,8 +25,12 @@ import android.webkit.WebViewClient
 import android.widget.FrameLayout
 import android.widget.ImageButton
 import android.widget.ProgressBar
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
+import androidx.activity.result.ActivityResultLauncher
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.example.core.LogKeeper
 import com.example.data.AppDatabase
@@ -37,16 +47,17 @@ import java.net.URLConnection
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
- * PwaPlayerActivity: Dedicated full-screen Offline PWA runtime in the :heavy process.
+ * PwaPlayerActivity: Dedicated full-screen Offline PWA Mini App runtime in the :heavy process.
  *
  * Core architecture & reliability enhancements:
  * 1. Hosts PWA in full-screen (isolated runtime outside Sidebar page containers).
  * 2. Virtual domain origin per PWA (https://pwa-${id}.local) for origin isolation (DOM, IDB, Cache)
  *    and elimination of file:// ES module / CORS restrictions.
- * 3. SPA client-side routing fallback to index.html for non-file subroutes.
+ * 3. Enforceable capability permission policy (Internet, Files SAF, Camera, Microphone, Location, Sound)
+ *    defaulting to OFF for zero-trust sandbox execution.
  * 4. Android Back navigation handling: iterates WebView history first, exits to previous context at root.
  * 5. Orientation customization: User override + manifest fallback.
- * 6. Deep diagnostics via LogKeeper: PWA_START, navigation, resource counters, console warnings/errors,
+ * 6. Deep diagnostics via LogKeeper: PWA_START, capability actions, resource counters, console warnings/errors,
  *    and 10-second PWA_LOAD_STALLED watchdog.
  */
 class PwaPlayerActivity : ComponentActivity() {
@@ -67,6 +78,23 @@ class PwaPlayerActivity : ComponentActivity() {
     private var pwaEntity: PwaEntity? = null
     private var progressBar: ProgressBar? = null
 
+    // Capability policy
+    private var permissionPolicy: PwaPermissionPolicy = PwaPermissionPolicy()
+
+    // File chooser / SAF state
+    private var pendingFileChooserCallback: ValueCallback<Array<Uri>>? = null
+    private lateinit var fileChooserLauncher: ActivityResultLauncher<Intent>
+
+    // Web media permission state (Camera & Microphone)
+    private var pendingPermissionRequest: PermissionRequest? = null
+    private var pendingGrantedMediaResources: MutableList<String> = mutableListOf()
+    private lateinit var mediaPermissionLauncher: ActivityResultLauncher<Array<String>>
+
+    // Geolocation permission state
+    private var pendingGeolocationCallback: GeolocationPermissions.Callback? = null
+    private var pendingGeolocationOrigin: String? = null
+    private lateinit var locationPermissionLauncher: ActivityResultLauncher<Array<String>>
+
     // Diagnostic state
     private val assetsRequestedCount = AtomicInteger(0)
     private val assetsFailedCount = AtomicInteger(0)
@@ -84,6 +112,23 @@ class PwaPlayerActivity : ComponentActivity() {
             LogKeeper.log(this, TAG, "PwaPlayerActivity started without PWA_ID, finishing")
             finish()
             return
+        }
+
+        // Initialize ActivityResult launchers for SAF file chooser & device permissions
+        initActivityLaunchers(pwaId)
+
+        // Resolve capability policy (Intent extras first with fallback to stored policy)
+        permissionPolicy = if (intent.hasExtra("PERM_INTERNET")) {
+            PwaPermissionPolicy(
+                internetAllowed = intent.getBooleanExtra("PERM_INTERNET", false),
+                filesAllowed = intent.getBooleanExtra("PERM_FILES", false),
+                cameraAllowed = intent.getBooleanExtra("PERM_CAMERA", false),
+                microphoneAllowed = intent.getBooleanExtra("PERM_MICROPHONE", false),
+                locationAllowed = intent.getBooleanExtra("PERM_LOCATION", false),
+                soundAllowed = intent.getBooleanExtra("PERM_SOUND", false)
+            )
+        } else {
+            PwaPermissionManager.getPolicy(this, pwaId)
         }
 
         val rootLayout = FrameLayout(this).apply {
@@ -131,8 +176,10 @@ class PwaPlayerActivity : ComponentActivity() {
                 finish()
             }
         }
+        val closeButtonExtra = intent.getStringExtra("PREF_CLOSE_BUTTON")
         val prefs = getSharedPreferences("FloatingReaderPrefs", Context.MODE_PRIVATE)
-        val showCloseButton = prefs.getString("pwa_pref_${pwaId}_close_button", "show") != "hide"
+        val closeButtonPref = closeButtonExtra ?: prefs.getString("pwa_pref_${pwaId}_close_button", "show") ?: "show"
+        val showCloseButton = closeButtonPref != "hide"
         if (!showCloseButton) {
             closeButton.visibility = View.GONE
             LogKeeper.log(this@PwaPlayerActivity, TAG, "PWA close button hidden per preference for $pwaId")
@@ -162,10 +209,10 @@ class PwaPlayerActivity : ComponentActivity() {
             }
             if (entity == null) {
                 withContext(Dispatchers.Main) {
-                    android.widget.Toast.makeText(
+                    Toast.makeText(
                         this@PwaPlayerActivity,
                         "PWA not found: $pwaId",
-                        android.widget.Toast.LENGTH_SHORT
+                        Toast.LENGTH_SHORT
                     ).show()
                     finish()
                 }
@@ -178,8 +225,8 @@ class PwaPlayerActivity : ComponentActivity() {
             }
 
             // Orientation resolution
-            val prefs = getSharedPreferences("FloatingReaderPrefs", Context.MODE_PRIVATE)
-            val userOverride = prefs.getString("pwa_pref_${entity.id}_orientation", "manifest") ?: "manifest"
+            val orientationExtra = intent.getStringExtra("PREF_ORIENTATION")
+            val userOverride = orientationExtra ?: prefs.getString("pwa_pref_${entity.id}_orientation", "manifest") ?: "manifest"
             val resolvedOrientation = resolveOrientation(userOverride, entity.orientation)
             requestedOrientation = resolvedOrientation
 
@@ -192,12 +239,90 @@ class PwaPlayerActivity : ComponentActivity() {
             LogKeeper.log(
                 this@PwaPlayerActivity,
                 TAG,
-                "PWA_START id=${entity.id} root=${entity.unpackedPath} startUrl=${entity.startUrl} scope=${entity.scope} orientation=$orientationLabel (override=$userOverride, manifest=${entity.orientation}) display=${entity.displayMode}"
+                "PWA_START id=${entity.id} root=${entity.unpackedPath} startUrl=${entity.startUrl} scope=${entity.scope} orientation=$orientationLabel (override=$userOverride) display=${entity.displayMode} perms=[net=${permissionPolicy.internetAllowed},files=${permissionPolicy.filesAllowed},cam=${permissionPolicy.cameraAllowed},mic=${permissionPolicy.microphoneAllowed},loc=${permissionPolicy.locationAllowed},snd=${permissionPolicy.soundAllowed}]"
             )
 
             withContext(Dispatchers.Main) {
                 initializeWebView(rootLayout, entity)
             }
+        }
+    }
+
+    private fun initActivityLaunchers(pwaId: String) {
+        // SAF file chooser contract
+        fileChooserLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            val callback = pendingFileChooserCallback
+            pendingFileChooserCallback = null
+            if (callback == null) return@registerForActivityResult
+
+            if (result.resultCode == RESULT_OK && result.data != null) {
+                val data = result.data!!
+                val uris = mutableListOf<Uri>()
+
+                val clipData = data.clipData
+                if (clipData != null) {
+                    for (i in 0 until clipData.itemCount) {
+                        val itemUri = clipData.getItemAt(i).uri
+                        uris.add(itemUri)
+                    }
+                } else if (data.data != null) {
+                    uris.add(data.data!!)
+                }
+
+                // Persist permissions and link grants to pwaId
+                for (u in uris) {
+                    try {
+                        contentResolver.takePersistableUriPermission(u, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    } catch (_: Throwable) {}
+                    PwaPermissionManager.addGrantedUri(this, pwaId, u)
+                }
+
+                LogKeeper.log(this, TAG, "PWA_SAF_CHOOSER_SUCCESS id=$pwaId count=${uris.size}")
+                callback.onReceiveValue(uris.toTypedArray())
+            } else {
+                LogKeeper.log(this, TAG, "PWA_SAF_CHOOSER_CANCELLED id=$pwaId")
+                callback.onReceiveValue(null)
+            }
+        }
+
+        // Camera & Microphone permission contract
+        mediaPermissionLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { results ->
+            val request = pendingPermissionRequest
+            val granted = pendingGrantedMediaResources.toMutableList()
+            pendingPermissionRequest = null
+            pendingGrantedMediaResources.clear()
+
+            if (request == null) return@registerForActivityResult
+
+            if (results[Manifest.permission.CAMERA] == true && permissionPolicy.cameraAllowed) {
+                granted.add(PermissionRequest.RESOURCE_VIDEO_CAPTURE)
+            }
+            if (results[Manifest.permission.RECORD_AUDIO] == true && permissionPolicy.microphoneAllowed) {
+                granted.add(PermissionRequest.RESOURCE_AUDIO_CAPTURE)
+            }
+
+            if (granted.isNotEmpty()) {
+                request.grant(granted.toTypedArray())
+                LogKeeper.log(this, TAG, "PWA_RUNTIME_MEDIA_GRANTED id=$pwaId granted=$granted")
+            } else {
+                request.deny()
+                LogKeeper.log(this, TAG, "PWA_RUNTIME_MEDIA_DENIED id=$pwaId")
+            }
+        }
+
+        // Location permission contract
+        locationPermissionLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { results ->
+            val callback = pendingGeolocationCallback
+            val origin = pendingGeolocationOrigin
+            pendingGeolocationCallback = null
+            pendingGeolocationOrigin = null
+
+            val fineGranted = results[Manifest.permission.ACCESS_FINE_LOCATION] == true
+            val coarseGranted = results[Manifest.permission.ACCESS_COARSE_LOCATION] == true
+            val isAllowed = (fineGranted || coarseGranted) && permissionPolicy.locationAllowed
+
+            callback?.invoke(origin, isAllowed, false)
+            LogKeeper.log(this, TAG, "PWA_RUNTIME_LOCATION_RESULT id=$pwaId allowed=$isAllowed")
         }
     }
 
@@ -238,7 +363,8 @@ class PwaPlayerActivity : ComponentActivity() {
             databaseEnabled = true
             allowFileAccess = true
             allowContentAccess = true
-            mediaPlaybackRequiresUserGesture = false
+            // Enforce sound policy: require user gesture if sound is disallowed
+            mediaPlaybackRequiresUserGesture = !permissionPolicy.soundAllowed
             cacheMode = WebSettings.LOAD_DEFAULT
             useWideViewPort = true
             loadWithOverviewMode = true
@@ -246,12 +372,19 @@ class PwaPlayerActivity : ComponentActivity() {
             builtInZoomControls = true
             setSupportZoom(true)
 
+            // Geolocation enable setting
+            setGeolocationEnabled(permissionPolicy.locationAllowed)
+
             // Dedicated isolated database path
             val isolatedDataDir = PwaStorageManager.getIsolatedDataDir(this@PwaPlayerActivity, entity.id)
             setDatabasePath(isolatedDataDir.absolutePath)
         }
 
-        LogKeeper.log(this, TAG, "WebView initialized: domStorage=true, database=true, isolatedDir=${PwaStorageManager.getIsolatedDataDir(this, entity.id).name}")
+        LogKeeper.log(
+            this,
+            TAG,
+            "WebView initialized: isolatedDir=${PwaStorageManager.getIsolatedDataDir(this, entity.id).name} soundAllowed=${permissionPolicy.soundAllowed}"
+        )
 
         val unpackedDir = File(entity.unpackedPath)
         val virtualHost = "pwa-${entity.id}.local"
@@ -275,6 +408,119 @@ class PwaPlayerActivity : ComponentActivity() {
                 }
                 return super.onConsoleMessage(consoleMessage)
             }
+
+            // Real SAF File Chooser enforcement
+            override fun onShowFileChooser(
+                webView: WebView?,
+                filePathCallback: ValueCallback<Array<Uri>>?,
+                fileChooserParams: FileChooserParams?
+            ): Boolean {
+                if (!permissionPolicy.filesAllowed) {
+                    LogKeeper.log(this@PwaPlayerActivity, TAG, "PWA_BLOCKED_FILES id=${entity.id}")
+                    Toast.makeText(this@PwaPlayerActivity, "File access disabled for this Mini App", Toast.LENGTH_SHORT).show()
+                    filePathCallback?.onReceiveValue(null)
+                    return true
+                }
+
+                pendingFileChooserCallback?.onReceiveValue(null)
+                pendingFileChooserCallback = filePathCallback
+
+                return try {
+                    val pickIntent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                        addCategory(Intent.CATEGORY_OPENABLE)
+                        type = "*/*"
+                        val acceptTypes = fileChooserParams?.acceptTypes?.filter { it.isNotBlank() }
+                        if (!acceptTypes.isNullOrEmpty()) {
+                            if (acceptTypes.size == 1) {
+                                type = acceptTypes[0]
+                            } else {
+                                putExtra(Intent.EXTRA_MIME_TYPES, acceptTypes.toTypedArray())
+                            }
+                        }
+                        val isMultiple = fileChooserParams?.mode == FileChooserParams.MODE_OPEN_MULTIPLE
+                        putExtra(Intent.EXTRA_ALLOW_MULTIPLE, isMultiple)
+                        addFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION or Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    }
+                    fileChooserLauncher.launch(pickIntent)
+                    true
+                } catch (e: Exception) {
+                    LogKeeper.logError(this@PwaPlayerActivity, TAG, "Failed to launch SAF document picker", e)
+                    pendingFileChooserCallback?.onReceiveValue(null)
+                    pendingFileChooserCallback = null
+                    false
+                }
+            }
+
+            // Real Camera & Microphone enforcement
+            override fun onPermissionRequest(request: PermissionRequest?) {
+                if (request == null) return
+                val requestedResources = request.resources
+                val wantsCamera = requestedResources.contains(PermissionRequest.RESOURCE_VIDEO_CAPTURE)
+                val wantsMic = requestedResources.contains(PermissionRequest.RESOURCE_AUDIO_CAPTURE)
+
+                val granted = mutableListOf<String>()
+                val neededPermissions = mutableListOf<String>()
+
+                if (wantsCamera) {
+                    if (permissionPolicy.cameraAllowed) {
+                        if (ContextCompat.checkSelfPermission(this@PwaPlayerActivity, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
+                            granted.add(PermissionRequest.RESOURCE_VIDEO_CAPTURE)
+                        } else {
+                            neededPermissions.add(Manifest.permission.CAMERA)
+                        }
+                    } else {
+                        LogKeeper.log(this@PwaPlayerActivity, TAG, "PWA_BLOCKED_CAMERA id=${entity.id}")
+                    }
+                }
+
+                if (wantsMic) {
+                    if (permissionPolicy.microphoneAllowed) {
+                        if (ContextCompat.checkSelfPermission(this@PwaPlayerActivity, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+                            granted.add(PermissionRequest.RESOURCE_AUDIO_CAPTURE)
+                        } else {
+                            neededPermissions.add(Manifest.permission.RECORD_AUDIO)
+                        }
+                    } else {
+                        LogKeeper.log(this@PwaPlayerActivity, TAG, "PWA_BLOCKED_MICROPHONE id=${entity.id}")
+                    }
+                }
+
+                if (neededPermissions.isNotEmpty()) {
+                    pendingPermissionRequest = request
+                    pendingGrantedMediaResources = granted
+                    mediaPermissionLauncher.launch(neededPermissions.toTypedArray())
+                } else if (granted.isNotEmpty()) {
+                    request.grant(granted.toTypedArray())
+                    LogKeeper.log(this@PwaPlayerActivity, TAG, "PWA_GRANTED_MEDIA id=${entity.id} res=$granted")
+                } else {
+                    request.deny()
+                    LogKeeper.log(this@PwaPlayerActivity, TAG, "PWA_DENIED_MEDIA id=${entity.id}")
+                }
+            }
+
+            // Real Geolocation enforcement
+            override fun onGeolocationPermissionsShowPrompt(
+                origin: String?,
+                callback: GeolocationPermissions.Callback?
+            ) {
+                if (!permissionPolicy.locationAllowed) {
+                    LogKeeper.log(this@PwaPlayerActivity, TAG, "PWA_BLOCKED_LOCATION id=${entity.id}")
+                    callback?.invoke(origin, false, false)
+                    return
+                }
+
+                val hasFine = ContextCompat.checkSelfPermission(this@PwaPlayerActivity, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+                val hasCoarse = ContextCompat.checkSelfPermission(this@PwaPlayerActivity, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+
+                if (hasFine || hasCoarse) {
+                    callback?.invoke(origin, true, false)
+                    LogKeeper.log(this@PwaPlayerActivity, TAG, "PWA_GRANTED_LOCATION id=${entity.id}")
+                } else {
+                    pendingGeolocationCallback = callback
+                    pendingGeolocationOrigin = origin
+                    locationPermissionLauncher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
+                }
+            }
         }
 
         wv.webViewClient = object : WebViewClient() {
@@ -284,6 +530,11 @@ class PwaPlayerActivity : ComponentActivity() {
                 isPageFinished = false
                 progressBar?.visibility = View.VISIBLE
                 LogKeeper.log(this@PwaPlayerActivity, TAG, "WebView page started: $url")
+
+                // Enforce sound mute script if sound is disallowed
+                if (!permissionPolicy.soundAllowed) {
+                    injectAudioSuppressionScript(view)
+                }
 
                 // Start 10-second loading watchdog
                 startLoadingWatchdog(entity.id)
@@ -301,11 +552,36 @@ class PwaPlayerActivity : ComponentActivity() {
                     wv.clearHistory()
                 }
 
+                // Enforce sound mute script on finished page as well
+                if (!permissionPolicy.soundAllowed) {
+                    injectAudioSuppressionScript(view)
+                }
+
                 LogKeeper.log(
                     this@PwaPlayerActivity,
                     TAG,
                     "WebView page finished: $url (assets requested=${assetsRequestedCount.get()}, failed=${assetsFailedCount.get()})"
                 )
+            }
+
+            override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
+                val url = request?.url ?: return false
+                val host = url.host?.lowercase() ?: ""
+                val scheme = url.scheme?.lowercase() ?: ""
+
+                // Local assets / virtual host stay inside WebView
+                if ((scheme == "https" || scheme == "http") && (host == virtualHost || host.endsWith(".local") || host == "localhost")) {
+                    return false
+                }
+
+                // External network navigation
+                if (!permissionPolicy.internetAllowed) {
+                    LogKeeper.log(this@PwaPlayerActivity, TAG, "PWA_BLOCKED_NAV id=${entity.id} url=$url")
+                    Toast.makeText(this@PwaPlayerActivity, "External internet navigation disabled for this Mini App", Toast.LENGTH_SHORT).show()
+                    return true // Block external navigation
+                }
+
+                return super.shouldOverrideUrlLoading(view, request)
             }
 
             override fun onReceivedError(
@@ -346,7 +622,7 @@ class PwaPlayerActivity : ComponentActivity() {
                 val scheme = url.scheme?.lowercase() ?: ""
                 val host = url.host?.lowercase() ?: ""
 
-                // Intercept virtual domain requests or fallback file scheme requests
+                // 1. Intercept virtual domain requests or fallback file scheme requests (local package assets)
                 if ((scheme == "https" || scheme == "http") && (host == virtualHost || host.endsWith(".local") || host == "localhost")) {
                     assetsRequestedCount.incrementAndGet()
                     val path = url.path ?: "/"
@@ -355,6 +631,12 @@ class PwaPlayerActivity : ComponentActivity() {
                     assetsRequestedCount.incrementAndGet()
                     val path = url.path ?: "/"
                     return handleLocalAssetRequest(unpackedDir, path)
+                }
+
+                // 2. External network requests
+                if (!permissionPolicy.internetAllowed) {
+                    LogKeeper.log(this@PwaPlayerActivity, TAG, "PWA_BLOCKED_NETWORK id=${entity.id} url=$url")
+                    return create403Response("Network access disabled for this Mini App")
                 }
 
                 return super.shouldInterceptRequest(view, request)
@@ -368,6 +650,35 @@ class PwaPlayerActivity : ComponentActivity() {
         val launchUrl = "https://$virtualHost/$cleanStart"
         LogKeeper.log(this, TAG, "Loading PWA entrypoint via virtual origin: $launchUrl")
         wv.loadUrl(launchUrl)
+    }
+
+    private fun injectAudioSuppressionScript(view: WebView?) {
+        val script = """
+            (function() {
+                try {
+                    if (window.__pwaMuteEnforced) return;
+                    window.__pwaMuteEnforced = true;
+                    HTMLMediaElement.prototype.play = function() { return Promise.reject(new Error("Audio disabled")); };
+                    if (window.AudioContext) {
+                        var origA = window.AudioContext;
+                        window.AudioContext = function() {
+                            var ctx = new origA();
+                            try { ctx.suspend(); } catch(e) {}
+                            return ctx;
+                        };
+                    }
+                    if (window.webkitAudioContext) {
+                        var origW = window.webkitAudioContext;
+                        window.webkitAudioContext = function() {
+                            var ctx = new origW();
+                            try { ctx.suspend(); } catch(e) {}
+                            return ctx;
+                        };
+                    }
+                } catch(e) {}
+            })();
+        """.trimIndent()
+        view?.evaluateJavascript(script, null)
     }
 
     private fun handleLocalAssetRequest(webRoot: File, requestPath: String): WebResourceResponse {
@@ -414,6 +725,17 @@ class PwaPlayerActivity : ComponentActivity() {
             "Access-Control-Allow-Origin" to "*",
             "Access-Control-Allow-Methods" to "GET, POST, OPTIONS",
             "Access-Control-Allow-Headers" to "*",
+            "Cache-Control" to "no-cache"
+        )
+        return response
+    }
+
+    private fun create403Response(message: String): WebResourceResponse {
+        val bytes = message.toByteArray(Charsets.UTF_8)
+        val stream = ByteArrayInputStream(bytes)
+        val response = WebResourceResponse("text/plain", "utf-8", 403, "Forbidden", emptyMap(), stream)
+        response.responseHeaders = mapOf(
+            "Access-Control-Allow-Origin" to "*",
             "Cache-Control" to "no-cache"
         )
         return response

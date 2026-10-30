@@ -209,6 +209,13 @@ class WidgetPickerActivity : ComponentActivity() {
             broadcastIntent.putExtra("WIDGET_ID", widgetId)
             broadcastIntent.putExtra("PAGE_ID", pageId)
             broadcastIntent.setPackage(packageName); sendBroadcast(broadcastIntent)
+
+            // Allocate next widgetId and keep picker open for continuous additions
+            val host = AppWidgetHelper.getHost(this)
+            appWidgetId = host.allocateAppWidgetId()
+            val label = info?.loadLabel(packageManager) ?: "Widget"
+            Toast.makeText(this, "Added: $label", Toast.LENGTH_SHORT).show()
+            return
         } else if (actionType == "CREATE_PAGE") {
             val broadcastIntent = Intent("WIDGET_PAGE_CREATED")
             broadcastIntent.putExtra("WIDGET_ID", widgetId)

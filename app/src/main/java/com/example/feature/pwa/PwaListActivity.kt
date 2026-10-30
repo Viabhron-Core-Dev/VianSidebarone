@@ -28,6 +28,7 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -111,8 +112,20 @@ class PwaListActivity : ComponentActivity() {
                         startActivity(editIntent)
                     },
                     onLaunchPlayer = { pwa ->
+                        val prefs = getSharedPreferences("FloatingReaderPrefs", Context.MODE_PRIVATE)
+                        val orientation = prefs.getString("pwa_pref_${pwa.id}_orientation", "manifest") ?: "manifest"
+                        val closeButton = prefs.getString("pwa_pref_${pwa.id}_close_button", "show") ?: "show"
+                        val policy = PwaPermissionManager.getPolicy(this, pwa.id)
                         val playerIntent = Intent(this, PwaPlayerActivity::class.java).apply {
                             putExtra("PWA_ID", pwa.id)
+                            putExtra("PREF_ORIENTATION", orientation)
+                            putExtra("PREF_CLOSE_BUTTON", closeButton)
+                            putExtra("PERM_INTERNET", policy.internetAllowed)
+                            putExtra("PERM_FILES", policy.filesAllowed)
+                            putExtra("PERM_CAMERA", policy.cameraAllowed)
+                            putExtra("PERM_MICROPHONE", policy.microphoneAllowed)
+                            putExtra("PERM_LOCATION", policy.locationAllowed)
+                            putExtra("PERM_SOUND", policy.soundAllowed)
                         }
                         startActivity(playerIntent)
                     }
@@ -155,9 +168,9 @@ fun PwaListScreen(
     var showDeleteConfirmDialog by remember { mutableStateOf(false) }
     var isImporting by remember { mutableStateOf(false) }
 
-    // Zip file picker launcher
+    // Zip file picker launcher via SAF OpenDocument
     val zipPickerLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
+        contract = ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
         if (uri != null) {
             isImporting = true
@@ -184,6 +197,33 @@ fun PwaListScreen(
                     Toast.makeText(context, "Import failed: ${e.message}", Toast.LENGTH_LONG).show()
                 } finally {
                     isImporting = false
+                }
+            }
+        }
+    }
+
+    // SAF document creation launcher for PWA backup export
+    val exportBackupLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/zip")
+    ) { uri: Uri? ->
+        val exportId = selectedIds.firstOrNull()
+        if (uri != null && exportId != null) {
+            scope.launch {
+                val success = withContext(Dispatchers.IO) {
+                    try {
+                        context.contentResolver.openOutputStream(uri)?.use { stream ->
+                            PwaStorageManager.exportPwaBackup(context, exportId, stream)
+                        } ?: false
+                    } catch (e: Exception) {
+                        false
+                    }
+                }
+                if (success) {
+                    Toast.makeText(context, "PWA backup exported successfully", Toast.LENGTH_SHORT).show()
+                    isMultiSelectMode = false
+                    selectedIds.clear()
+                } else {
+                    Toast.makeText(context, "Failed to export backup", Toast.LENGTH_LONG).show()
                 }
             }
         }
@@ -220,6 +260,15 @@ fun PwaListScreen(
                         }
                     },
                     actions = {
+                        if (selectedIds.size == 1) {
+                            IconButton(onClick = {
+                                val pwa = allPwas.firstOrNull { it.id == selectedIds.first() }
+                                val safeName = (pwa?.name ?: "pwa").replace(Regex("[^a-zA-Z0-9._-]"), "_").take(30)
+                                exportBackupLauncher.launch("${safeName}_backup.zip")
+                            }) {
+                                Icon(Icons.Default.Share, contentDescription = "Export Backup", tint = MaterialTheme.colorScheme.primary)
+                            }
+                        }
                         if (selectedIds.isNotEmpty()) {
                             IconButton(onClick = { showDeleteConfirmDialog = true }) {
                                 Icon(Icons.Default.Delete, contentDescription = "Delete selected", tint = Color(0xFFFF5252))
@@ -296,7 +345,7 @@ fun PwaListScreen(
         floatingActionButton = {
             if (!isMultiSelectMode) {
                 FloatingActionButton(
-                    onClick = { zipPickerLauncher.launch("application/zip") },
+                    onClick = { zipPickerLauncher.launch(arrayOf("application/zip", "application/x-zip-compressed", "application/octet-stream", "*/*")) },
                     containerColor = MaterialTheme.colorScheme.primary,
                     contentColor = Color.White
                 ) {

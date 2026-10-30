@@ -8,6 +8,7 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -15,6 +16,7 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.graphics.asImageBitmap
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import java.io.File
 import androidx.compose.material.icons.Icons
@@ -37,10 +39,18 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import com.example.core.IconCacheManager
+import com.example.core.SquircleHelper
 import com.example.feature.element.CustomTabLauncher
 import com.example.feature.element.CustomTabProviderInfo
 import com.example.feature.sidebar.ElementMetadata
 import com.example.feature.sidebar.ElementMetadataStore
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.util.UUID
 
 /**
@@ -244,6 +254,8 @@ fun LinkPickerScreen(
         }
     }
 
+    val scope = rememberCoroutineScope()
+
     // Add / Edit Modal Dialog
     if (showAddEditDialog) {
         AddEditLinkDialog(
@@ -256,19 +268,48 @@ fun LinkPickerScreen(
                     onCancel()
                 }
             },
-            onSave = { label, url, browserPkg, account ->
+            onSave = { label, url, browserPkg, account, customIconUri, resetIcon ->
                 val uuid = editingMeta?.id?.substringAfter("link:")?.substringBefore(":")
                     ?: UUID.randomUUID().toString()
-                ElementMetadataStore.saveLinkElement(
-                    context = context,
-                    uuid = uuid,
-                    url = url,
-                    label = label,
-                    elementId = "link:$uuid",
-                    browserPackage = browserPkg,
-                    account = account
-                )
-                refreshLinks()
+
+                scope.launch {
+                    var finalIconPath = editingMeta?.iconPath ?: ""
+                    if (customIconUri != null) {
+                        withContext(Dispatchers.IO) {
+                            IconCacheManager.saveCustomIconFromUri(context, "link:$uuid", customIconUri)
+                            val customFile = IconCacheManager.getCustomIconFile(context, "link:$uuid")
+                            if (customFile.exists()) {
+                                finalIconPath = customFile.absolutePath
+                            }
+                        }
+                    } else if (resetIcon) {
+                        withContext(Dispatchers.IO) {
+                            val customFile = IconCacheManager.getCustomIconFile(context, "link:$uuid")
+                            if (customFile.exists()) customFile.delete()
+                            IconCacheManager.captureAndSaveLinkIcon(context, uuid)
+                            finalIconPath = ""
+                        }
+                    }
+
+                    ElementMetadataStore.saveLinkElement(
+                        context = context,
+                        uuid = uuid,
+                        url = url,
+                        label = label,
+                        elementId = "link:$uuid",
+                        iconPath = finalIconPath,
+                        browserPackage = browserPkg,
+                        account = account
+                    )
+
+                    val intent = Intent("com.example.UPDATE_SIDEBAR_ICONS").apply {
+                        putExtra("item_id", "link:$uuid")
+                        `package` = context.packageName
+                    }
+                    context.sendBroadcast(intent)
+                    refreshLinks()
+                }
+
                 showAddEditDialog = false
                 editingMeta = null
                 Toast.makeText(context, "Link saved", Toast.LENGTH_SHORT).show()
@@ -533,13 +574,47 @@ private fun AddEditLinkDialog(
     initialMeta: ElementMetadata?,
     providers: List<CustomTabProviderInfo>,
     onDismiss: () -> Unit,
-    onSave: (label: String, url: String, browserPackage: String?, account: String?) -> Unit
+    onSave: (label: String, url: String, browserPackage: String?, account: String?, customIconUri: Uri?, resetIcon: Boolean) -> Unit
 ) {
+    val context = LocalContext.current
     var label by remember { mutableStateOf(initialMeta?.label ?: "") }
     var url by remember { mutableStateOf(initialMeta?.target ?: "https://") }
     var selectedBrowserPackage by remember { mutableStateOf(initialMeta?.browserPackage) }
     var account by remember { mutableStateOf(initialMeta?.account ?: "") }
     var showBrowserDialog by remember { mutableStateOf(false) }
+
+    var selectedIconUri by remember { mutableStateOf<Uri?>(null) }
+    var isResettingIcon by remember { mutableStateOf(false) }
+
+    val iconPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            selectedIconUri = uri
+            isResettingIcon = false
+        }
+    }
+
+    val displayedIconBitmap: Bitmap? = remember(initialMeta?.iconPath, selectedIconUri, isResettingIcon) {
+        if (isResettingIcon) {
+            null
+        } else if (selectedIconUri != null) {
+            try {
+                context.contentResolver.openInputStream(selectedIconUri!!)?.use { stream ->
+                    val raw = BitmapFactory.decodeStream(stream)
+                    if (raw != null) SquircleHelper.toSquircleBitmap(raw) else null
+                }
+            } catch (_: Exception) { null }
+        } else if (!initialMeta?.iconPath.isNullOrEmpty()) {
+            val file = File(initialMeta!!.iconPath)
+            if (file.exists() && file.length() > 0) {
+                try {
+                    val raw = BitmapFactory.decodeFile(file.absolutePath)
+                    if (raw != null) SquircleHelper.toSquircleBitmap(raw) else null
+                } catch (_: Exception) { null }
+            } else null
+        } else null
+    }
 
     val isHttpsValid = remember(url) {
         CustomTabLauncher.isValidHttpsUrl(url)
@@ -633,6 +708,64 @@ private fun AddEditLinkDialog(
                     .padding(vertical = 4.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
+                // Icon Customization Row
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(48.dp)
+                            .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(12.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (displayedIconBitmap != null) {
+                            Image(
+                                bitmap = displayedIconBitmap.asImageBitmap(),
+                                contentDescription = "Link Icon",
+                                modifier = Modifier.fillMaxSize().padding(2.dp)
+                            )
+                        } else {
+                            Icon(
+                                painter = painterResource(com.example.R.drawable.ic_language),
+                                contentDescription = "Default Link Icon",
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(28.dp)
+                            )
+                        }
+                    }
+
+                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedButton(
+                                onClick = { iconPickerLauncher.launch("image/*") },
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                                modifier = Modifier.testTag("btn_change_link_icon")
+                            ) {
+                                Text("Change Icon", fontSize = 11.sp)
+                            }
+                            if (selectedIconUri != null || (!initialMeta?.iconPath.isNullOrEmpty() && !isResettingIcon)) {
+                                TextButton(
+                                    onClick = {
+                                        selectedIconUri = null
+                                        isResettingIcon = true
+                                    },
+                                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
+                                    modifier = Modifier.testTag("btn_reset_link_icon")
+                                ) {
+                                    Text("Reset", fontSize = 11.sp, color = MaterialTheme.colorScheme.error)
+                                }
+                            }
+                        }
+                        Text(
+                            text = if (isResettingIcon) "Default icon will be restored" else if (selectedIconUri != null) "Custom icon selected" else if (!initialMeta?.iconPath.isNullOrEmpty()) "Custom icon active" else "Default icon",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
                 // Title / Label
                 OutlinedTextField(
                     value = label,
@@ -712,7 +845,7 @@ private fun AddEditLinkDialog(
                 onClick = {
                     val finalLabel = if (label.isNotBlank()) label.trim() else "Link"
                     val finalAccount = if (account.isNotBlank()) account.trim() else null
-                    onSave(finalLabel, url.trim(), selectedBrowserPackage, finalAccount)
+                    onSave(finalLabel, url.trim(), selectedBrowserPackage, finalAccount, selectedIconUri, isResettingIcon)
                 },
                 enabled = isHttpsValid,
                 modifier = Modifier.testTag("btn_save_link")

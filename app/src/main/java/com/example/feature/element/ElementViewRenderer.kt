@@ -24,6 +24,7 @@ import com.example.R
 import com.example.core.AppWidgetHelper
 import com.example.core.LogKeeper
 import com.example.feature.sidebar.GridWidgetItem
+import com.example.feature.sidebar.SidebarActionMenuHelper
 import com.example.feature.sidebar.SidebarAppsManager
 import com.example.feature.sidebar.SidebarItem
 import com.example.utils.AppTrackerHelper
@@ -110,122 +111,76 @@ class ElementViewRenderer(
         parsed: SidebarItem,
         appsManager: SidebarAppsManager
     ) {
-        val actionList = mutableListOf<String>()
+        val menuItems = mutableListOf<SidebarActionMenuHelper.ActionMenuItem>()
+
         if (parsed is SidebarItem.App) {
-            actionList.add("App Info")
+            menuItems.add(
+                SidebarActionMenuHelper.ActionMenuItem("App Info", android.R.drawable.ic_menu_info_details) {
+                    try {
+                        val intent = Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                            data = android.net.Uri.parse("package:${parsed.packageName}")
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                        context.startActivity(intent)
+                    } catch (_: Exception) {}
+                }
+            )
         }
+
         val isForceStop = (parsed is SidebarItem.SystemAction && parsed.action == "force_stop_running_apps")
         if (isForceStop) {
-            actionList.add("Edit")
-        }
-        actionList.add("Change Icon")
-        val customIconFile = File(context.filesDir, "custom_icons/${item.id.replace(Regex("[^a-zA-Z0-9.-]"), "_")}.webp")
-        if (customIconFile.exists()) {
-            actionList.add("Reset Icon")
-        }
-        actionList.add("Remove")
-
-        var popupWindow: PopupWindow? = null
-        val popupLayout = LinearLayout(context).apply {
-            orientation = LinearLayout.VERTICAL
-            val pad = (8 * density).toInt()
-            setPadding(pad, pad, pad, pad)
-        }
-
-        actionList.forEach { action ->
-            val actionView = TextView(context).apply {
-                text = action
-                setTextColor(Color.WHITE)
-                setPadding(0, (12 * density).toInt(), 0, (12 * density).toInt())
-                gravity = Gravity.CENTER
-
-                val shape = GradientDrawable().apply {
-                    cornerRadius = 8 * density
-                    setColor(Color.parseColor("#333333"))
-                    setStroke(1, Color.LTGRAY)
-                }
-                background = shape
-
-                layoutParams = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.WRAP_CONTENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT
-                ).apply {
-                    setMargins(0, 0, 0, (8 * density).toInt())
-                }
-
-                setOnClickListener {
-                    popupWindow?.dismiss()
-                    when (action) {
-                        "Edit" -> {
-                            if (isForceStop) {
-                                val intent = Intent(context, com.example.AppTrackerSettingsActivity::class.java).apply {
-                                    putExtra("MODE", "force_stop_only")
-                                    putExtra("CONTAINER_ID", containerId)
-                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                }
-                                context.startActivity(intent)
-                                onClose?.invoke() ?: com.example.feature.sidebar.SidebarManager.getInstance(context).closeSidebar()
-                            }
-                        }
-                        "Remove" -> {
-                            onItemRemoved?.invoke(item.id)
-                        }
-                        "Change Icon" -> {
-                            val intent = Intent(context, com.example.IconPickerActivity::class.java).apply {
-                                putExtra("item_id", item.id)
-                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                            }
-                            context.startActivity(intent)
-                        }
-                        "Reset Icon" -> {
-                            val file = File(context.filesDir, "custom_icons/${item.id.replace(Regex("[^a-zA-Z0-9.-]"), "_")}.webp")
-                            if (file.exists()) file.delete()
-                            appsManager.iconCache.remove("custom_${item.id}")
-                            appsManager.iconCache.remove(item.id)
-                            context.sendBroadcast(Intent("com.example.UPDATE_SIDEBAR_ICONS").apply {
-                                putExtra("item_id", item.id)
-                            })
-                        }
-                        "App Info" -> {
-                            if (parsed is SidebarItem.App) {
-                                try {
-                                    val intent = Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-                                        data = android.net.Uri.parse("package:${parsed.packageName}")
-                                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                    }
-                                    context.startActivity(intent)
-                                } catch (_: Exception) {}
-                            }
-                        }
+            menuItems.add(
+                SidebarActionMenuHelper.ActionMenuItem("Edit", android.R.drawable.ic_menu_edit) {
+                    val intent = Intent(context, com.example.AppTrackerSettingsActivity::class.java).apply {
+                        putExtra("MODE", "force_stop_only")
+                        putExtra("CONTAINER_ID", containerId)
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                     }
+                    context.startActivity(intent)
+                    onClose?.invoke() ?: com.example.feature.sidebar.SidebarManager.getInstance(context).closeSidebar()
                 }
-            }
-            popupLayout.addView(actionView)
+            )
+        } else if (parsed is SidebarItem.App) {
+            menuItems.add(
+                SidebarActionMenuHelper.ActionMenuItem("Edit", android.R.drawable.ic_menu_edit) {
+                    val intent = Intent(context, com.example.IconPickerActivity::class.java).apply {
+                        putExtra("item_id", item.id)
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    context.startActivity(intent)
+                }
+            )
+        } else if (parsed is SidebarItem.Pwa) {
+            menuItems.add(
+                SidebarActionMenuHelper.ActionMenuItem("Edit", android.R.drawable.ic_menu_edit) {
+                    val intent = Intent(context, com.example.feature.pwa.PwaEditActivity::class.java).apply {
+                        putExtra("PWA_ID", parsed.pwaId)
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    context.startActivity(intent)
+                }
+            )
+        } else if (parsed is SidebarItem.Link) {
+            menuItems.add(
+                SidebarActionMenuHelper.ActionMenuItem("Edit", android.R.drawable.ic_menu_edit) {
+                    val intent = Intent(context, com.example.feature.settings.LinkPickerActivity::class.java).apply {
+                        putExtra("EDIT_ELEMENT_ID", item.id)
+                        putExtra("CONTAINER_ID", containerId)
+                        putExtra("PAGE_ID", pageId)
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    context.startActivity(intent)
+                }
+            )
         }
 
-        popupLayout.measure(View.MeasureSpec.UNSPECIFIED, View.MeasureSpec.UNSPECIFIED)
-        popupWindow = PopupWindow(
-            popupLayout,
-            (150 * density).toInt(),
-            LinearLayout.LayoutParams.WRAP_CONTENT,
-            true
-        ).apply {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                windowLayoutType = WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-            } else {
-                @Suppress("DEPRECATION")
-                windowLayoutType = WindowManager.LayoutParams.TYPE_PHONE
+        menuItems.add(
+            SidebarActionMenuHelper.ActionMenuItem("Remove", android.R.drawable.ic_menu_delete) {
+                onItemRemoved?.invoke(item.id)
             }
-            setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
-            isOutsideTouchable = true
-        }
+        )
 
-        val location = IntArray(2)
-        anchor.getLocationOnScreen(location)
-        val x = location[0]
-        var y = location[1] - popupLayout.measuredHeight
-        if (y < 0) y = location[1] + anchor.height
-        popupWindow.showAtLocation(anchor, Gravity.NO_GRAVITY, x, y)
+        SidebarActionMenuHelper.show(anchor, menuItems)
     }
 
     /**

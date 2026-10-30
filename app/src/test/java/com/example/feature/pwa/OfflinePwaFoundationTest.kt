@@ -302,4 +302,119 @@ class OfflinePwaFoundationTest {
         item.onClick()
         assertTrue("Click handler should execute", clicked)
     }
+
+    @Test
+    fun testPwaBackupArchiveStructureAndRestore() {
+        val pwaId = "backup_test_pwa"
+        val pwaDir = File(mockFilesDir, "pwa/$pwaId").apply { mkdirs() }
+        val testPkgZip = File(pwaDir, "package.zip")
+        ZipOutputStream(FileOutputStream(testPkgZip)).use { zos ->
+            zos.putNextEntry(ZipEntry("index.html"))
+            zos.write("<html><body>App</body></html>".toByteArray(StandardCharsets.UTF_8))
+            zos.closeEntry()
+            zos.putNextEntry(ZipEntry("manifest.json"))
+            zos.write("""{"name": "Backup App", "start_url": "index.html"}""".toByteArray(StandardCharsets.UTF_8))
+            zos.closeEntry()
+        }
+
+        // Create backup archive containing pwa_metadata.json + package.zip
+        val backupZip = File(tempFolder.root, "app_backup.zip")
+        ZipOutputStream(FileOutputStream(backupZip)).use { zos ->
+            zos.putNextEntry(ZipEntry("pwa_metadata.json"))
+            val meta = """{
+                "id": "$pwaId",
+                "name": "Backup Restored App",
+                "orientationPreference": "landscape",
+                "closeButtonPreference": "hide"
+            }""".trimIndent()
+            zos.write(meta.toByteArray(StandardCharsets.UTF_8))
+            zos.closeEntry()
+
+            zos.putNextEntry(ZipEntry("package.zip"))
+            testPkgZip.inputStream().use { it.copyTo(zos) }
+            zos.closeEntry()
+        }
+
+        // Test importing this backup archive
+        val restored = backupZip.inputStream().use { stream ->
+            PwaZipImporter.unpackAndBuildEntity(
+                context = context,
+                inputStream = stream,
+                originalFileName = "app_backup.zip"
+            )
+        }
+
+        assertNotNull(restored)
+        assertEquals("Backup App", restored.name)
+        assertEquals("landscape", fakePrefs.getString("pwa_pref_${restored.id}_orientation", null))
+        assertEquals("hide", fakePrefs.getString("pwa_pref_${restored.id}_close_button", null))
+    }
+
+    @Test
+    fun testPwaPermissionPolicyDefaultsToOff() {
+        val policy = PwaPermissionManager.getPolicy(context, "unconfigured_pwa_123")
+        assertFalse("Internet must default to OFF", policy.internetAllowed)
+        assertFalse("Files must default to OFF", policy.filesAllowed)
+        assertFalse("Camera must default to OFF", policy.cameraAllowed)
+        assertFalse("Microphone must default to OFF", policy.microphoneAllowed)
+        assertFalse("Location must default to OFF", policy.locationAllowed)
+        assertFalse("Sound must default to OFF", policy.soundAllowed)
+    }
+
+    @Test
+    fun testPwaPermissionPolicySaveAndRetrieve() {
+        val pwaId = "perm_test_pwa"
+        val customPolicy = PwaPermissionPolicy(
+            internetAllowed = true,
+            filesAllowed = true,
+            cameraAllowed = false,
+            microphoneAllowed = false,
+            locationAllowed = true,
+            soundAllowed = true
+        )
+        PwaPermissionManager.savePolicy(context, pwaId, customPolicy)
+
+        val retrieved = PwaPermissionManager.getPolicy(context, pwaId)
+        assertTrue(retrieved.internetAllowed)
+        assertTrue(retrieved.filesAllowed)
+        assertFalse(retrieved.cameraAllowed)
+        assertFalse(retrieved.microphoneAllowed)
+        assertTrue(retrieved.locationAllowed)
+        assertTrue(retrieved.soundAllowed)
+    }
+
+    @Test
+    fun testPwaPermissionPolicyPerPwaIsolation() {
+        val pwa1 = "pwa_isolated_1"
+        val pwa2 = "pwa_isolated_2"
+
+        PwaPermissionManager.savePolicy(context, pwa1, PwaPermissionPolicy(cameraAllowed = true))
+        PwaPermissionManager.savePolicy(context, pwa2, PwaPermissionPolicy(cameraAllowed = false, microphoneAllowed = true))
+
+        val policy1 = PwaPermissionManager.getPolicy(context, pwa1)
+        val policy2 = PwaPermissionManager.getPolicy(context, pwa2)
+
+        assertTrue(policy1.cameraAllowed)
+        assertFalse(policy1.microphoneAllowed)
+
+        assertFalse(policy2.cameraAllowed)
+        assertTrue(policy2.microphoneAllowed)
+    }
+
+    @Test
+    fun testPwaSafGrantsManagement() {
+        val pwaId = "saf_test_pwa"
+        assertTrue(PwaPermissionManager.getGrantedUris(context, pwaId).isEmpty())
+
+        val testUriStr = "content://com.android.providers.media.documents/document/image%3A1001"
+        PwaPermissionManager.addGrantedUri(context, pwaId, testUriStr)
+
+        val grants = PwaPermissionManager.getGrantedUris(context, pwaId)
+        assertEquals(1, grants.size)
+        assertEquals(testUriStr, grants[0])
+
+        // Revoke
+        PwaPermissionManager.revokeGrantedUri(context, pwaId, testUriStr)
+        assertTrue("Grant should be removed after revoke", PwaPermissionManager.getGrantedUris(context, pwaId).isEmpty())
+    }
 }
