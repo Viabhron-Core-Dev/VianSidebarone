@@ -256,3 +256,29 @@ Capped at 500 lines per file.
 * Any deviation from what was requested, and why: None. Internet Speed Monitor, Notifications, Media, Calculator, Compass, Scheduler, and other modules left untouched.
 * Any known issue or follow-up needed: Ready for on-device manual testing.
 
+## Entry 102 - PWA Close Button Setting, Continuous Fast-Adding, PWA/Link Long-Press Edit, and Unified Action Popups
+* Timestamp: 2026-10-30T00:50:00Z
+* One-line summary: Added PWA Close Button show/hide option with non-blocking Android Back exit, enabled continuous fast-adding in PwaListActivity, added direct Edit actions to PWA and Link long-press menus, and unified all popup menus across Sidebar grids with a dedicated white pill/black icon/text helper.
+* Exact files touched:
+  - app/src/main/java/com/example/feature/sidebar/SidebarActionMenuHelper.kt
+  - app/src/main/java/com/example/feature/pwa/PwaEditActivity.kt
+  - app/src/main/java/com/example/feature/pwa/PwaPlayerActivity.kt
+  - app/src/main/java/com/example/feature/pwa/PwaListActivity.kt
+  - app/src/main/java/com/example/feature/settings/LinkPickerActivity.kt
+  - app/src/main/java/com/example/feature/sidebar/HybridGridPageView.kt
+  - app/src/main/java/com/example/feature/sidebar/AppsPageView.kt
+  - app/src/main/java/com/example/feature/sidebar/WidgetsGridPageView.kt
+  - app/src/test/java/com/example/feature/pwa/OfflinePwaFoundationTest.kt
+  - receipts/RECEIPTS_098.md
+* What was actually done:
+  - Created `SidebarActionMenuHelper`: Encapsulated white pill background (`#FFFFFF`), black icons (`#000000`), black text (`#000000`), 38dp pill height, 140dp width, 19dp corner radius, 14dp horizontal padding, 18dp icons, 14sp text, and 6dp vertical margins. Replaced legacy inconsistent dark textviews across `HybridGridPageView` (both main grid and folder popups), `AppsPageView`, and `WidgetsGridPageView`.
+  - Added "Close Button" setting card in `PwaEditActivity` with "Show" and "Hide" options, persisting per-PWA in `FloatingReaderPrefs` under key `"pwa_pref_${pwaId}_close_button"` (default "show").
+  - Updated `PwaPlayerActivity` to check `"pwa_pref_${pwaId}_close_button"`: when set to "hide", hides the visual floating exit button (`View.GONE`) while preserving 100% of Android Back exit capability (navigates WebView history, exits runtime at root).
+  - Updated `PwaListActivity` onSelectForGrid: when picking for Hybrid Grid (`isHybridGrid && !pageId.isNullOrEmpty()`), adds the element via `ElementPlacementHelper.addElementToHybridGrid`, shows feedback Toast, and remains open on the list so users can add multiple PWAs in one session before pressing Back.
+  - Updated `LinkPickerActivity`: added support for `EDIT_ELEMENT_ID` intent extra to automatically pop open the editing dialog for an existing link, updating metadata and dismissing back to the caller on save/cancel.
+  - Added "Edit" menu action to PWA and Link items in `HybridGridPageView` (both main grid and inside folders) and `AppsPageView`, routing to `PwaEditActivity` with `PWA_ID` or `LinkPickerActivity` with `EDIT_ELEMENT_ID`.
+  - Added unit tests in `OfflinePwaFoundationTest` verifying close button preference fallback logic and menu item construction.
+* How it was verified: local build only (`gradle :app:testDebugUnitTest --tests "com.example.feature.pwa.OfflinePwaFoundationTest"` passed; all project unit tests passed; `compile_applet` passed cleanly).
+* Any deviation from what was requested, and why: None. Internet Speed Monitor, Notifications, Media, Calculator, Compass, Scheduler, and launcher components remained completely untouched.
+* Any known issue or follow-up needed: Ready for on-device manual testing.
+

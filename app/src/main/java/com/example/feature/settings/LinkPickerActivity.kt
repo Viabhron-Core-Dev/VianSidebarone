@@ -62,6 +62,7 @@ class LinkPickerActivity : ComponentActivity() {
         val pageId = intent.getStringExtra("PAGE_ID")
         val containerId = intent.getStringExtra("CONTAINER_ID") ?: "sidebar"
         val isHybridGrid = intent.getBooleanExtra("IS_HYBRID_GRID", false)
+        val editElementId = intent.getStringExtra("EDIT_ELEMENT_ID")
 
         setContent {
             MaterialTheme(colorScheme = darkColorScheme()) {
@@ -70,6 +71,7 @@ class LinkPickerActivity : ComponentActivity() {
                     color = MaterialTheme.colorScheme.background
                 ) {
                     LinkPickerScreen(
+                        editElementId = editElementId,
                         onLinkSelected = { elementId ->
                             if (isHybridGrid && !pageId.isNullOrEmpty()) {
                                 com.example.feature.element.ElementPlacementHelper.addElementToHybridGrid(
@@ -103,6 +105,7 @@ class LinkPickerActivity : ComponentActivity() {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LinkPickerScreen(
+    editElementId: String? = null,
     onLinkSelected: (String) -> Unit,
     onCancel: () -> Unit
 ) {
@@ -114,8 +117,14 @@ fun LinkPickerScreen(
         CustomTabLauncher.getCustomTabProviders(context)
     }
 
-    var showAddEditDialog by remember { mutableStateOf(false) }
-    var editingMeta by remember { mutableStateOf<ElementMetadata?>(null) }
+    val initialEdit = remember(editElementId) {
+        if (!editElementId.isNullOrEmpty()) {
+            ElementMetadataStore.get(context, editElementId)
+        } else null
+    }
+
+    var showAddEditDialog by remember { mutableStateOf(initialEdit != null) }
+    var editingMeta by remember { mutableStateOf(initialEdit) }
     var selectedForActions by remember { mutableStateOf<ElementMetadata?>(null) }
 
     fun refreshLinks() {
@@ -243,6 +252,9 @@ fun LinkPickerScreen(
             onDismiss = {
                 showAddEditDialog = false
                 editingMeta = null
+                if (!editElementId.isNullOrEmpty()) {
+                    onCancel()
+                }
             },
             onSave = { label, url, browserPkg, account ->
                 val uuid = editingMeta?.id?.substringAfter("link:")?.substringBefore(":")
@@ -260,6 +272,9 @@ fun LinkPickerScreen(
                 showAddEditDialog = false
                 editingMeta = null
                 Toast.makeText(context, "Link saved", Toast.LENGTH_SHORT).show()
+                if (!editElementId.isNullOrEmpty()) {
+                    onCancel()
+                }
             }
         )
     }

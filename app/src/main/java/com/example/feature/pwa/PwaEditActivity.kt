@@ -62,6 +62,9 @@ class PwaEditActivity : ComponentActivity() {
                 val initialOrientation = remember(pwaId) {
                     prefs.getString("pwa_pref_${pwaId}_orientation", "manifest") ?: "manifest"
                 }
+                val initialCloseButton = remember(pwaId) {
+                    prefs.getString("pwa_pref_${pwaId}_close_button", "show") ?: "show"
+                }
 
                 LaunchedEffect(pwaId) {
                     val entity = withContext(Dispatchers.IO) {
@@ -75,8 +78,9 @@ class PwaEditActivity : ComponentActivity() {
                     PwaEditScreen(
                         pwa = currentPwa,
                         initialOrientation = initialOrientation,
+                        initialCloseButton = initialCloseButton,
                         onBack = { finish() },
-                        onSave = { updatedName, selectedOrientation ->
+                        onSave = { updatedName, selectedOrientation, selectedCloseButton ->
                             lifecycleScope.launch {
                                 withContext(Dispatchers.IO) {
                                     AppDatabase.getDatabase(this@PwaEditActivity).pwaDao()
@@ -94,6 +98,7 @@ class PwaEditActivity : ComponentActivity() {
                                     )
                                     prefs.edit()
                                         .putString("pwa_pref_${currentPwa.id}_orientation", selectedOrientation)
+                                        .putString("pwa_pref_${currentPwa.id}_close_button", selectedCloseButton)
                                         .apply()
 
                                     if (!currentPwa.iconPath.isNullOrEmpty()) {
@@ -120,11 +125,13 @@ class PwaEditActivity : ComponentActivity() {
 fun PwaEditScreen(
     pwa: PwaEntity,
     initialOrientation: String,
+    initialCloseButton: String,
     onBack: () -> Unit,
-    onSave: (newName: String, orientation: String) -> Unit
+    onSave: (newName: String, orientation: String, closeButton: String) -> Unit
 ) {
     var name by remember { mutableStateOf(pwa.name) }
     var orientation by remember { mutableStateOf(initialOrientation) }
+    var closeButtonOption by remember { mutableStateOf(initialCloseButton) }
     val dateFormat = remember { SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()) }
 
     Scaffold(
@@ -138,7 +145,7 @@ fun PwaEditScreen(
                 },
                 actions = {
                     IconButton(
-                        onClick = { if (name.isNotBlank()) onSave(name.trim(), orientation) },
+                        onClick = { if (name.isNotBlank()) onSave(name.trim(), orientation, closeButtonOption) },
                         modifier = Modifier.testTag("pwa_edit_save_button")
                     ) {
                         Icon(Icons.Default.Check, contentDescription = "Save", tint = MaterialTheme.colorScheme.primary)
@@ -265,6 +272,52 @@ fun PwaEditScreen(
                 }
             }
 
+            // Close Button Setting
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1E2E)),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(
+                        text = "Close Button",
+                        style = MaterialTheme.typography.titleSmall,
+                        color = Color.White
+                    )
+
+                    val closeOptions = listOf(
+                        "show" to "Show (Display floating exit button)",
+                        "hide" to "Hide (Android Back key exits at root)"
+                    )
+
+                    closeOptions.forEach { (key, label) ->
+                        val isSelected = closeButtonOption == key
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f) else Color.Transparent)
+                                .clickable { closeButtonOption = key }
+                                .padding(horizontal = 12.dp, vertical = 10.dp)
+                                .testTag("pwa_close_button_$key"),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            RadioButton(
+                                selected = isSelected,
+                                onClick = { closeButtonOption = key },
+                                colors = RadioButtonDefaults.colors(selectedColor = MaterialTheme.colorScheme.primary)
+                            )
+                            Text(
+                                text = label,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = if (isSelected) Color.White else Color.LightGray
+                            )
+                        }
+                    }
+                }
+            }
+
             // Read-only Details Card
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -287,7 +340,7 @@ fun PwaEditScreen(
             Spacer(modifier = Modifier.height(16.dp))
 
             Button(
-                onClick = { if (name.isNotBlank()) onSave(name.trim(), orientation) },
+                onClick = { if (name.isNotBlank()) onSave(name.trim(), orientation, closeButtonOption) },
                 modifier = Modifier.fillMaxWidth().height(48.dp).testTag("pwa_save_changes_button"),
                 shape = RoundedCornerShape(8.dp)
             ) {

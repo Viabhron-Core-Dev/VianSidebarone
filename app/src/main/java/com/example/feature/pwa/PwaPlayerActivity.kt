@@ -131,6 +131,12 @@ class PwaPlayerActivity : ComponentActivity() {
                 finish()
             }
         }
+        val prefs = getSharedPreferences("FloatingReaderPrefs", Context.MODE_PRIVATE)
+        val showCloseButton = prefs.getString("pwa_pref_${pwaId}_close_button", "show") != "hide"
+        if (!showCloseButton) {
+            closeButton.visibility = View.GONE
+            LogKeeper.log(this@PwaPlayerActivity, TAG, "PWA close button hidden per preference for $pwaId")
+        }
         rootLayout.addView(closeButton)
 
         setContentView(rootLayout)

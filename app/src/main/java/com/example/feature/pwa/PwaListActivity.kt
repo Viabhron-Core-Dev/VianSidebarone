@@ -82,16 +82,27 @@ class PwaListActivity : ComponentActivity() {
                             pwa.name,
                             pwa.iconPath
                         )
-                        val resultIntent = Intent().apply {
-                            putExtra("ELEMENT_ID", "pwa:${pwa.id}")
-                            putExtra("DISPLAY_NAME", pwa.name)
-                            putExtra("PWA_NAME", pwa.name)
-                            putExtra("ICON_PATH", pwa.iconPath)
-                            putExtra("CONTAINER_ID", containerId)
-                            putExtra("PAGE_ID", pageId)
+                        if (isHybridGrid && !pageId.isNullOrEmpty()) {
+                            val elementId = "pwa:${pwa.id}"
+                            com.example.feature.element.ElementPlacementHelper.addElementToHybridGrid(
+                                this@PwaListActivity,
+                                pageId,
+                                elementId,
+                                containerId = containerId
+                            )
+                            Toast.makeText(this@PwaListActivity, "Added: ${pwa.name}", Toast.LENGTH_SHORT).show()
+                        } else {
+                            val resultIntent = Intent().apply {
+                                putExtra("ELEMENT_ID", "pwa:${pwa.id}")
+                                putExtra("DISPLAY_NAME", pwa.name)
+                                putExtra("PWA_NAME", pwa.name)
+                                putExtra("ICON_PATH", pwa.iconPath)
+                                putExtra("CONTAINER_ID", containerId)
+                                putExtra("PAGE_ID", pageId)
+                            }
+                            setResult(Activity.RESULT_OK, resultIntent)
+                            finish()
                         }
-                        setResult(Activity.RESULT_OK, resultIntent)
-                        finish()
                     },
                     onOpenEdit = { pwa ->
                         val editIntent = Intent(this, PwaEditActivity::class.java).apply {

@@ -677,118 +677,129 @@ class AppsPageView(
             }
 
             itemView.setOnLongClickListener {
-                val actionList = mutableListOf<String>()
+                val menuItems = mutableListOf<SidebarActionMenuHelper.ActionMenuItem>()
                 if (item is SidebarItem.App) {
-                    actionList.add("App Info")
+                    menuItems.add(
+                        SidebarActionMenuHelper.ActionMenuItem(
+                            title = "App Info",
+                            iconResId = android.R.drawable.ic_menu_info_details
+                        ) {
+                            try {
+                                val intent = android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                                    data = android.net.Uri.parse("package:${item.packageName}")
+                                    addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                                }
+                                context.startActivity(intent)
+                                currentFolderPopup?.dismiss()
+                                onCloseSidebar()
+                            } catch (e: Exception) { e.printStackTrace() }
+                        }
+                    )
                 }
                 val isForceStop = (item is SidebarItem.SystemAction && item.action == "force_stop_running_apps")
                 if (isForceStop) {
-                    actionList.add("Edit")
+                    menuItems.add(
+                        SidebarActionMenuHelper.ActionMenuItem(
+                            title = "Edit",
+                            iconResId = android.R.drawable.ic_menu_edit
+                        ) {
+                            val intent = android.content.Intent(context, com.example.AppTrackerSettingsActivity::class.java).apply {
+                                putExtra("MODE", "force_stop_only")
+                                putExtra("CONTAINER_ID", handleId)
+                                addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                            }
+                            context.startActivity(intent)
+                            currentFolderPopup?.dismiss()
+                            onCloseSidebar()
+                        }
+                    )
                 }
-                actionList.add("Change Icon")
+                val isPwa = item is SidebarItem.Pwa || item.id.startsWith("pwa:")
+                if (isPwa) {
+                    val pwaId = if (item is SidebarItem.Pwa) item.pwaId else item.id.removePrefix("pwa:")
+                    menuItems.add(
+                        SidebarActionMenuHelper.ActionMenuItem(
+                            title = "Edit",
+                            iconResId = android.R.drawable.ic_menu_edit
+                        ) {
+                            val intent = android.content.Intent(context, com.example.feature.pwa.PwaEditActivity::class.java).apply {
+                                putExtra("PWA_ID", pwaId)
+                                addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                            }
+                            context.startActivity(intent)
+                            currentFolderPopup?.dismiss()
+                            onCloseSidebar()
+                        }
+                    )
+                }
+                val isLink = item is SidebarItem.Link || item.id.startsWith("link:")
+                if (isLink) {
+                    val linkElementId = if (item is SidebarItem.Link) item.id else item.id
+                    menuItems.add(
+                        SidebarActionMenuHelper.ActionMenuItem(
+                            title = "Edit",
+                            iconResId = android.R.drawable.ic_menu_edit
+                        ) {
+                            val intent = android.content.Intent(context, com.example.feature.settings.LinkPickerActivity::class.java).apply {
+                                putExtra("EDIT_ELEMENT_ID", linkElementId)
+                                putExtra("CONTAINER_ID", containerId)
+                                addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                            }
+                            context.startActivity(intent)
+                            currentFolderPopup?.dismiss()
+                            onCloseSidebar()
+                        }
+                    )
+                }
+                menuItems.add(
+                    SidebarActionMenuHelper.ActionMenuItem(
+                        title = "Change Icon",
+                        iconResId = android.R.drawable.ic_menu_gallery
+                    ) {
+                        val intent = android.content.Intent(context, com.example.IconPickerActivity::class.java).apply {
+                            putExtra("item_id", item.id)
+                            addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                        context.startActivity(intent)
+                        currentFolderPopup?.dismiss()
+                        onCloseSidebar()
+                    }
+                )
                 val customIconFile = java.io.File(context.filesDir, "custom_icons/${item.id.replace(Regex("[^a-zA-Z0-9.-]"), "_")}.webp")
                 if (customIconFile.exists()) {
-                    actionList.add("Reset Icon")
-                }
-                actionList.add("Remove")
-
-                var popupWindow: android.widget.PopupWindow? = null
-                val popupLayout = android.widget.LinearLayout(context).apply {
-                    orientation = android.widget.LinearLayout.VERTICAL
-                    val pad = (8 * context.resources.displayMetrics.density).toInt()
-                    setPadding(pad, pad, pad, pad)
-                }
-
-                actionList.forEach { action ->
-                    val actionView = android.widget.TextView(context).apply {
-                        text = action
-                        val padV = (10 * context.resources.displayMetrics.density).toInt()
-                        val padH = (16 * context.resources.displayMetrics.density).toInt()
-                        setPadding(padH, padV, padH, padV)
-                        setTextColor(android.graphics.Color.BLACK)
-                        textSize = 14f
-                        
-                        val shape = android.graphics.drawable.GradientDrawable()
-                        shape.shape = android.graphics.drawable.GradientDrawable.RECTANGLE
-                        shape.cornerRadius = 24f * context.resources.displayMetrics.density
-                        shape.setColor(android.graphics.Color.WHITE)
-                        shape.setStroke(1, android.graphics.Color.LTGRAY)
-                        background = shape
-                        
-                        layoutParams = android.widget.LinearLayout.LayoutParams(
-                            android.widget.LinearLayout.LayoutParams.WRAP_CONTENT,
-                            android.widget.LinearLayout.LayoutParams.WRAP_CONTENT
-                        ).apply {
-                            setMargins(0, 0, 0, (8 * context.resources.displayMetrics.density).toInt())
+                    menuItems.add(
+                        SidebarActionMenuHelper.ActionMenuItem(
+                            title = "Reset Icon",
+                            iconResId = android.R.drawable.ic_menu_revert
+                        ) {
+                            val file = java.io.File(context.filesDir, "custom_icons/${item.id.replace(Regex("[^a-zA-Z0-9.-]"), "_")}.webp")
+                            if (file.exists()) file.delete()
+                            manager.iconCache.remove("custom_${item.id}")
+                            manager.iconCache.remove(item.id)
+                            context.sendBroadcast(android.content.Intent("com.example.UPDATE_SIDEBAR_ICONS").apply {
+                                putExtra("item_id", item.id)
+                            })
+                            currentFolderPopup?.dismiss()
                         }
-                        
-                        setOnClickListener {
-                            popupWindow?.dismiss()
-                            when (action) {
-                                "Edit" -> {
-                                    if (isForceStop) {
-                                        val intent = android.content.Intent(context, com.example.AppTrackerSettingsActivity::class.java).apply {
-                                            putExtra("MODE", "force_stop_only")
-                                            putExtra("CONTAINER_ID", handleId)
-                                            addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                                        }
-                                        context.startActivity(intent)
-                                        currentFolderPopup?.dismiss()
-                                        onCloseSidebar()
-                                    }
-                                }
-                                "Remove" -> manager.removeItem(item.id)
-                                "Change Icon" -> {
-                                    val intent = android.content.Intent(context, com.example.IconPickerActivity::class.java).apply {
-                                        putExtra("item_id", item.id)
-                                        addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                                    }
-                                    context.startActivity(intent)
-                                    currentFolderPopup?.dismiss()
-                                    onCloseSidebar()
-                                }
-                                "Reset Icon" -> {
-                                    val file = java.io.File(context.filesDir, "custom_icons/${item.id.replace(Regex("[^a-zA-Z0-9.-]"), "_")}.webp")
-                                    if (file.exists()) file.delete()
-                                    manager.iconCache.remove("custom_${item.id}")
-                                    manager.iconCache.remove(item.id)
-                                    context.sendBroadcast(android.content.Intent("com.example.UPDATE_SIDEBAR_ICONS").apply {
-                                        putExtra("item_id", item.id)
-                                    })
-                                    currentFolderPopup?.dismiss()
-                                }
-                                "App Info" -> {
-                                    if (item is SidebarItem.App) {
-                                        try {
-                                            val intent = android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
-                                            intent.data = android.net.Uri.parse("package:${item.packageName}")
-                                            intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                                            context.startActivity(intent)
-                                            currentFolderPopup?.dismiss()
-                        onCloseSidebar()
-                                        } catch (e: Exception) { e.printStackTrace() }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    popupLayout.addView(actionView)
+                    )
                 }
+                menuItems.add(
+                    SidebarActionMenuHelper.ActionMenuItem(
+                        title = "Remove",
+                        iconResId = android.R.drawable.ic_menu_delete
+                    ) {
+                        manager.removeItem(item.id)
+                    }
+                )
 
-                popupWindow = android.widget.PopupWindow(popupLayout, android.view.ViewGroup.LayoutParams.WRAP_CONTENT, android.view.ViewGroup.LayoutParams.WRAP_CONTENT, true).apply {
-                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-                        windowLayoutType = android.view.WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-                    } else {
-                        windowLayoutType = android.view.WindowManager.LayoutParams.TYPE_PHONE
-                    }
-                    setBackgroundDrawable(android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT))
-                    elevation = 8f * context.resources.displayMetrics.density
-                }
-                
                 val location = IntArray(2)
                 itemView.getLocationOnScreen(location)
-                popupWindow?.showAtLocation(itemView, android.view.Gravity.NO_GRAVITY, location[0] + itemView.width / 4, location[1] + itemView.height / 2)
-                
+                SidebarActionMenuHelper.show(
+                    anchorView = itemView,
+                    items = menuItems,
+                    preferredX = location[0] + itemView.width / 4,
+                    preferredY = location[1] + itemView.height / 2
+                )
                 true
             }
 

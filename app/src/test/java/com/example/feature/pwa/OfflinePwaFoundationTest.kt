@@ -273,4 +273,33 @@ class OfflinePwaFoundationTest {
         assertFalse("Image logo.png is a static asset", isSpaRoute("/images/logo.png"))
         assertFalse("Font font.woff2 is a static asset", isSpaRoute("/fonts/font.woff2"))
     }
+
+    @Test
+    fun testCloseButtonPreferenceResolution() {
+        fun shouldShowCloseButton(prefValue: String?): Boolean {
+            return prefValue != "hide"
+        }
+
+        // Default / null / empty should show close button
+        assertTrue("Default null should show close button", shouldShowCloseButton(null))
+        assertTrue("show value should show close button", shouldShowCloseButton("show"))
+        assertTrue("empty string should show close button", shouldShowCloseButton(""))
+
+        // Explicit "hide" hides the floating button
+        assertFalse("hide value should hide close button", shouldShowCloseButton("hide"))
+    }
+
+    @Test
+    fun testSidebarActionMenuStructure() {
+        var clicked = false
+        val item = com.example.feature.sidebar.SidebarActionMenuHelper.ActionMenuItem(
+            title = "Edit",
+            iconResId = android.R.drawable.ic_menu_edit,
+            onClick = { clicked = true }
+        )
+        assertEquals("Edit", item.title)
+        assertEquals(android.R.drawable.ic_menu_edit, item.iconResId)
+        item.onClick()
+        assertTrue("Click handler should execute", clicked)
+    }
 }

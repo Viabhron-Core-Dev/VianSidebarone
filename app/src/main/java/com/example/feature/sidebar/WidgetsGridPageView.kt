@@ -406,84 +406,34 @@ class WidgetsGridPageView(
                             maxHeight = max(maxHeight, item.y * cellHeight + widgetHeight)
                             
                             hostView.setOnLongClickListener {
-                                val actionList = mutableListOf("App Info", "Remove")
-
-                                var popupWindow: PopupWindow? = null
-                                val popupLayout = LinearLayout(context).apply {
-                                    orientation = LinearLayout.VERTICAL
-                                    val pad = (8 * context.resources.displayMetrics.density).toInt()
-                                    setPadding(pad, pad, pad, pad)
-                                }
-
-                                actionList.forEach { action ->
-                                    val actionView = TextView(context).apply {
-                                        text = action
-                                        setTextColor(Color.WHITE)
-                                        setPadding(0, (12 * context.resources.displayMetrics.density).toInt(), 0, (12 * context.resources.displayMetrics.density).toInt())
-                                        gravity = Gravity.CENTER
-                                        
-                                        val shape = android.graphics.drawable.GradientDrawable()
-                                        shape.cornerRadius = 8 * context.resources.displayMetrics.density
-                                        shape.setColor(Color.parseColor("#333333"))
-                                        shape.setStroke(1, Color.LTGRAY)
-                                        background = shape
-                                        
-                                        layoutParams = LinearLayout.LayoutParams(
-                                            LinearLayout.LayoutParams.WRAP_CONTENT,
-                                            LinearLayout.LayoutParams.WRAP_CONTENT
-                                        ).apply {
-                                            setMargins(0, 0, 0, (8 * context.resources.displayMetrics.density).toInt())
-                                        }
-                                        
-                                        setOnClickListener {
-                                            popupWindow?.dismiss()
-                                            when (action) {
-                                                "Remove" -> {
-                                                    val newItems = items.toMutableList()
-                                                    newItems.removeAll { it.id == item.id }
-                                                    saveWidgetItems(newItems)
-                                                    context.sendBroadcast(Intent("WIDGET_ADDED_TO_GRID").apply {
-                                                        putExtra("PAGE_ID", pageId)
-                                                        putExtra("CONTAINER_ID", containerId)
-                                                        setPackage(context.packageName)
-                                                    })
-                                                }
-                                                "App Info" -> {
-                                                    try {
-                                                        val intent = Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
-                                                        intent.data = android.net.Uri.parse("package:${info.provider.packageName}")
-                                                        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                                        context.startActivity(intent)
-                                                    } catch (e: Exception) {}
-                                                }
+                                val menuItems = listOf(
+                                    SidebarActionMenuHelper.ActionMenuItem(
+                                        title = "App Info",
+                                        iconResId = android.R.drawable.ic_menu_info_details
+                                    ) {
+                                        try {
+                                            val intent = Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                                                data = android.net.Uri.parse("package:${info.provider.packageName}")
+                                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                                             }
-                                        }
+                                            context.startActivity(intent)
+                                        } catch (_: Exception) {}
+                                    },
+                                    SidebarActionMenuHelper.ActionMenuItem(
+                                        title = "Remove",
+                                        iconResId = android.R.drawable.ic_menu_delete
+                                    ) {
+                                        val newItems = items.toMutableList()
+                                        newItems.removeAll { it.id == item.id }
+                                        saveWidgetItems(newItems)
+                                        context.sendBroadcast(Intent("WIDGET_ADDED_TO_GRID").apply {
+                                            putExtra("PAGE_ID", pageId)
+                                            putExtra("CONTAINER_ID", containerId)
+                                            setPackage(context.packageName)
+                                        })
                                     }
-                                    popupLayout.addView(actionView)
-                                }
-                                
-                                popupLayout.measure(View.MeasureSpec.UNSPECIFIED, View.MeasureSpec.UNSPECIFIED)
-                                popupWindow = PopupWindow(
-                                    popupLayout,
-                                    (150 * context.resources.displayMetrics.density).toInt(),
-                                    LinearLayout.LayoutParams.WRAP_CONTENT,
-                                    true
-                                ).apply {
-                                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-                                        windowLayoutType = android.view.WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-                                    } else {
-                                        @Suppress("DEPRECATION")
-                                        windowLayoutType = android.view.WindowManager.LayoutParams.TYPE_PHONE
-                                    }
-                                    setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
-                                    isOutsideTouchable = true
-                                }
-                                val location = IntArray(2)
-                                hostView.getLocationOnScreen(location)
-                                val x = location[0]
-                                var y = location[1] - popupLayout.measuredHeight
-                                if (y < 0) y = location[1] + hostView.measuredHeight
-                                popupWindow?.showAtLocation(hostView, Gravity.NO_GRAVITY, x, y)
+                                )
+                                SidebarActionMenuHelper.show(anchorView = hostView, items = menuItems)
                                 true
                             }
                         }
