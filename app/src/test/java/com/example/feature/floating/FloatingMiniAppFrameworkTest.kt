@@ -292,4 +292,58 @@ class FloatingMiniAppFrameworkTest {
         assertEquals("test_notes", snapshot!!.appType)
         assertEquals(MiniAppState.ACTIVE, snapshot.state)
     }
+
+    @Test
+    fun testWindowGeometryMoveResizeMaximizeAndImeIndependence() {
+        val store = DurableMiniAppStore.getInstance(testContext)
+        val initialBounds = WindowBounds(100, 150, 400, 500)
+        val snapshot = MiniAppRecoverySnapshot(
+            instanceId = "geom_test_notes",
+            appType = "test_notes",
+            state = MiniAppState.ACTIVE,
+            windowBounds = initialBounds.copyBounds(),
+            buttonPosition = Pair(40, 200)
+        )
+        store.saveSnapshot(snapshot)
+
+        // 1. Move: updates x, y
+        val movedBounds = WindowBounds(180, 220, 400, 500)
+        store.updateWindowBounds("geom_test_notes", movedBounds)
+        val afterMove = store.loadSnapshot("geom_test_notes")!!
+        assertEquals(180, afterMove.windowBounds.x)
+        assertEquals(220, afterMove.windowBounds.y)
+        assertEquals(Pair(40, 200), afterMove.buttonPosition)
+
+        // 2. Resize: updates width, height
+        val resizedBounds = WindowBounds(180, 220, 480, 620)
+        store.updateWindowBounds("geom_test_notes", resizedBounds)
+        val afterResize = store.loadSnapshot("geom_test_notes")!!
+        assertEquals(480, afterResize.windowBounds.width)
+        assertEquals(620, afterResize.windowBounds.height)
+        assertEquals(Pair(40, 200), afterResize.buttonPosition)
+
+        // 3. Maximize: saves maximizeRestoreBounds
+        val restoreBounds = resizedBounds.copyBounds()
+        store.updateMaximizeRestoreBounds("geom_test_notes", restoreBounds)
+        val maximizedBounds = WindowBounds(12, 28, 760, 1400)
+        store.updateWindowBounds("geom_test_notes", maximizedBounds)
+        val afterMax = store.loadSnapshot("geom_test_notes")!!
+        assertEquals(maximizedBounds.width, afterMax.windowBounds.width)
+        assertEquals(restoreBounds.width, afterMax.maximizeRestoreBounds!!.width)
+
+        // 4. Restore: resets to restoreBounds
+        store.updateWindowBounds("geom_test_notes", afterMax.maximizeRestoreBounds!!)
+        store.updateMaximizeRestoreBounds("geom_test_notes", null)
+        val afterRestore = store.loadSnapshot("geom_test_notes")!!
+        assertEquals(480, afterRestore.windowBounds.width)
+        assertEquals(620, afterRestore.windowBounds.height)
+        assertNull(afterRestore.maximizeRestoreBounds)
+
+        // 5. Button position is completely independent
+        store.updateButtonPosition("geom_test_notes", 75, 800)
+        val afterBubbleMove = store.loadSnapshot("geom_test_notes")!!
+        assertEquals(Pair(75, 800), afterBubbleMove.buttonPosition)
+        assertEquals(480, afterBubbleMove.windowBounds.width)
+        assertEquals(620, afterBubbleMove.windowBounds.height)
+    }
 }

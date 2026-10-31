@@ -57,6 +57,7 @@ class FloatingMiniAppWindow(
     private var titleView: TextView? = null
     private var noteEditText: android.widget.EditText? = null
     private var currentNoteText: String = ""
+    private var maxRestoreButton: TextView? = null
 
     init {
         // Load existing maximize restore bounds if present
@@ -104,21 +105,25 @@ class FloatingMiniAppWindow(
         }
 
         // Embed Heavy content view or fallback
+        LogKeeper.log(context, "FloatingMiniAppWindow", "CONTENT_REQUEST id=$instanceId type=$appType")
         val heavyHost = HeavyFloatingHost.getInstance(context)
         val activeInstance = heavyHost.getActiveInstance(instanceId)
         val embeddedView = activeInstance?.createContentView(context)
         if (embeddedView != null) {
+            LogKeeper.log(context, "FloatingMiniAppWindow", "CONTENT_CREATED id=$instanceId mode=embedded_heavy")
+            LogKeeper.log(context, "FloatingMiniAppWindow", "SURFACE_ATTACHED id=$instanceId mode=embedded_heavy")
             contentContainer?.addView(embeddedView)
         } else {
             val savedSnapshot = durableStore.loadSnapshot(instanceId)
             currentNoteText = savedSnapshot?.payload?.get(TestNotesMiniAppInstance.KEY_TEXT)
                 ?: savedSnapshot?.payload?.get("note_content")
                 ?: TestNotesMiniAppInstance.DEFAULT_INSTRUCTIONAL_TEXT
+            LogKeeper.log(context, "FloatingMiniAppWindow", "CONTENT_CREATED id=$instanceId mode=in_process_fallback textLength=${currentNoteText.length}")
 
             val clientView = LinearLayout(context).apply {
                 orientation = LinearLayout.VERTICAL
                 setBackgroundColor(Color.parseColor("#181825"))
-                setPadding((16 * density).toInt(), (14 * density).toInt(), (16 * density).toInt(), (16 * density).toInt())
+                setPadding((16 * density).toInt(), (14 * density).toInt(), (16 * density).toInt(), (38 * density).toInt())
                 layoutParams = FrameLayout.LayoutParams(
                     FrameLayout.LayoutParams.MATCH_PARENT,
                     FrameLayout.LayoutParams.MATCH_PARENT
@@ -167,14 +172,17 @@ class FloatingMiniAppWindow(
             contentContainer?.addView(clientView)
         }
         mainLayout.addView(contentContainer)
-
         root.addView(mainLayout)
 
-        // 3. Bottom-Right Resize Handle
+        // 3. Bottom-Right Control Sticker (attached/overlapped on bottom-right of floating card)
+        val sticker = createBottomRightSticker(context)
+        root.addView(sticker)
+
+        // 4. Dedicated Corner Resize Handle
         val resizeHandle = createResizeHandle(context)
         root.addView(resizeHandle)
 
-        // 4. Attach IME GlobalLayoutListener
+        // 5. Attach IME GlobalLayoutListener
         setupImeObserver(root)
 
         return root
@@ -182,13 +190,13 @@ class FloatingMiniAppWindow(
 
     private fun createTopBar(context: Context): LinearLayout {
         val density = context.resources.displayMetrics.density
-        val topBarHeight = (44 * density).toInt()
+        val topBarHeight = (38 * density).toInt()
 
         val bar = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             setBackgroundColor(Color.parseColor("#2B2D42"))
-            setPadding((12 * density).toInt(), 0, (8 * density).toInt(), 0)
+            setPadding((12 * density).toInt(), 0, (12 * density).toInt(), 0)
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 topBarHeight
@@ -218,54 +226,36 @@ class FloatingMiniAppWindow(
         }
         bar.addView(titleView)
 
-        // Sleep / Minimize Button (_)
-        val sleepBtn = createHeaderButton(context, "—") {
-            FloatingMiniAppBridge.getInstance(context).sleepMiniApp(instanceId)
-        }
-        bar.addView(sleepBtn)
-
-        // Maximize / Restore Button (□)
-        val maxBtn = createHeaderButton(context, if (isMaximized) "❐" else "□") {
-            toggleMaximize()
-        }
-        bar.addView(maxBtn)
-
-        // Close Button (✕)
-        val closeBtn = createHeaderButton(context, "✕") {
-            FloatingMiniAppBridge.getInstance(context).closeMiniApp(instanceId, deleteDurable = true)
-        }
-        bar.addView(closeBtn)
-
         // Setup Top Bar Drag & Double-Tap Gestures
         setupTopBarGestures(bar, context)
 
         return bar
     }
 
-    private fun createHeaderButton(context: Context, label: String, onClick: () -> Unit): TextView {
-        val density = context.resources.displayMetrics.density
-        return TextView(context).apply {
-            text = label
-            setTextColor(Color.parseColor("#CDD6F4"))
-            textSize = 14f
-            gravity = Gravity.CENTER
-            setPadding((10 * density).toInt(), (6 * density).toInt(), (10 * density).toInt(), (6 * density).toInt())
-            setOnClickListener { onClick() }
-        }
-    }
-
     private fun setupTopBarGestures(topBar: View, context: Context) {
-        val gestureDetector = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
-            override fun onDoubleTap(e: MotionEvent): Boolean {
-                toggleMaximize()
-                return true
-            }
-        })
-
+        val touchSlop = android.view.ViewConfiguration.get(context).scaledTouchSlop
+        var isDragging = false
         var dragStartRawX = 0f
         var dragStartRawY = 0f
         var initialBoundsX = 0
         var initialBoundsY = 0
+
+        val gestureDetector = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
+            override fun onDoubleTap(e: MotionEvent): Boolean {
+                LogKeeper.log(context, "FloatingMiniAppWindow", "DOUBLE_TAP id=$instanceId wasMaximized=$isMaximized")
+                toggleMaximize()
+                return true
+            }
+
+            override fun onLongPress(e: MotionEvent) {
+                isDragging = true
+                LogKeeper.log(context, "FloatingMiniAppWindow", "MOVE_START id=$instanceId trigger=long_press initialBounds=($initialBoundsX,$initialBoundsY)")
+            }
+
+            override fun onDown(e: MotionEvent): Boolean {
+                return true
+            }
+        })
 
         topBar.setOnTouchListener { _, event ->
             gestureDetector.onTouchEvent(event)
@@ -276,34 +266,61 @@ class FloatingMiniAppWindow(
                     dragStartRawY = event.rawY
                     initialBoundsX = bounds.x
                     initialBoundsY = bounds.y
-                    manager?.bringToFront(windowId)
-                    true
-                }
+                    isDragging = false
+                    LogKeeper.log(context, "FloatingMiniAppWindow", "TOPBAR_DOWN id=$instanceId rawX=${event.rawX} rawY=${event.rawY} bounds=$bounds")
 
-                MotionEvent.ACTION_MOVE -> {
-                    val dx = (event.rawX - dragStartRawX).toInt()
-                    val dy = (event.rawY - dragStartRawY).toInt()
-
-                    val wm = manager ?: FloatingWindowManager.getInstance(context)
-                    val screenW = wm.screenWidth
-                    val screenH = wm.screenHeight
-
-                    val newX = (initialBoundsX + dx).coerceIn(0, max(0, screenW - bounds.width))
-                    val newY = (initialBoundsY + dy).coerceIn(0, max(0, screenH - bounds.height))
-
-                    if (newX != bounds.x || newY != bounds.y) {
-                        bounds.x = newX
-                        bounds.y = newY
-                        layoutParams.x = newX
-                        layoutParams.y = newY
-                        wm.updateBounds(windowId, bounds)
+                    // Set focus safely without tearing down overlay views
+                    manager?.setFocus(windowId)
+                    if (manager?.getTopVisibleWindow()?.windowId != windowId) {
+                        manager?.bringToFront(windowId)
                     }
                     true
                 }
 
-                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                    // Commit real window bounds exclusively
-                    durableStore.updateWindowBounds(instanceId, bounds)
+                MotionEvent.ACTION_MOVE -> {
+                    val dx = event.rawX - dragStartRawX
+                    val dy = event.rawY - dragStartRawY
+
+                    if (!isDragging && (abs(dx) > touchSlop || abs(dy) > touchSlop)) {
+                        isDragging = true
+                        LogKeeper.log(context, "FloatingMiniAppWindow", "MOVE_START id=$instanceId initialBounds=($initialBoundsX,$initialBoundsY)")
+                    }
+
+                    if (isDragging) {
+                        val wm = manager ?: FloatingWindowManager.getInstance(context)
+                        val screenW = wm.screenWidth
+                        val screenH = wm.screenHeight
+
+                        val newX = (initialBoundsX + dx.toInt()).coerceIn(0, max(0, screenW - bounds.width))
+                        val newY = (initialBoundsY + dy.toInt()).coerceIn(0, max(0, screenH - bounds.height))
+
+                        if (newX != bounds.x || newY != bounds.y) {
+                            bounds.x = newX
+                            bounds.y = newY
+                            layoutParams.x = newX
+                            layoutParams.y = newY
+                            wm.updateBounds(windowId, bounds)
+                        }
+                    }
+                    true
+                }
+
+                MotionEvent.ACTION_UP -> {
+                    if (isDragging) {
+                        isDragging = false
+                        LogKeeper.log(context, "FloatingMiniAppWindow", "MOVE_END id=$instanceId finalBounds=$bounds")
+                        // Commit real window bounds exclusively
+                        durableStore.updateWindowBounds(instanceId, bounds)
+                        LogKeeper.log(context, "FloatingMiniAppWindow", "WINDOW_BOUNDS_PERSISTED id=$instanceId bounds=$bounds source=drag")
+                    }
+                    true
+                }
+
+                MotionEvent.ACTION_CANCEL -> {
+                    if (isDragging) {
+                        isDragging = false
+                        LogKeeper.log(context, "FloatingMiniAppWindow", "MOVE_CANCEL id=$instanceId bounds=$bounds")
+                    }
                     true
                 }
 
@@ -312,9 +329,95 @@ class FloatingMiniAppWindow(
         }
     }
 
+    private fun createBottomRightSticker(context: Context): View {
+        val density = context.resources.displayMetrics.density
+        val sticker = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            val bg = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadii = floatArrayOf(
+                    10 * density, 10 * density, // top-left
+                    4 * density, 4 * density,   // top-right
+                    4 * density, 4 * density,   // bottom-right
+                    4 * density, 4 * density    // bottom-left
+                )
+                setColor(Color.parseColor("#252639"))
+                setStroke((1 * density).toInt(), Color.parseColor("#45475A"))
+            }
+            background = bg
+            elevation = 6 * density
+            setPadding((4 * density).toInt(), (2 * density).toInt(), (4 * density).toInt(), (2 * density).toInt())
+            layoutParams = FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.WRAP_CONTENT,
+                (32 * density).toInt(),
+                Gravity.BOTTOM or Gravity.END
+            ).apply {
+                // Positioned adjacent to the corner resize handle
+                marginEnd = (28 * density).toInt()
+                bottomMargin = (4 * density).toInt()
+            }
+        }
+
+        // 1. Close Button (✕)
+        val closeBtn = createStickerButton(context, "✕", Color.parseColor("#F38BA8")) {
+            LogKeeper.log(context, "FloatingMiniAppWindow", "CONTROL_CLOSE id=$instanceId")
+            FloatingMiniAppBridge.getInstance(context).closeMiniApp(instanceId, deleteDurable = true)
+        }
+        sticker.addView(closeBtn)
+
+        // Divider
+        sticker.addView(createStickerDivider(context))
+
+        // 2. Sleep / Minimize Button (—)
+        val sleepBtn = createStickerButton(context, "—", Color.parseColor("#CDD6F4")) {
+            LogKeeper.log(context, "FloatingMiniAppWindow", "CONTROL_SLEEP id=$instanceId")
+            FloatingMiniAppBridge.getInstance(context).sleepMiniApp(instanceId)
+        }
+        sticker.addView(sleepBtn)
+
+        // Divider
+        sticker.addView(createStickerDivider(context))
+
+        // 3. Maximize / Restore Button (□ / ❐)
+        val maxBtn = createStickerButton(context, if (isMaximized) "❐" else "□", Color.parseColor("#89B4FA")) {
+            LogKeeper.log(context, "FloatingMiniAppWindow", "CONTROL_${if (isMaximized) "RESTORE" else "MAXIMIZE"} id=$instanceId")
+            toggleMaximize()
+        }
+        maxRestoreButton = maxBtn
+        sticker.addView(maxBtn)
+
+        return sticker
+    }
+
+    private fun createStickerButton(context: Context, label: String, textColor: Int, onClick: () -> Unit): TextView {
+        val density = context.resources.displayMetrics.density
+        return TextView(context).apply {
+            text = label
+            setTextColor(textColor)
+            textSize = 13f
+            typeface = Typeface.DEFAULT_BOLD
+            gravity = Gravity.CENTER
+            isClickable = true
+            isFocusable = false
+            setPadding((8 * density).toInt(), (4 * density).toInt(), (8 * density).toInt(), (4 * density).toInt())
+            setOnClickListener { onClick() }
+        }
+    }
+
+    private fun createStickerDivider(context: Context): View {
+        val density = context.resources.displayMetrics.density
+        return View(context).apply {
+            setBackgroundColor(Color.parseColor("#45475A"))
+            layoutParams = LinearLayout.LayoutParams((1 * density).toInt(), (14 * density).toInt()).apply {
+                gravity = Gravity.CENTER_VERTICAL
+            }
+        }
+    }
+
     private fun createResizeHandle(context: Context): View {
         val density = context.resources.displayMetrics.density
-        val handleSizePx = (36 * density).toInt()
+        val handleSizePx = (26 * density).toInt()
 
         val handle = FrameLayout(context).apply {
             layoutParams = FrameLayout.LayoutParams(
@@ -324,19 +427,15 @@ class FloatingMiniAppWindow(
             )
 
             // Visual corner indicator
-            val indicator = View(context).apply {
-                val bg = GradientDrawable().apply {
-                    shape = GradientDrawable.OVAL
-                    setColor(Color.parseColor("#6C7086"))
-                }
-                background = bg
+            val indicator = TextView(context).apply {
+                text = "↘"
+                textSize = 12f
+                setTextColor(Color.parseColor("#6C7086"))
+                gravity = Gravity.CENTER
                 layoutParams = FrameLayout.LayoutParams(
-                    (10 * density).toInt(),
-                    (10 * density).toInt(),
-                    Gravity.BOTTOM or Gravity.END
-                ).apply {
-                    setMargins(0, 0, (6 * density).toInt(), (6 * density).toInt())
-                }
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.MATCH_PARENT
+                )
             }
             addView(indicator)
         }
@@ -353,7 +452,8 @@ class FloatingMiniAppWindow(
                     resizeStartRawY = event.rawY
                     startWidth = bounds.width
                     startHeight = bounds.height
-                    manager?.bringToFront(windowId)
+                    LogKeeper.log(context, "FloatingMiniAppWindow", "RESIZE_START id=$instanceId initialSize=($startWidth,$startHeight)")
+                    manager?.setFocus(windowId)
                     true
                 }
 
@@ -383,8 +483,15 @@ class FloatingMiniAppWindow(
                     true
                 }
 
-                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                MotionEvent.ACTION_UP -> {
+                    LogKeeper.log(context, "FloatingMiniAppWindow", "RESIZE_END id=$instanceId finalSize=(${bounds.width},${bounds.height})")
                     durableStore.updateWindowBounds(instanceId, bounds)
+                    LogKeeper.log(context, "FloatingMiniAppWindow", "WINDOW_BOUNDS_PERSISTED id=$instanceId bounds=$bounds source=resize")
+                    true
+                }
+
+                MotionEvent.ACTION_CANCEL -> {
+                    LogKeeper.log(context, "FloatingMiniAppWindow", "RESIZE_CANCEL id=$instanceId size=(${bounds.width},${bounds.height})")
                     true
                 }
 
@@ -413,10 +520,13 @@ class FloatingMiniAppWindow(
             bounds = target.copyBounds()
             isMaximized = false
             durableStore.updateMaximizeRestoreBounds(instanceId, null)
+            LogKeeper.log(context, "FloatingMiniAppWindow", "RESTORE id=$instanceId target=$target")
+            LogKeeper.log(context, "FloatingMiniAppWindow", "WINDOW_BOUNDS_PERSISTED id=$instanceId bounds=$bounds source=restore")
         } else {
             // Save restore bounds before maximizing
             maximizeRestoreBounds = bounds.copyBounds()
             durableStore.updateMaximizeRestoreBounds(instanceId, maximizeRestoreBounds)
+            LogKeeper.log(context, "FloatingMiniAppWindow", "MAXIMIZE_RESTORE_BOUNDS id=$instanceId restoreBounds=$maximizeRestoreBounds")
 
             val marginH = (12 * density).toInt()
             val marginV = (28 * density).toInt()
@@ -425,7 +535,11 @@ class FloatingMiniAppWindow(
             bounds.width = max(300, wm.screenWidth - (marginH * 2))
             bounds.height = max(400, wm.screenHeight - (marginV * 2))
             isMaximized = true
+            LogKeeper.log(context, "FloatingMiniAppWindow", "MAXIMIZE id=$instanceId bounds=$bounds")
+            LogKeeper.log(context, "FloatingMiniAppWindow", "WINDOW_BOUNDS_PERSISTED id=$instanceId bounds=$bounds source=maximize")
         }
+
+        maxRestoreButton?.text = if (isMaximized) "❐" else "□"
 
         layoutParams.x = bounds.x
         layoutParams.y = bounds.y
@@ -449,21 +563,27 @@ class FloatingMiniAppWindow(
             val isKeyboardOpen = keypadHeight > screenH * 0.15
 
             if (isKeyboardOpen) {
-                val windowBottom = bounds.y + bounds.height
+                val windowBottom = layoutParams.y + layoutParams.height
                 if (windowBottom > r.bottom) {
                     val shift = (windowBottom - r.bottom) + (16 * context.resources.displayMetrics.density).toInt()
-                    val shiftedY = max(0, bounds.y - shift)
+                    val shiftedY = max(0, layoutParams.y - shift)
 
                     if (layoutParams.y != shiftedY) {
+                        LogKeeper.log(context, "FloatingMiniAppWindow", "IME_VISIBLE keypadHeight=$keypadHeight")
+                        LogKeeper.log(context, "FloatingMiniAppWindow", "IME_TEMP_SHIFT id=$instanceId shift=$shift newY=$shiftedY previousY=${layoutParams.y}")
                         layoutParams.y = shiftedY
                         isImeShifted = true
+                        LogKeeper.log(context, "FloatingMiniAppWindow", "IME_SHIFT id=$instanceId y=$shiftedY")
                         applyLayoutUpdate()
                     }
                 }
             } else if (isImeShifted) {
-                // Restore exact persistent bounds.y on keyboard dismiss
+                // Restore exact persistent bounds.y on keyboard dismiss (remains maximized if maximized)
+                LogKeeper.log(context, "FloatingMiniAppWindow", "IME_HIDDEN")
+                LogKeeper.log(context, "FloatingMiniAppWindow", "IME_TEMP_RESTORE id=$instanceId restoredY=${bounds.y}")
                 layoutParams.y = bounds.y
                 isImeShifted = false
+                LogKeeper.log(context, "FloatingMiniAppWindow", "IME_RESTORE id=$instanceId y=${bounds.y}")
                 applyLayoutUpdate()
             }
         }
@@ -569,8 +689,10 @@ class FloatingMiniAppWindow(
         }
         noteEditText = null
 
+        LogKeeper.log(context, "FloatingMiniAppWindow", "SURFACE_DETACHED id=$instanceId")
         contentContainer?.removeAllViews()
         contentContainer = null
+        LogKeeper.log(context, "FloatingMiniAppWindow", "CONTENT_RELEASED id=$instanceId")
     }
 
     companion object {

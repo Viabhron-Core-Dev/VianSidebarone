@@ -62,7 +62,7 @@ class FloatingWindowManager private constructor(context: Context) {
 
         window.notifyStateChanged(WindowState.CREATED, WindowState.CREATED)
         window.onRegister(this)
-        log("Window registered: ${window.windowId}, total=${windows.size}")
+        log("WINDOW_REGISTER id=${window.windowId} type=${window.windowType} bounds=${window.bounds} zOrder=${window.zOrder} total=${windows.size}")
         return true
     }
 
@@ -100,7 +100,7 @@ class FloatingWindowManager private constructor(context: Context) {
         window.manager = null
         windows.remove(windowId)
 
-        log("Window unregistered: $windowId, remaining=${windows.size}")
+        log("WINDOW_UNREGISTER id=$windowId remaining=${windows.size}")
         return true
     }
 
@@ -162,12 +162,18 @@ class FloatingWindowManager private constructor(context: Context) {
     @Synchronized
     fun bringToFront(windowId: String): Boolean {
         val window = windows[windowId] ?: return false
+        val wasAlreadyTop = zOrderedWindowIds.lastOrNull() == windowId
 
         val toElevate = LinkedHashSet<String>()
         collectDescendants(windowId, toElevate)
         toElevate.add(windowId)
 
+        var orderChanged = false
+        val lastIdx = zOrderedWindowIds.size - 1
         for (id in toElevate) {
+            if (zOrderedWindowIds.indexOf(id) != lastIdx) {
+                orderChanged = true
+            }
             zOrderedWindowIds.remove(id)
         }
         zOrderedWindowIds.add(windowId)
@@ -179,10 +185,17 @@ class FloatingWindowManager private constructor(context: Context) {
 
         recomputeZOrders()
 
-        for (id in toElevate) {
-            val w = windows[id] ?: continue
-            if (w.isAttached && w.isVisible) {
-                refreshOverlayZOrder(w)
+        val refreshPerformed = orderChanged && !wasAlreadyTop
+        log("WINDOW_BRING_TO_FRONT id=$windowId alreadyTop=$wasAlreadyTop orderChanged=$orderChanged zOrder=${window.zOrder} refreshPerformed=$refreshPerformed")
+
+        // Only refresh WindowManager view order if order actually changed and wasn't already top!
+        // Never remove and re-add if already at the top, which destroys active touch streams and flickers.
+        if (refreshPerformed) {
+            for (id in toElevate) {
+                val w = windows[id] ?: continue
+                if (w.isAttached && w.isVisible) {
+                    refreshOverlayZOrder(w)
+                }
             }
         }
 
@@ -211,8 +224,14 @@ class FloatingWindowManager private constructor(context: Context) {
         focusedWindowId = windowId
         val newFocus = windowId?.let { windows[it] }
 
-        oldFocus?.notifyFocusChanged(false)
-        newFocus?.notifyFocusChanged(true)
+        if (oldFocus != null) {
+            log("WINDOW_FOCUS id=${oldFocus.windowId} focused=false")
+            oldFocus.notifyFocusChanged(false)
+        }
+        if (newFocus != null) {
+            log("WINDOW_FOCUS id=${newFocus.windowId} focused=true")
+            newFocus.notifyFocusChanged(true)
+        }
         return true
     }
 
@@ -269,7 +288,7 @@ class FloatingWindowManager private constructor(context: Context) {
         if (window.isAttached) return true
 
         if (!canDrawOverlays()) {
-            log("Cannot attach overlay: permission denied")
+            logError("WINDOW_ATTACH_FAILURE id=$windowId: overlay permission denied")
             return false
         }
 
@@ -279,9 +298,10 @@ class FloatingWindowManager private constructor(context: Context) {
             val oldState = window.state
             window.notifyStateChanged(oldState, WindowState.ATTACHED)
             window.onAttach(windowManager)
+            log("WINDOW_ATTACH id=$windowId bounds=${window.bounds} type=${window.windowType}")
             true
         } catch (e: Exception) {
-            logError("Failed to attach overlay for $windowId: ${e.message}", e)
+            logError("WINDOW_ATTACH_FAILURE id=$windowId: ${e.message}", e)
             false
         }
     }
@@ -303,9 +323,10 @@ class FloatingWindowManager private constructor(context: Context) {
             if (focusedWindowId == windowId) {
                 setFocus(getTopVisibleWindow()?.windowId)
             }
+            log("WINDOW_DETACH id=$windowId")
             true
         } catch (e: Exception) {
-            log("Failed to detach overlay for $windowId: ${e.message}")
+            logError("WINDOW_DETACH_FAILURE id=$windowId: ${e.message}", e)
             false
         }
     }

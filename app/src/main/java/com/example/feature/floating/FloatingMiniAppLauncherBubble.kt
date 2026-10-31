@@ -113,8 +113,10 @@ class FloatingMiniAppLauncherBubble(
                     if (isDragging) {
                         // Persist ONLY buttonPosition in Main's authoritative store
                         DurableMiniAppStore.getInstance(context).updateButtonPosition(instanceId, bounds.x, bounds.y)
+                        com.example.core.LogKeeper.log(context, "FloatingMiniAppLauncherBubble", "LAUNCHER_POSITION_CHANGED instance=$instanceId buttonPosition=(${bounds.x},${bounds.y})")
                     } else if (event.actionMasked == MotionEvent.ACTION_UP) {
                         // Tapped: wake mini-app
+                        com.example.core.LogKeeper.log(context, "FloatingMiniAppLauncherBubble", "LAUNCHER_TAPPED instance=$instanceId")
                         onBubbleTapped(instanceId)
                     }
                     isDragging = false

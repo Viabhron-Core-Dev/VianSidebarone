@@ -104,7 +104,7 @@ class HeavyProcessConnectionManager internal constructor(
 
     private val deathRecipient = IBinder.DeathRecipient {
         synchronized(lock) {
-            safeLog("HeavyProcessConnectionManager", "Heavy process binder died (DeathRecipient triggered)")
+            safeLog("HeavyIPC", "BINDER_DIED DeathRecipient triggered: Binder connection to :heavy terminated")
             context?.let { ctx ->
                 LogKeeper.logLifecycle(ctx, "HeavyProcess", "HEAVY_PROCESS_DIED", "DeathRecipient triggered: Binder connection to :heavy terminated")
             }
@@ -127,6 +127,7 @@ class HeavyProcessConnectionManager internal constructor(
             synchronized(lock) {
                 if (service == null) {
                     state = ConnectionState.DISCONNECTED
+                    safeLog("HeavyIPC", "DISCONNECTED service_binder_null")
                     return
                 }
                 try {
@@ -137,7 +138,7 @@ class HeavyProcessConnectionManager internal constructor(
                     remoteProxy = proxy
                     state = ConnectionState.CONNECTED
                     isServiceBound = true
-                    safeLog("HeavyProcessConnectionManager", "Heavy process bound successfully (CONNECTED)")
+                    safeLog("HeavyIPC", "CONNECTED component=${name?.shortClassName} proxyReady=true activeConsumers=${activeConsumers.size}")
 
                     // Re-sync cached snapshot if available
                     latestSnapshot?.let { snapshot ->
@@ -149,6 +150,7 @@ class HeavyProcessConnectionManager internal constructor(
                 } catch (e: Throwable) {
                     safeLogCrash("HeavyProcessConnectionManager", e)
                     state = ConnectionState.DISCONNECTED
+                    safeLog("HeavyIPC", "IPC_FAILURE service connection setup failed: ${e.message}")
                     return
                 }
             }
@@ -164,7 +166,7 @@ class HeavyProcessConnectionManager internal constructor(
 
         override fun onServiceDisconnected(name: ComponentName?) {
             synchronized(lock) {
-                safeLog("HeavyProcessConnectionManager", "Heavy process unexpectedly disconnected")
+                safeLog("HeavyIPC", "DISCONNECTED unexpected=true component=${name?.shortClassName}")
                 state = ConnectionState.DISCONNECTED
                 remoteProxy = null
                 remoteBinder = null
@@ -192,20 +194,28 @@ class HeavyProcessConnectionManager internal constructor(
     /**
      * Binds asynchronously to HeavyFloatingHostService running in :heavy.
      */
-    fun connect(autoCreate: Boolean = true): Boolean {
+    fun connect(autoCreate: Boolean = true, reason: String = "default"): Boolean {
+        safeLog("HeavyIPC", "CONNECT_REQUEST autoCreate=$autoCreate currentState=$state reason=$reason")
         val ctx = context ?: run {
             state = ConnectionState.DISCONNECTED
+            safeLog("HeavyIPC", "IPC_FAILURE connect failed: context is null")
             return false
         }
         val pkgName = try { ctx.packageName } catch (_: Exception) { null }
         if (pkgName.isNullOrBlank()) {
-            safeLog("HeavyProcessConnectionManager", "Connection aborted: Context package name is null or blank")
+            safeLog("HeavyIPC", "IPC_FAILURE connect aborted: Context package name is null or blank")
             state = ConnectionState.DISCONNECTED
             return false
         }
         synchronized(lock) {
-            if (state == ConnectionState.CONNECTED) return true
-            if (state == ConnectionState.CONNECTING) return true
+            if (state == ConnectionState.CONNECTED) {
+                safeLog("HeavyIPC", "CONNECT_REQUEST already connected")
+                return true
+            }
+            if (state == ConnectionState.CONNECTING) {
+                safeLog("HeavyIPC", "CONNECT_REQUEST already connecting")
+                return true
+            }
 
             state = ConnectionState.CONNECTING
             return try {
@@ -214,14 +224,15 @@ class HeavyProcessConnectionManager internal constructor(
                     "com.example.feature.floating.HeavyFloatingHostService"
                 )
                 val flags = if (autoCreate) Context.BIND_AUTO_CREATE else 0
+                safeLog("HeavyIPC", "BIND_REQUEST pkg=$pkgName flags=$flags")
                 val bound = ctx.bindService(intent, serviceConnection, flags)
                 if (!bound) {
                     state = ConnectionState.DISCONNECTED
-                    safeLog("HeavyProcessConnectionManager", "bindService returned false (Heavy unavailable)")
+                    safeLog("HeavyIPC", "IPC_FAILURE bindService returned false (Heavy unavailable)")
                 }
                 bound
             } catch (e: Throwable) {
-                safeLog("HeavyProcessConnectionManager", "bindService failed: ${e.message}")
+                safeLog("HeavyIPC", "IPC_FAILURE bindService exception: ${e.message}")
                 state = ConnectionState.DISCONNECTED
                 false
             }
@@ -231,9 +242,13 @@ class HeavyProcessConnectionManager internal constructor(
     /**
      * Unbinds from Heavy process cleanly.
      */
-    fun disconnect() {
+    fun disconnect(reason: String = "requested") {
+        safeLog("HeavyIPC", "DISCONNECT_REQUEST reason=$reason activeConsumers=${activeConsumers.size}")
         synchronized(lock) {
-            if (!isServiceBound && state == ConnectionState.DISCONNECTED) return
+            if (!isServiceBound && state == ConnectionState.DISCONNECTED) {
+                safeLog("HeavyIPC", "DISCONNECTED already disconnected")
+                return
+            }
 
             try {
                 remoteBinder?.unlinkToDeath(deathRecipient, 0)
@@ -244,7 +259,7 @@ class HeavyProcessConnectionManager internal constructor(
                     context?.unbindService(serviceConnection)
                 }
             } catch (e: Throwable) {
-                safeLog("HeavyProcessConnectionManager", "Error unbinding service: ${e.message}")
+                safeLog("HeavyIPC", "IPC_FAILURE error unbinding service: ${e.message}")
             }
 
             remoteProxy = null
@@ -252,7 +267,7 @@ class HeavyProcessConnectionManager internal constructor(
             isServiceBound = false
             pendingCommands.clear()
             state = ConnectionState.DISCONNECTED
-            safeLog("HeavyProcessConnectionManager", "Disconnected from Heavy process")
+            safeLog("HeavyIPC", "DISCONNECTED remainingConsumers=${activeConsumers.size} reason=$reason")
         }
 
         for (listener in listeners) {
@@ -268,24 +283,27 @@ class HeavyProcessConnectionManager internal constructor(
      * Registers an active consumer demanding the Heavy process.
      * Triggers connect() on demand when the first consumer is acquired.
      */
-    fun acquireConsumer(consumerTag: String) {
-        synchronized(lock) {
+    fun acquireConsumer(consumerTag: String, reason: String = "demand") {
+        val count = synchronized(lock) {
             activeConsumers.add(consumerTag)
+            activeConsumers.size
         }
-        connect(autoCreate = true)
+        safeLog("HeavyIPC", "CONSUMER_ACQUIRE id=$consumerTag count=$count reason=$reason")
+        connect(autoCreate = true, reason = "acquireConsumer:$consumerTag")
     }
 
     /**
      * Unregisters an active consumer.
      * When no active consumers remain, automatically unbinds and disconnects.
      */
-    fun releaseConsumer(consumerTag: String) {
+    fun releaseConsumer(consumerTag: String, reason: String = "release") {
         val remaining = synchronized(lock) {
             activeConsumers.remove(consumerTag)
             activeConsumers.size
         }
+        safeLog("HeavyIPC", "CONSUMER_RELEASE id=$consumerTag count=$remaining reason=$reason")
         if (remaining == 0) {
-            disconnect()
+            disconnect(reason = "no_consumers_left")
         }
     }
 
@@ -295,8 +313,8 @@ class HeavyProcessConnectionManager internal constructor(
      * Forces a clean disconnect and reconnect sequence.
      */
     fun reconnect(): Boolean {
-        disconnect()
-        return connect(autoCreate = true)
+        disconnect(reason = "reconnect")
+        return connect(autoCreate = true, reason = "reconnect")
     }
 
     /**
@@ -311,8 +329,9 @@ class HeavyProcessConnectionManager internal constructor(
                     if (pendingCommands.size < 20) {
                         pendingCommands.offer(command)
                     }
-                    connect(autoCreate = true)
+                    connect(autoCreate = true, reason = "sendCommand:${command.type}")
                 }
+                safeLog("HeavyIPC", "IPC_FAILURE cmdId=${command.commandId} type=${command.type} target=${command.targetId} error=Heavy process is not connected (state=$state)")
                 return IpcResult.error(
                     IpcErrorCode.HEAVY_UNAVAILABLE,
                     "Heavy process is not connected (state=$state)"
@@ -322,6 +341,7 @@ class HeavyProcessConnectionManager internal constructor(
         }
 
         if (proxy == null) {
+            safeLog("HeavyIPC", "IPC_FAILURE cmdId=${command.commandId} type=${command.type} target=${command.targetId} error=Remote proxy is null")
             return IpcResult.error(IpcErrorCode.HEAVY_UNAVAILABLE, "Remote proxy is null")
         }
 
@@ -331,9 +351,13 @@ class HeavyProcessConnectionManager internal constructor(
             if (result.errorCode == IpcErrorCode.DEAD_BINDER) {
                 handleDeadBinder()
             }
+            if (!result.success) {
+                safeLog("HeavyIPC", "IPC_FAILURE cmdId=${command.commandId} type=${command.type} target=${command.targetId} error=${result.message}")
+            }
             result
         } catch (e: Throwable) {
             safeLogCrash("HeavyProcessConnectionManager", e)
+            safeLog("HeavyIPC", "IPC_FAILURE cmdId=${command.commandId} type=${command.type} target=${command.targetId} error=${e.message}")
             IpcResult.error(IpcErrorCode.UNKNOWN_ERROR, e.message ?: "sendCommand failed")
         }
     }

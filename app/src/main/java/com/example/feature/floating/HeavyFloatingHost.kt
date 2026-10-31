@@ -59,6 +59,7 @@ class HeavyFloatingHost private constructor(private val context: Context) {
         initialBounds: WindowBounds? = null,
         initialPayload: Map<String, String> = emptyMap()
     ): MiniAppInstance? {
+        log("INSTANCE_CREATE_REQUEST id=$instanceId type=$appType initialPayloadKeys=${initialPayload.keys}")
         synchronized(lock) {
             val existing = activeInstances[instanceId]
             if (existing != null) {
@@ -69,6 +70,7 @@ class HeavyFloatingHost private constructor(private val context: Context) {
                     existing.onStart()
                     existing.onResume()
                 }
+                log("INSTANCE_ACTIVE id=$instanceId type=$appType resumedExisting=true state=${existing.lifecycleState}")
                 return existing
             }
 
@@ -77,6 +79,7 @@ class HeavyFloatingHost private constructor(private val context: Context) {
 
             if (instance != null) {
                 try {
+                    log("INSTANCE_CREATED id=$instanceId type=$appType factory=${factory.javaClass.simpleName}")
                     val snapshot = MiniAppRecoverySnapshot(
                         instanceId = instanceId,
                         appType = appType,
@@ -88,13 +91,13 @@ class HeavyFloatingHost private constructor(private val context: Context) {
                     instance.onStart()
                     instance.onResume()
                     activeInstances[instanceId] = instance
-                    log("Started mini-app instance $instanceId ($appType)")
+                    log("INSTANCE_ACTIVE id=$instanceId type=$appType bounds=${snapshot.windowBounds} activeTotal=${activeInstances.size}")
                 } catch (e: Throwable) {
-                    logCrash("startInstance failed", e)
+                    logCrash("INSTANCE_CREATE_FAILURE id=$instanceId type=$appType error=${e.message}", e)
                     return null
                 }
             } else {
-                log("No factory could create mini-app type $appType")
+                log("INSTANCE_CREATE_FAILURE id=$instanceId type=$appType reason=No factory registered")
             }
 
             return instance
@@ -106,8 +109,12 @@ class HeavyFloatingHost private constructor(private val context: Context) {
      * destroys the in-memory instance, and returns the payload to Main for durable storage.
      */
     fun prepareSleep(instanceId: String, additionalPayload: Map<String, String> = emptyMap()): Map<String, String> {
+        log("INSTANCE_RELEASE_REQUEST id=$instanceId reason=sleep additionalKeys=${additionalPayload.keys}")
         synchronized(lock) {
-            val instance = activeInstances.remove(instanceId) ?: return emptyMap()
+            val instance = activeInstances.remove(instanceId) ?: run {
+                log("INSTANCE_RELEASED id=$instanceId reason=sleep foundInMemory=false")
+                return emptyMap()
+            }
             return try {
                 if (additionalPayload.isNotEmpty()) {
                     instance.restoreFromSnapshot(
@@ -125,9 +132,11 @@ class HeavyFloatingHost private constructor(private val context: Context) {
                     instance.onStop()
                 }
                 val payload = instance.prepareForSleep()
+                val textLen = payload["text"]?.length ?: 0
+                log("STATE_SAVED id=$instanceId reason=sleep keys=${payload.keys} textLength=$textLen")
                 instance.releaseRuntime()
                 instance.onDestroy()
-                log("Slept mini-app instance $instanceId, returned ${payload.size} payload keys")
+                log("INSTANCE_RELEASED id=$instanceId reason=sleep remainingActive=${activeInstances.size}")
                 payload
             } catch (e: Throwable) {
                 logCrash("prepareSleep failed for $instanceId", e)
@@ -144,7 +153,10 @@ class HeavyFloatingHost private constructor(private val context: Context) {
             val instance = activeInstances[instanceId] ?: return emptyMap()
             return try {
                 instance.onPause()
-                instance.onSaveState()
+                val state = instance.onSaveState()
+                val textLen = state["text"]?.length ?: 0
+                log("STATE_SAVED id=$instanceId reason=pause keys=${state.keys} textLength=$textLen")
+                state
             } catch (e: Throwable) {
                 logCrash("pauseInstance failed", e)
                 emptyMap()
@@ -156,17 +168,23 @@ class HeavyFloatingHost private constructor(private val context: Context) {
      * Stops an active instance, gathers its state, and releases runtime.
      */
     fun stopInstance(instanceId: String): Map<String, String> {
+        log("INSTANCE_RELEASE_REQUEST id=$instanceId reason=stop")
         synchronized(lock) {
-            val instance = activeInstances.remove(instanceId) ?: return emptyMap()
+            val instance = activeInstances.remove(instanceId) ?: run {
+                log("INSTANCE_CLOSED id=$instanceId foundInMemory=false")
+                return emptyMap()
+            }
             return try {
                 if (instance.lifecycleState == MiniAppLifecycleState.RESUMED) {
                     instance.onPause()
                 }
                 instance.onStop()
                 val payload = instance.onSaveState()
+                val textLen = payload["text"]?.length ?: 0
+                log("STATE_SAVED id=$instanceId reason=stop keys=${payload.keys} textLength=$textLen")
                 instance.releaseRuntime()
                 instance.onDestroy()
-                log("Stopped and destroyed runtime for $instanceId")
+                log("INSTANCE_CLOSED id=$instanceId remainingActive=${activeInstances.size}")
                 payload
             } catch (e: Throwable) {
                 logCrash("stopInstance failed", e)
@@ -179,6 +197,7 @@ class HeavyFloatingHost private constructor(private val context: Context) {
      * Destroys an active instance and releases all associated memory.
      */
     fun destroyInstance(instanceId: String) {
+        log("INSTANCE_RELEASE_REQUEST id=$instanceId reason=destroy")
         synchronized(lock) {
             val instance = activeInstances.remove(instanceId)
             if (instance != null) {
@@ -195,7 +214,7 @@ class HeavyFloatingHost private constructor(private val context: Context) {
                     logCrash("destroyInstance failed", e)
                 }
             }
-            log("Destroyed mini-app instance $instanceId")
+            log("INSTANCE_CLOSED id=$instanceId remainingActive=${activeInstances.size}")
         }
     }
 

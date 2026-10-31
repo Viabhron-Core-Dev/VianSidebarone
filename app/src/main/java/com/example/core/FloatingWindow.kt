@@ -141,7 +141,10 @@ open class FloatingWindow(
             val container = object : FrameLayout(context.applicationContext) {
                 override fun onInterceptTouchEvent(ev: MotionEvent): Boolean {
                     if (!isFocused && ev.action == MotionEvent.ACTION_DOWN) {
-                        manager?.bringToFront(this@FloatingWindow.windowId)
+                        manager?.setFocus(this@FloatingWindow.windowId)
+                        if (manager?.getTopVisibleWindow()?.windowId != this@FloatingWindow.windowId) {
+                            manager?.bringToFront(this@FloatingWindow.windowId)
+                        }
                     }
                     return super.onInterceptTouchEvent(ev)
                 }

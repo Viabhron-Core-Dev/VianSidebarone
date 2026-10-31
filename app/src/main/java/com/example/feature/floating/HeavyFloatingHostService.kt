@@ -182,18 +182,25 @@ class HeavyFloatingHostService : Service() {
         val activeModules = com.example.feature.heavy.module.HeavyModuleManager.getInstance(this).getActiveSessionCount()
         val isCallRecording = HeavyProcessHost.getInstance(this).getCallHostExtension().isRecordingActive()
         val activePages = com.example.feature.heavy.page.HeavyPageHostManager.getInstance(this).getActivePageCount()
+        val willStop = (activeFloating == 0 && activeModules == 0 && !isCallRecording && activePages == 0)
 
-        if (activeFloating == 0 && activeModules == 0 && !isCallRecording && activePages == 0) {
-            LogKeeper.log(this, "HeavyFloatingHostService", "No active mini-apps ($activeFloating), modules ($activeModules), call recordings ($isCallRecording), or heavy pages ($activePages); stopping Heavy host")
+        LogKeeper.log(
+            this,
+            "HeavyFloatingHostService",
+            "HEAVY_IDLE_CHECK activeMiniApps=$activeFloating activeHeavyPages=$activePages moduleSessions=$activeModules callRecording=$isCallRecording willStop=$willStop reason=${if (willStop) "all_workloads_idle" else "workloads_active"}"
+        )
+
+        if (willStop) {
+            LogKeeper.log(this, "HeavyFloatingHostService", "HEAVY_STOP_REQUEST reason=all_workloads_idle stopping Heavy host")
             stopSelf()
         }
     }
 
     override fun onDestroy() {
         super.onDestroy()
+        LogKeeper.log(this, "HeavyFloatingHostService", "HEAVY_SERVICE_DESTROY timestamp=${System.currentTimeMillis()}")
         com.example.feature.heavy.module.HeavyModuleManager.getInstance(this).setIdleListener(null)
         com.example.feature.heavy.page.HeavyPageHostManager.getInstance(this).unmountAll()
-        LogKeeper.log(this, "HeavyFloatingHostService", "Heavy process floating service destroyed")
     }
 
     override fun onBind(intent: Intent?): IBinder {
