@@ -346,3 +346,26 @@ Capped at 500 lines per file.
 * How it was verified: local build only (`gradle :app:testDebugUnitTest` passed all 313 unit tests; `compile_applet` passed cleanly).
 * Any deviation from what was requested, and why: None. PWAs remain full-screen Heavy-process apps; floating PWA windows, eReader, Dictionary, AI features, and launcher integration were intentionally avoided. Internet Speed Monitor, Notifications, Media, Calculator, Compass, and Scheduler remained completely untouched.
 * Any known issue or follow-up needed: Ready for on-device physical testing.
+
+### Entry 105
+* Timestamp: 2026-10-30T21:52:00Z
+* One-line summary: Crash-hardened PWA SAF file chooser and Android capability bridges against ActivityNotFoundException and unhandled Chromium exceptions.
+* Exact files touched:
+  - app/src/main/java/com/example/feature/pwa/PwaMimeHelper.kt
+  - app/src/main/java/com/example/feature/pwa/PwaPlayerActivity.kt
+  - app/src/main/AndroidManifest.xml
+  - app/src/test/java/com/example/feature/pwa/OfflinePwaFoundationTest.kt
+  - receipts/RECEIPTS_098.md
+* What was actually done:
+  - Resolved root cause of physical `:heavy` crash: HTML `<input type="file" accept=".json">` caused `type = ".json"` to be set on `ACTION_OPEN_DOCUMENT`, throwing `ActivityNotFoundException` and unhandled Chromium `JniAndroid$UncaughtExceptionException`.
+  - Created `PwaMimeHelper.kt` to validate and translate accept tokens into valid Android MIME types (e.g. `.json` -> `application/json`, `image/*` -> `image/*`, `text/plain` -> `text/plain`, invalid extension -> `*/*`), handling comma-separated lists and returning clean single vs multiple `EXTRA_MIME_TYPES` Intent configurations.
+  - Hardened `PwaPlayerActivity.kt` `onShowFileChooser`: validates intent resolution (`canResolveIntent`) before launching; applies fallback to generic `*/*` and `ACTION_GET_CONTENT` if needed; strictly catches `ActivityNotFoundException`, `SecurityException`, and `IllegalArgumentException`; cancels the pending callback; and returns `true` to Chromium so native unhandled exceptions never crash `:heavy`.
+  - Audited and enforced complete `ValueCallback<Array<Uri>>` lifecycle: cancels previous callback when a new chooser request arrives, cancels on picker launch failure, cancels on user back, cancels on floating close, cancels in `onDestroy()`, and clears callback reference after delivery.
+  - Audited Camera, Microphone, and Geolocation bridges: wrapped launcher calls in specific exception handlers, cleaned up pending requests in `onDestroy()` and upon back/close, and guaranteed clean denial to WebView if permission or activity resolution fails.
+  - Enhanced Sound suppression script: muted `HTMLMediaElement` volume, set `muted = true` via property descriptors, and suspended/rejected `AudioContext` and `webkitAudioContext`.
+  - Diagnosed Service Worker fetch failure: WebView fetches `/sw.js` via `ServiceWorkerController` rather than `WebViewClient`, routing to real network DNS where virtual origin `https://pwa-${id}.local` fails resolution; added diagnostic logging in `LogKeeper`.
+  - Suppressed harmless 404 error logging for missing `/favicon.ico`.
+  - Added unit tests in `OfflinePwaFoundationTest.kt` verifying MIME conversion, multiple accept handling, and capability gating.
+* How it was verified: local build only (`gradle :app:testDebugUnitTest` passed all 317 unit tests; `compile_applet` passed cleanly).
+* Any deviation from what was requested, and why: None. All existing architectures preserved; no unrelated features touched.
+* Any known issue or follow-up needed: Ready for on-device physical testing.

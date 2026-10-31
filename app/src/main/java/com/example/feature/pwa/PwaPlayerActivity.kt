@@ -2,6 +2,7 @@ package com.example.feature.pwa
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ActivityInfo
@@ -49,16 +50,26 @@ import java.util.concurrent.atomic.AtomicInteger
 /**
  * PwaPlayerActivity: Dedicated full-screen Offline PWA Mini App runtime in the :heavy process.
  *
- * Core architecture & reliability enhancements:
- * 1. Hosts PWA in full-screen (isolated runtime outside Sidebar page containers).
- * 2. Virtual domain origin per PWA (https://pwa-${id}.local) for origin isolation (DOM, IDB, Cache)
- *    and elimination of file:// ES module / CORS restrictions.
- * 3. Enforceable capability permission policy (Internet, Files SAF, Camera, Microphone, Location, Sound)
- *    defaulting to OFF for zero-trust sandbox execution.
- * 4. Android Back navigation handling: iterates WebView history first, exits to previous context at root.
- * 5. Orientation customization: User override + manifest fallback.
- * 6. Deep diagnostics via LogKeeper: PWA_START, capability actions, resource counters, console warnings/errors,
- *    and 10-second PWA_LOAD_STALLED watchdog.
+ * Crash-hardened capability bridges:
+ * 1. SAF File Chooser:
+ *    - Strict MIME translation via PwaMimeHelper (.json -> application/json; no raw extensions to Intent.type).
+ *    - Intent resolution validation and safe fallback to wildcard prior to launching.
+ *    - Clean ValueCallback lifecycle: cancel old on new request, cancel on failure/back/close/destroy,
+ *      clear reference after delivery.
+ *    - Catches ActivityNotFoundException, SecurityException, IllegalArgumentException without crashing :heavy.
+ * 2. Media (Camera & Microphone):
+ *    - Strict capability gating + runtime Android permission check.
+ *    - Safe launch catch & cleanup on destroy.
+ * 3. Geolocation:
+ *    - Strict capability gating + runtime Android permission check.
+ *    - Safe launch catch & cleanup on destroy.
+ * 4. Sound:
+ *    - Enforceable audio suppression policy via mediaPlaybackRequiresUserGesture and JS AudioContext/MediaElement muting.
+ * 5. Internet Blocking:
+ *    - Virtual origin (https://pwa-${id}.local/) local assets always work offline; external HTTP/HTTPS blocked with 403.
+ * 6. Service Worker & Favicon:
+ *    - Harmless 404 for missing /favicon.ico without stall watchdog false alarms.
+ *    - Structured diagnostics for service worker registration attempts.
  */
 class PwaPlayerActivity : ComponentActivity() {
 
@@ -173,6 +184,7 @@ class PwaPlayerActivity : ComponentActivity() {
             contentDescription = "Close PWA"
             setOnClickListener {
                 LogKeeper.log(this@PwaPlayerActivity, TAG, "PWA close button clicked: exiting runtime")
+                cleanupAllPendingCallbacks("pwa_close_button_clicked")
                 finish()
             }
         }
@@ -197,6 +209,7 @@ class PwaPlayerActivity : ComponentActivity() {
                     wv.goBack()
                 } else {
                     LogKeeper.log(this@PwaPlayerActivity, TAG, "PWA_BACK root -> finish")
+                    cleanupAllPendingCallbacks("pwa_back_pressed_at_root")
                     finish()
                 }
             }
@@ -277,11 +290,19 @@ class PwaPlayerActivity : ComponentActivity() {
                     PwaPermissionManager.addGrantedUri(this, pwaId, u)
                 }
 
-                LogKeeper.log(this, TAG, "PWA_SAF_CHOOSER_SUCCESS id=$pwaId count=${uris.size}")
-                callback.onReceiveValue(uris.toTypedArray())
+                LogKeeper.log(this, TAG, "PWA_FILE_CHOOSER_RESOLVED id=$pwaId count=${uris.size}")
+                try {
+                    callback.onReceiveValue(uris.toTypedArray())
+                } catch (e: Throwable) {
+                    LogKeeper.logError(this, TAG, "Error delivering file chooser result to WebView", e)
+                }
             } else {
-                LogKeeper.log(this, TAG, "PWA_SAF_CHOOSER_CANCELLED id=$pwaId")
-                callback.onReceiveValue(null)
+                LogKeeper.log(this, TAG, "PWA_FILE_CHOOSER_CANCELLED id=$pwaId reason=user_cancelled")
+                try {
+                    callback.onReceiveValue(null)
+                } catch (e: Throwable) {
+                    LogKeeper.logError(this, TAG, "Error delivering cancellation to WebView", e)
+                }
             }
         }
 
@@ -302,11 +323,19 @@ class PwaPlayerActivity : ComponentActivity() {
             }
 
             if (granted.isNotEmpty()) {
-                request.grant(granted.toTypedArray())
-                LogKeeper.log(this, TAG, "PWA_RUNTIME_MEDIA_GRANTED id=$pwaId granted=$granted")
+                try {
+                    request.grant(granted.toTypedArray())
+                    LogKeeper.log(this, TAG, "PWA_PERMISSION_GRANTED id=$pwaId capability=media granted=$granted")
+                } catch (e: Throwable) {
+                    LogKeeper.logError(this, TAG, "Error granting media request", e)
+                }
             } else {
-                request.deny()
-                LogKeeper.log(this, TAG, "PWA_RUNTIME_MEDIA_DENIED id=$pwaId")
+                try {
+                    request.deny()
+                    LogKeeper.log(this, TAG, "PWA_PERMISSION_DENIED id=$pwaId capability=media reason=user_denied")
+                } catch (e: Throwable) {
+                    LogKeeper.logError(this, TAG, "Error denying media request", e)
+                }
             }
         }
 
@@ -321,8 +350,16 @@ class PwaPlayerActivity : ComponentActivity() {
             val coarseGranted = results[Manifest.permission.ACCESS_COARSE_LOCATION] == true
             val isAllowed = (fineGranted || coarseGranted) && permissionPolicy.locationAllowed
 
-            callback?.invoke(origin, isAllowed, false)
-            LogKeeper.log(this, TAG, "PWA_RUNTIME_LOCATION_RESULT id=$pwaId allowed=$isAllowed")
+            try {
+                callback?.invoke(origin, isAllowed, false)
+                if (isAllowed) {
+                    LogKeeper.log(this, TAG, "PWA_PERMISSION_GRANTED id=$pwaId capability=location")
+                } else {
+                    LogKeeper.log(this, TAG, "PWA_PERMISSION_DENIED id=$pwaId capability=location reason=user_denied")
+                }
+            } catch (e: Throwable) {
+                LogKeeper.logError(this, TAG, "Error invoking geolocation callback", e)
+            }
         }
     }
 
@@ -377,7 +414,10 @@ class PwaPlayerActivity : ComponentActivity() {
 
             // Dedicated isolated database path
             val isolatedDataDir = PwaStorageManager.getIsolatedDataDir(this@PwaPlayerActivity, entity.id)
-            setDatabasePath(isolatedDataDir.absolutePath)
+            try {
+                @Suppress("DEPRECATION")
+                setDatabasePath(isolatedDataDir.absolutePath)
+            } catch (_: Throwable) {}
         }
 
         LogKeeper.log(
@@ -399,9 +439,15 @@ class PwaPlayerActivity : ComponentActivity() {
 
             override fun onConsoleMessage(consoleMessage: android.webkit.ConsoleMessage?): Boolean {
                 if (consoleMessage != null) {
+                    val msgText = consoleMessage.message() ?: ""
+                    // Service Worker diagnostic capture
+                    if (msgText.contains("ServiceWorker", ignoreCase = true) || msgText.contains("service worker", ignoreCase = true)) {
+                        LogKeeper.log(this@PwaPlayerActivity, TAG, "PWA_SW_DIAGNOSTIC id=${entity.id} msg=$msgText")
+                    }
+
                     val level = consoleMessage.messageLevel()
                     if (level == android.webkit.ConsoleMessage.MessageLevel.WARNING || level == android.webkit.ConsoleMessage.MessageLevel.ERROR) {
-                        val msg = "JS Console [${level.name}] L${consoleMessage.lineNumber()}: ${consoleMessage.message()}"
+                        val msg = "JS Console [${level.name}] L${consoleMessage.lineNumber()}: $msgText"
                         lastError = msg
                         LogKeeper.log(this@PwaPlayerActivity, TAG, msg)
                     }
@@ -409,54 +455,122 @@ class PwaPlayerActivity : ComponentActivity() {
                 return super.onConsoleMessage(consoleMessage)
             }
 
-            // Real SAF File Chooser enforcement
+            // Real SAF File Chooser enforcement with complete crash hardening
             override fun onShowFileChooser(
                 webView: WebView?,
                 filePathCallback: ValueCallback<Array<Uri>>?,
                 fileChooserParams: FileChooserParams?
             ): Boolean {
+                // Cancel any previous active callback before storing the new one
+                cancelPendingFileChooser("superseded_by_new_request")
+
                 if (!permissionPolicy.filesAllowed) {
-                    LogKeeper.log(this@PwaPlayerActivity, TAG, "PWA_BLOCKED_FILES id=${entity.id}")
-                    Toast.makeText(this@PwaPlayerActivity, "File access disabled for this Mini App", Toast.LENGTH_SHORT).show()
-                    filePathCallback?.onReceiveValue(null)
+                    LogKeeper.log(this@PwaPlayerActivity, TAG, "PWA_PERMISSION_BLOCKED id=${entity.id} capability=files reason=permission_disabled")
+                    Toast.makeText(this@PwaPlayerActivity, "File access disabled in Mini App Info", Toast.LENGTH_SHORT).show()
+                    try {
+                        filePathCallback?.onReceiveValue(null)
+                    } catch (_: Throwable) {}
                     return true
                 }
 
-                pendingFileChooserCallback?.onReceiveValue(null)
                 pendingFileChooserCallback = filePathCallback
 
-                return try {
-                    val pickIntent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
-                        addCategory(Intent.CATEGORY_OPENABLE)
-                        type = "*/*"
-                        val acceptTypes = fileChooserParams?.acceptTypes?.filter { it.isNotBlank() }
-                        if (!acceptTypes.isNullOrEmpty()) {
-                            if (acceptTypes.size == 1) {
-                                type = acceptTypes[0]
-                            } else {
-                                putExtra(Intent.EXTRA_MIME_TYPES, acceptTypes.toTypedArray())
-                            }
-                        }
-                        val isMultiple = fileChooserParams?.mode == FileChooserParams.MODE_OPEN_MULTIPLE
-                        putExtra(Intent.EXTRA_ALLOW_MULTIPLE, isMultiple)
-                        addFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION or Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                val rawAccepts = fileChooserParams?.acceptTypes
+                val isMultiple = fileChooserParams?.mode == FileChooserParams.MODE_OPEN_MULTIPLE
+                val (primaryMime, extraMimes) = PwaMimeHelper.resolveIntentMimeTypes(rawAccepts)
+
+                LogKeeper.log(
+                    this@PwaPlayerActivity,
+                    TAG,
+                    "PWA_FILE_CHOOSER_REQUEST id=${entity.id} rawAccepts=${rawAccepts?.toList()} isMultiple=$isMultiple primaryMime=$primaryMime extraMimes=${extraMimes?.toList()}"
+                )
+
+                // 1. Construct primary Intent (ACTION_OPEN_DOCUMENT) with valid MIME configuration
+                var pickIntent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                    addCategory(Intent.CATEGORY_OPENABLE)
+                    type = primaryMime
+                    if (extraMimes != null && extraMimes.isNotEmpty()) {
+                        putExtra(Intent.EXTRA_MIME_TYPES, extraMimes)
                     }
+                    putExtra(Intent.EXTRA_ALLOW_MULTIPLE, isMultiple)
+                    addFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION or Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+
+                // 2. Verify Android has an Activity capable of resolving this Intent
+                if (!canResolveIntent(pickIntent)) {
+                    // Try fallback to generic wildcard if specific MIME was unresolvable
+                    if (primaryMime != "*/*") {
+                        LogKeeper.log(this@PwaPlayerActivity, TAG, "PWA_FILE_CHOOSER_FALLBACK id=${entity.id} from=$primaryMime to=*/*")
+                        pickIntent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                            addCategory(Intent.CATEGORY_OPENABLE)
+                            type = "*/*"
+                            if (extraMimes != null && extraMimes.isNotEmpty()) {
+                                putExtra(Intent.EXTRA_MIME_TYPES, extraMimes)
+                            }
+                            putExtra(Intent.EXTRA_ALLOW_MULTIPLE, isMultiple)
+                            addFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION or Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        }
+                    }
+
+                    // If still unresolvable, try ACTION_GET_CONTENT
+                    if (!canResolveIntent(pickIntent)) {
+                        LogKeeper.log(this@PwaPlayerActivity, TAG, "PWA_FILE_CHOOSER_FALLBACK id=${entity.id} to=ACTION_GET_CONTENT")
+                        pickIntent = Intent(Intent.ACTION_GET_CONTENT).apply {
+                            addCategory(Intent.CATEGORY_OPENABLE)
+                            type = primaryMime
+                            if (extraMimes != null && extraMimes.isNotEmpty()) {
+                                putExtra(Intent.EXTRA_MIME_TYPES, extraMimes)
+                            }
+                            putExtra(Intent.EXTRA_ALLOW_MULTIPLE, isMultiple)
+                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        }
+                    }
+
+                    // If still completely unresolvable, gracefully cancel and notify without crashing
+                    if (!canResolveIntent(pickIntent)) {
+                        LogKeeper.log(this@PwaPlayerActivity, TAG, "PWA_FILE_CHOOSER_FAILED id=${entity.id} reason=no_activity_found")
+                        cancelPendingFileChooser("no_activity_found")
+                        Toast.makeText(this@PwaPlayerActivity, "No file manager found to open files", Toast.LENGTH_SHORT).show()
+                        return true
+                    }
+                }
+
+                // 3. Launch picker with strictly contained exception handling
+                return try {
                     fileChooserLauncher.launch(pickIntent)
                     true
-                } catch (e: Exception) {
-                    LogKeeper.logError(this@PwaPlayerActivity, TAG, "Failed to launch SAF document picker", e)
-                    pendingFileChooserCallback?.onReceiveValue(null)
-                    pendingFileChooserCallback = null
-                    false
+                } catch (e: ActivityNotFoundException) {
+                    LogKeeper.log(this@PwaPlayerActivity, TAG, "PWA_FILE_CHOOSER_FAILED id=${entity.id} reason=activity_not_found_${e.message}")
+                    cancelPendingFileChooser("activity_not_found")
+                    Toast.makeText(this@PwaPlayerActivity, "No file manager found", Toast.LENGTH_SHORT).show()
+                    true
+                } catch (e: SecurityException) {
+                    LogKeeper.log(this@PwaPlayerActivity, TAG, "PWA_FILE_CHOOSER_FAILED id=${entity.id} reason=security_exception_${e.message}")
+                    cancelPendingFileChooser("security_exception")
+                    true
+                } catch (e: IllegalArgumentException) {
+                    LogKeeper.log(this@PwaPlayerActivity, TAG, "PWA_FILE_CHOOSER_FAILED id=${entity.id} reason=illegal_argument_${e.message}")
+                    cancelPendingFileChooser("illegal_argument")
+                    true
                 }
             }
 
-            // Real Camera & Microphone enforcement
+            // Real Camera & Microphone enforcement with crash containment
             override fun onPermissionRequest(request: PermissionRequest?) {
                 if (request == null) return
+
+                // Cancel any previous active media request
+                cancelPendingMediaPermission("superseded_by_new_request")
+
                 val requestedResources = request.resources
                 val wantsCamera = requestedResources.contains(PermissionRequest.RESOURCE_VIDEO_CAPTURE)
                 val wantsMic = requestedResources.contains(PermissionRequest.RESOURCE_AUDIO_CAPTURE)
+
+                LogKeeper.log(
+                    this@PwaPlayerActivity,
+                    TAG,
+                    "PWA_PERMISSION_REQUEST id=${entity.id} capability=media wantsCamera=$wantsCamera wantsMic=$wantsMic resources=${requestedResources.toList()}"
+                )
 
                 val granted = mutableListOf<String>()
                 val neededPermissions = mutableListOf<String>()
@@ -469,7 +583,7 @@ class PwaPlayerActivity : ComponentActivity() {
                             neededPermissions.add(Manifest.permission.CAMERA)
                         }
                     } else {
-                        LogKeeper.log(this@PwaPlayerActivity, TAG, "PWA_BLOCKED_CAMERA id=${entity.id}")
+                        LogKeeper.log(this@PwaPlayerActivity, TAG, "PWA_PERMISSION_BLOCKED id=${entity.id} capability=camera reason=permission_disabled")
                     }
                 }
 
@@ -481,31 +595,59 @@ class PwaPlayerActivity : ComponentActivity() {
                             neededPermissions.add(Manifest.permission.RECORD_AUDIO)
                         }
                     } else {
-                        LogKeeper.log(this@PwaPlayerActivity, TAG, "PWA_BLOCKED_MICROPHONE id=${entity.id}")
+                        LogKeeper.log(this@PwaPlayerActivity, TAG, "PWA_PERMISSION_BLOCKED id=${entity.id} capability=microphone reason=permission_disabled")
                     }
                 }
 
                 if (neededPermissions.isNotEmpty()) {
                     pendingPermissionRequest = request
                     pendingGrantedMediaResources = granted
-                    mediaPermissionLauncher.launch(neededPermissions.toTypedArray())
+                    try {
+                        mediaPermissionLauncher.launch(neededPermissions.toTypedArray())
+                    } catch (e: ActivityNotFoundException) {
+                        LogKeeper.log(this@PwaPlayerActivity, TAG, "PWA_PERMISSION_DENIED id=${entity.id} capability=media reason=activity_not_found")
+                        cancelPendingMediaPermission("activity_not_found")
+                    } catch (e: SecurityException) {
+                        LogKeeper.log(this@PwaPlayerActivity, TAG, "PWA_PERMISSION_DENIED id=${entity.id} capability=media reason=security_exception")
+                        cancelPendingMediaPermission("security_exception")
+                    } catch (e: IllegalArgumentException) {
+                        LogKeeper.log(this@PwaPlayerActivity, TAG, "PWA_PERMISSION_DENIED id=${entity.id} capability=media reason=illegal_argument")
+                        cancelPendingMediaPermission("illegal_argument")
+                    }
                 } else if (granted.isNotEmpty()) {
-                    request.grant(granted.toTypedArray())
-                    LogKeeper.log(this@PwaPlayerActivity, TAG, "PWA_GRANTED_MEDIA id=${entity.id} res=$granted")
+                    try {
+                        request.grant(granted.toTypedArray())
+                        LogKeeper.log(this@PwaPlayerActivity, TAG, "PWA_PERMISSION_GRANTED id=${entity.id} capability=media res=$granted")
+                    } catch (e: Throwable) {
+                        LogKeeper.logError(this@PwaPlayerActivity, TAG, "Error granting media request", e)
+                    }
                 } else {
-                    request.deny()
-                    LogKeeper.log(this@PwaPlayerActivity, TAG, "PWA_DENIED_MEDIA id=${entity.id}")
+                    try {
+                        request.deny()
+                        LogKeeper.log(this@PwaPlayerActivity, TAG, "PWA_PERMISSION_DENIED id=${entity.id} capability=media reason=no_allowed_resources")
+                    } catch (e: Throwable) {
+                        LogKeeper.logError(this@PwaPlayerActivity, TAG, "Error denying media request", e)
+                    }
                 }
             }
 
-            // Real Geolocation enforcement
+            // Real Geolocation enforcement with crash containment
             override fun onGeolocationPermissionsShowPrompt(
                 origin: String?,
                 callback: GeolocationPermissions.Callback?
             ) {
+                if (callback == null) return
+
+                // Cancel any previous active geolocation callback
+                cancelPendingGeolocation("superseded_by_new_request")
+
+                LogKeeper.log(this@PwaPlayerActivity, TAG, "PWA_PERMISSION_REQUEST id=${entity.id} capability=location origin=$origin")
+
                 if (!permissionPolicy.locationAllowed) {
-                    LogKeeper.log(this@PwaPlayerActivity, TAG, "PWA_BLOCKED_LOCATION id=${entity.id}")
-                    callback?.invoke(origin, false, false)
+                    LogKeeper.log(this@PwaPlayerActivity, TAG, "PWA_PERMISSION_BLOCKED id=${entity.id} capability=location reason=permission_disabled")
+                    try {
+                        callback.invoke(origin, false, false)
+                    } catch (_: Throwable) {}
                     return
                 }
 
@@ -513,12 +655,27 @@ class PwaPlayerActivity : ComponentActivity() {
                 val hasCoarse = ContextCompat.checkSelfPermission(this@PwaPlayerActivity, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
 
                 if (hasFine || hasCoarse) {
-                    callback?.invoke(origin, true, false)
-                    LogKeeper.log(this@PwaPlayerActivity, TAG, "PWA_GRANTED_LOCATION id=${entity.id}")
+                    try {
+                        callback.invoke(origin, true, false)
+                        LogKeeper.log(this@PwaPlayerActivity, TAG, "PWA_PERMISSION_GRANTED id=${entity.id} capability=location")
+                    } catch (e: Throwable) {
+                        LogKeeper.logError(this@PwaPlayerActivity, TAG, "Error invoking geolocation callback", e)
+                    }
                 } else {
                     pendingGeolocationCallback = callback
                     pendingGeolocationOrigin = origin
-                    locationPermissionLauncher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
+                    try {
+                        locationPermissionLauncher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
+                    } catch (e: ActivityNotFoundException) {
+                        LogKeeper.log(this@PwaPlayerActivity, TAG, "PWA_PERMISSION_DENIED id=${entity.id} capability=location reason=activity_not_found")
+                        cancelPendingGeolocation("activity_not_found")
+                    } catch (e: SecurityException) {
+                        LogKeeper.log(this@PwaPlayerActivity, TAG, "PWA_PERMISSION_DENIED id=${entity.id} capability=location reason=security_exception")
+                        cancelPendingGeolocation("security_exception")
+                    } catch (e: IllegalArgumentException) {
+                        LogKeeper.log(this@PwaPlayerActivity, TAG, "PWA_PERMISSION_DENIED id=${entity.id} capability=location reason=illegal_argument")
+                        cancelPendingGeolocation("illegal_argument")
+                    }
                 }
             }
         }
@@ -605,6 +762,11 @@ class PwaPlayerActivity : ComponentActivity() {
                 errorResponse: WebResourceResponse?
             ) {
                 super.onReceivedHttpError(view, request, errorResponse)
+                val reqUrl = request?.url?.toString() ?: ""
+                // Missing favicon.ico is standard HTTP 404 for PWAs without explicit /favicon.ico and should not pollute error state
+                if (reqUrl.endsWith("/favicon.ico")) {
+                    return
+                }
                 assetsFailedCount.incrementAndGet()
                 lastError = "HTTP Status=${errorResponse?.statusCode}"
                 LogKeeper.log(
@@ -652,18 +814,78 @@ class PwaPlayerActivity : ComponentActivity() {
         wv.loadUrl(launchUrl)
     }
 
+    private fun canResolveIntent(intent: Intent): Boolean {
+        return try {
+            val pm = packageManager
+            intent.resolveActivity(pm) != null || pm.queryIntentActivities(intent, 0).isNotEmpty()
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    private fun cancelPendingFileChooser(reason: String) {
+        pendingFileChooserCallback?.let { cb ->
+            try {
+                cb.onReceiveValue(null)
+            } catch (_: Throwable) {}
+            LogKeeper.log(this, TAG, "PWA_FILE_CHOOSER_CANCELLED id=${pwaEntity?.id} reason=$reason")
+        }
+        pendingFileChooserCallback = null
+    }
+
+    private fun cancelPendingMediaPermission(reason: String) {
+        pendingPermissionRequest?.let { req ->
+            try {
+                req.deny()
+            } catch (_: Throwable) {}
+            LogKeeper.log(this, TAG, "PWA_PERMISSION_DENIED id=${pwaEntity?.id} capability=media reason=$reason")
+        }
+        pendingPermissionRequest = null
+        pendingGrantedMediaResources.clear()
+    }
+
+    private fun cancelPendingGeolocation(reason: String) {
+        pendingGeolocationCallback?.let { cb ->
+            try {
+                cb.invoke(pendingGeolocationOrigin, false, false)
+            } catch (_: Throwable) {}
+            LogKeeper.log(this, TAG, "PWA_PERMISSION_DENIED id=${pwaEntity?.id} capability=location reason=$reason")
+        }
+        pendingGeolocationCallback = null
+        pendingGeolocationOrigin = null
+    }
+
+    private fun cleanupAllPendingCallbacks(reason: String) {
+        cancelPendingFileChooser(reason)
+        cancelPendingMediaPermission(reason)
+        cancelPendingGeolocation(reason)
+    }
+
     private fun injectAudioSuppressionScript(view: WebView?) {
         val script = """
             (function() {
                 try {
                     if (window.__pwaMuteEnforced) return;
                     window.__pwaMuteEnforced = true;
+                    // Suppress HTMLMediaElement playback
                     HTMLMediaElement.prototype.play = function() { return Promise.reject(new Error("Audio disabled")); };
+                    try {
+                        Object.defineProperty(HTMLMediaElement.prototype, 'volume', {
+                            get: function() { return 0; },
+                            set: function() {}
+                        });
+                        Object.defineProperty(HTMLMediaElement.prototype, 'muted', {
+                            get: function() { return true; },
+                            set: function() {}
+                        });
+                    } catch(e) {}
+                    // Suppress AudioContext & webkitAudioContext
                     if (window.AudioContext) {
                         var origA = window.AudioContext;
                         window.AudioContext = function() {
                             var ctx = new origA();
                             try { ctx.suspend(); } catch(e) {}
+                            ctx.resume = function() { return Promise.reject(new Error("Audio disabled")); };
                             return ctx;
                         };
                     }
@@ -672,6 +894,7 @@ class PwaPlayerActivity : ComponentActivity() {
                         window.webkitAudioContext = function() {
                             var ctx = new origW();
                             try { ctx.suspend(); } catch(e) {}
+                            ctx.resume = function() { return Promise.reject(new Error("Audio disabled")); };
                             return ctx;
                         };
                     }
@@ -713,6 +936,11 @@ class PwaPlayerActivity : ComponentActivity() {
         }
 
         // Case 3: Missing local static asset
+        if (requestPath == "/favicon.ico" || requestPath == "favicon.ico") {
+            // Harmless missing favicon
+            return create404Response("Favicon not provided")
+        }
+
         assetsFailedCount.incrementAndGet()
         lastError = "Local asset not found: $requestPath"
         LogKeeper.log(this, TAG, "Local asset not found: path=$requestPath")
@@ -806,6 +1034,7 @@ class PwaPlayerActivity : ComponentActivity() {
 
     override fun onDestroy() {
         watchdogJob?.cancel()
+        cleanupAllPendingCallbacks("activity_destroyed")
         LogKeeper.log(
             this,
             TAG,

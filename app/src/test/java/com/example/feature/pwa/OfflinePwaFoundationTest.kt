@@ -417,4 +417,99 @@ class OfflinePwaFoundationTest {
         PwaPermissionManager.revokeGrantedUri(context, pwaId, testUriStr)
         assertTrue("Grant should be removed after revoke", PwaPermissionManager.getGrantedUris(context, pwaId).isEmpty())
     }
+
+    @Test
+    fun testPwaMimeHelperConversions() {
+        // A. MIME conversion tests
+        // .json -> application/json
+        assertEquals("application/json", PwaMimeHelper.translateAcceptToken(".json"))
+        assertEquals("application/json", PwaMimeHelper.translateAcceptToken("json"))
+        assertEquals("application/json", PwaMimeHelper.translateAcceptToken("  .JSON  "))
+
+        // image/* stays image/*
+        assertEquals("image/*", PwaMimeHelper.translateAcceptToken("image/*"))
+
+        // text/plain stays text/plain
+        assertEquals("text/plain", PwaMimeHelper.translateAcceptToken("text/plain"))
+
+        // no accept -> empty list -> */*
+        val emptyResolved = PwaMimeHelper.resolveIntentMimeTypes(null)
+        assertEquals("*/*", emptyResolved.first)
+        assertNull(emptyResolved.second)
+
+        val blankArrayResolved = PwaMimeHelper.resolveIntentMimeTypes(arrayOf("", "   "))
+        assertEquals("*/*", blankArrayResolved.first)
+        assertNull(blankArrayResolved.second)
+
+        // Invalid extension does NOT become Intent MIME
+        assertNull(PwaMimeHelper.translateAcceptToken(".invalidextension123xyz"))
+        val invalidResolved = PwaMimeHelper.resolveIntentMimeTypes(arrayOf(".invalidextension123xyz"))
+        assertEquals("*/*", invalidResolved.first)
+        assertNull(invalidResolved.second)
+    }
+
+    @Test
+    fun testPwaMimeHelperMultipleAndCommaSeparatedAccepts() {
+        // Comma-separated in single element
+        val commaSeparated = arrayOf(".json, image/png, .txt")
+        val translated = PwaMimeHelper.translateAcceptTypes(commaSeparated)
+        assertEquals(3, translated.size)
+        assertTrue(translated.contains("application/json"))
+        assertTrue(translated.contains("image/png"))
+        assertTrue(translated.contains("text/plain"))
+
+        // Multiple selection Intent resolution
+        val (primary, extras) = PwaMimeHelper.resolveIntentMimeTypes(arrayOf(".json", ".pdf"))
+        assertEquals("*/*", primary)
+        assertNotNull(extras)
+        assertEquals(2, extras!!.size)
+        assertTrue(extras.contains("application/json"))
+        assertTrue(extras.contains("application/pdf"))
+
+        // Single valid MIME Intent resolution
+        val (singlePrimary, singleExtras) = PwaMimeHelper.resolveIntentMimeTypes(arrayOf(".json"))
+        assertEquals("application/json", singlePrimary)
+        assertNull(singleExtras)
+    }
+
+    @Test
+    fun testPwaFilesPermissionGatingModel() {
+        val pwaId = "pwa_file_gating_test"
+
+        // Default OFF
+        val defaultPolicy = PwaPermissionManager.getPolicy(context, pwaId)
+        assertFalse("Files must default to OFF", defaultPolicy.filesAllowed)
+
+        // Turn ON
+        PwaPermissionManager.savePolicy(context, pwaId, defaultPolicy.copy(filesAllowed = true))
+        val updatedPolicy = PwaPermissionManager.getPolicy(context, pwaId)
+        assertTrue("Files must be ON after saving", updatedPolicy.filesAllowed)
+    }
+
+    @Test
+    fun testPwaMediaAndLocationCapabilityGating() {
+        val pwaId = "pwa_cap_gating_test"
+        val policy = PwaPermissionManager.getPolicy(context, pwaId)
+
+        assertFalse("Camera defaults to OFF", policy.cameraAllowed)
+        assertFalse("Microphone defaults to OFF", policy.microphoneAllowed)
+        assertFalse("Location defaults to OFF", policy.locationAllowed)
+        assertFalse("Sound defaults to OFF", policy.soundAllowed)
+
+        val enabledPolicy = PwaPermissionPolicy(
+            internetAllowed = false,
+            filesAllowed = false,
+            cameraAllowed = true,
+            microphoneAllowed = true,
+            locationAllowed = true,
+            soundAllowed = true
+        )
+        PwaPermissionManager.savePolicy(context, pwaId, enabledPolicy)
+        val readBack = PwaPermissionManager.getPolicy(context, pwaId)
+
+        assertTrue(readBack.cameraAllowed)
+        assertTrue(readBack.microphoneAllowed)
+        assertTrue(readBack.locationAllowed)
+        assertTrue(readBack.soundAllowed)
+    }
 }
