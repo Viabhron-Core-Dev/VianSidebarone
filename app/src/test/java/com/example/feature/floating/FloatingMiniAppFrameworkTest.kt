@@ -346,4 +346,108 @@ class FloatingMiniAppFrameworkTest {
         assertEquals(480, afterBubbleMove.windowBounds.width)
         assertEquals(620, afterBubbleMove.windowBounds.height)
     }
+
+    @Test
+    fun testFoldSafeTransactionalOrderingAndPreservation() {
+        val store = DurableMiniAppStore.getInstance(testContext)
+        val initialSnapshot = MiniAppRecoverySnapshot(
+            instanceId = "fold_safe_test",
+            appType = "test_notes",
+            state = MiniAppState.ACTIVE,
+            windowBounds = WindowBounds(100, 100, 500, 600),
+            payload = mutableMapOf(TestNotesMiniAppInstance.KEY_TEXT to "Vital Note Content")
+        )
+        store.saveSnapshot(initialSnapshot)
+
+        // Simulate snapshot preparation in Heavy
+        val host = HeavyFloatingHost.getInstance(testContext)
+        val instance = host.startInstance("fold_safe_test", "test_notes", initialSnapshot.windowBounds, initialSnapshot.payload)
+        assertNotNull(instance)
+
+        // 1. Snapshot gathered BEFORE Heavy release
+        val snapshotPayload = host.prepareSleep("fold_safe_test")
+        assertTrue(snapshotPayload.containsKey(TestNotesMiniAppInstance.KEY_TEXT))
+        assertEquals("Vital Note Content", snapshotPayload[TestNotesMiniAppInstance.KEY_TEXT])
+
+        // 2. Commit to durable store
+        initialSnapshot.state = MiniAppState.SLEEPING
+        initialSnapshot.payload.putAll(snapshotPayload)
+        val saveOk = store.saveSnapshot(initialSnapshot)
+        assertTrue(saveOk)
+
+        // 3. Verify Heavy active instance is now 0 (disposable)
+        assertEquals(0, host.getActiveInstanceCount())
+
+        // 4. Verify durable store contains exact content
+        val loaded = store.loadSnapshot("fold_safe_test")
+        assertNotNull(loaded)
+        assertEquals(MiniAppState.SLEEPING, loaded!!.state)
+        assertEquals("Vital Note Content", loaded.payload[TestNotesMiniAppInstance.KEY_TEXT])
+    }
+
+    @Test
+    fun testLauncherDimensionsRemainStableBeforeDuringAndAfterDrag() {
+        val bubble = FloatingMiniAppLauncherBubble(
+            instanceId = "test_bubble",
+            appType = "test_notes",
+            context = testContext,
+            initialX = 50,
+            initialY = 150,
+            onBubbleTapped = {}
+        )
+
+        val initialW = bubble.bounds.width
+        val initialH = bubble.bounds.height
+        assertTrue("Bubble size must be compact (around 52dp * density = 104px)", initialW > 0)
+        assertEquals(initialW, initialH)
+        assertEquals("LayoutParams width must match bounds width", initialW, bubble.layoutParams.width)
+        assertEquals("LayoutParams height must match bounds height", initialH, bubble.layoutParams.height)
+
+        // Verify bounds update simulates drag without warping dimensions
+        val movedBounds = WindowBounds(120, 280, initialW, initialH)
+        bubble.setWindowBounds(movedBounds)
+        assertEquals(120, bubble.bounds.x)
+        assertEquals(280, bubble.bounds.y)
+        assertEquals(initialW, bubble.bounds.width)
+        assertEquals(initialH, bubble.bounds.height)
+        assertEquals(initialW, bubble.layoutParams.width)
+        assertEquals(initialH, bubble.layoutParams.height)
+    }
+
+    @Test
+    fun testMaximizePreservesNormalFloatingBoundsWithoutOverwrite() {
+        val store = DurableMiniAppStore.getInstance(testContext)
+        val normalBounds = WindowBounds(80, 120, 450, 550)
+        val snapshot = MiniAppRecoverySnapshot(
+            instanceId = "max_geom_test",
+            appType = "test_notes",
+            state = MiniAppState.ACTIVE,
+            windowBounds = normalBounds.copyBounds()
+        )
+        store.saveSnapshot(snapshot)
+
+        val window = FloatingMiniAppWindow("max_geom_test", testContext, "test_notes")
+        window.setWindowBounds(normalBounds)
+
+        // Toggle Maximize
+        window.toggleMaximize()
+        assertTrue("Window must report maximized", window.isMaximized)
+        assertNotNull("maximizeRestoreBounds must record normal floating bounds", window.maximizeRestoreBounds)
+        assertEquals(normalBounds.width, window.maximizeRestoreBounds!!.width)
+        assertEquals(normalBounds.height, window.maximizeRestoreBounds!!.height)
+
+        // Ensure durableStore normal bounds were NOT overwritten by maximized bounds
+        val storeSnapshot = store.loadSnapshot("max_geom_test")!!
+        assertEquals("Normal floating bounds in store must remain intact during maximize", normalBounds.width, storeSnapshot.windowBounds.width)
+        assertEquals("Normal floating bounds in store must remain intact during maximize", normalBounds.height, storeSnapshot.windowBounds.height)
+
+        // Toggle Restore
+        window.toggleMaximize()
+        assertFalse("Window must report unmaximized", window.isMaximized)
+        assertNull("maximizeRestoreBounds must be cleared on restore", window.maximizeRestoreBounds)
+        assertEquals(normalBounds.x, window.bounds.x)
+        assertEquals(normalBounds.y, window.bounds.y)
+        assertEquals(normalBounds.width, window.bounds.width)
+        assertEquals(normalBounds.height, window.bounds.height)
+    }
 }

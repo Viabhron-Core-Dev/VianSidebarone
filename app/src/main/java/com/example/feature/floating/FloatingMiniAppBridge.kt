@@ -41,6 +41,11 @@ class FloatingMiniAppBridge private constructor(private val context: Context) {
         // Dismiss launcher bubble if present
         dismissLauncherBubble(instanceId)
 
+        // 1. Acquire consumer first so Heavy process connects/mounts before window show
+        LogKeeper.log(context, TAG, "HEAVY_MOUNT_REQUEST id=$instanceId consumerTag=miniapp_$instanceId")
+        val connectionManager = HeavyProcessConnectionManager.getInstance(context)
+        connectionManager.acquireConsumer("miniapp_$instanceId", reason = "openMiniApp:$instanceId")
+
         val existing = windowManager.getWindow(instanceId)
         if (existing is FloatingMiniAppWindow) {
             if (existing.state != WindowState.VISIBLE) {
@@ -80,37 +85,36 @@ class FloatingMiniAppBridge private constructor(private val context: Context) {
         windowManager.showWindow(instanceId)
         windowManager.bringToFront(instanceId)
 
-        // Hold active consumer on Heavy process so closing Sidebar does not disconnect Heavy
-        LogKeeper.log(context, TAG, "HEAVY_MOUNT_REQUEST id=$instanceId consumerTag=miniapp_$instanceId")
-        HeavyProcessConnectionManager.getInstance(context).acquireConsumer("miniapp_$instanceId", reason = "openMiniApp:$instanceId")
-
         LogKeeper.log(context, TAG, "WINDOW_RESTORED id=$instanceId bounds=$bounds")
         return window
     }
 
     /**
-     * Puts an active mini-app to sleep:
-     * 1. Requests compact recovery payload from Heavy runtime.
-     * 2. Commits snapshot with state=SLEEPING and payload to DurableMiniAppStore.
-     * 3. Unregisters floating window from FloatingWindowManager.
-     * 4. Shows lightweight launcher bubble at snapshot.buttonPosition in Main.
-     * 5. Heavy dismantles runtime and terminates via checkDisposableTeardown().
+     * Puts an active mini-app to sleep via safe transactional ordering:
+     * 1. FOLD_TRANSACTION_BEGIN.
+     * 2. Keep Heavy consumer acquired during snapshot gathering.
+     * 3. Request RECOVERY_SNAPSHOT from Heavy.
+     * 4. If snapshot fails completely, abort transaction and keep runtime active.
+     * 5. Save snapshot durably in Main.
+     * 6. If durable save fails, abort transaction and do NOT destroy runtime.
+     * 7. Only on confirmed save success: release Heavy runtime, detach content, hide window.
+     * 8. Release Heavy consumer, allowing Heavy idle check to stop if no other workloads.
+     * 9. Show compact folded launcher bubble.
+     * 10. FOLD_TRANSACTION_COMPLETE.
      */
     fun sleepMiniApp(instanceId: String) {
+        LogKeeper.log(context, TAG, "FOLD_TRANSACTION_BEGIN id=$instanceId")
         LogKeeper.log(context, TAG, "SLEEP_REQUEST id=$instanceId")
 
-        // Release active consumer so Heavy can teardown if idle
-        HeavyProcessConnectionManager.getInstance(context).releaseConsumer("miniapp_$instanceId", reason = "sleepMiniApp:$instanceId")
-
+        val connectionManager = HeavyProcessConnectionManager.getInstance(context)
         val window = windowManager.getWindow(instanceId) as? FloatingMiniAppWindow
         val editedPayload = window?.getCurrentPayload() ?: emptyMap()
         val appType = window?.appType
             ?: durableStore.loadSnapshot(instanceId)?.appType
             ?: "generic"
 
-        // Step 1: Request sleep from Heavy via Binder
-        LogKeeper.log(context, TAG, "RECOVERY_SNAPSHOT_REQUEST id=$instanceId target=Heavy")
-        val connectionManager = HeavyProcessConnectionManager.getInstance(context)
+        // Step 1: Request sleep from Heavy via Binder while consumer is STILL ACQUIRED
+        LogKeeper.log(context, TAG, "SNAPSHOT_REQUEST id=$instanceId target=Heavy")
         val payloadToSend = LinkedHashMap<String, String>().apply {
             put("instance_id", instanceId)
             put("action", "sleep")
@@ -124,61 +128,81 @@ class FloatingMiniAppBridge private constructor(private val context: Context) {
             payload = payloadToSend
         )
 
-        val res = connectionManager.sendCommand(cmd, autoConnect = false)
-        val returnedPayload = if (res.success && res.data.isNotEmpty()) res.data else editedPayload
-        val textLength = (returnedPayload["text"] ?: editedPayload["text"])?.length ?: 0
-        LogKeeper.log(context, TAG, "RECOVERY_SNAPSHOT_READY id=$instanceId keys=${returnedPayload.keys} textLength=$textLength")
-
-        // Fallback IPC intent to trigger teardown if Binder was not connected
-        if (!res.success) {
-            dispatchToHeavy(
-                context,
-                Intent(MiniAppIpcContracts.ACTION_SLEEP_MINIAPP).apply {
-                    putExtra(MiniAppIpcContracts.EXTRA_INSTANCE_ID, instanceId)
-                }
-            )
+        val res = connectionManager.sendCommand(cmd, autoConnect = true)
+        val returnedPayload: Map<String, String>? = if (res.success && res.data.isNotEmpty()) {
+            res.data
+        } else if (editedPayload.isNotEmpty()) {
+            editedPayload
+        } else {
+            null
         }
 
-        // Step 2: Unregister and dismantle floating window in Main
-        LogKeeper.log(context, TAG, "INSTANCE_RELEASE id=$instanceId")
-        LogKeeper.log(context, TAG, "CONTENT_RELEASE id=$instanceId")
-        LogKeeper.log(context, TAG, "WINDOW_HIDDEN id=$instanceId")
-        windowManager.unregisterWindow(instanceId)
+        if (returnedPayload == null && !res.success) {
+            // Snapshot gathering failed: do NOT destroy runtime or data
+            LogKeeper.log(context, TAG, "SNAPSHOT_FAILURE id=$instanceId error=${res.message}")
+            LogKeeper.log(context, TAG, "FOLD_TRANSACTION_ABORTED id=$instanceId reason=snapshot_failed")
+            return
+        }
 
-        // Step 3: Commit recovery snapshot with state=SLEEPING
-        LogKeeper.log(context, TAG, "RECOVERY_SAVE_START id=$instanceId state=SLEEPING")
+        val finalPayload = returnedPayload ?: editedPayload
+        val textLength = (finalPayload["text"] ?: editedPayload["text"])?.length ?: 0
+        LogKeeper.log(context, TAG, "SNAPSHOT_SUCCESS id=$instanceId keys=${finalPayload.keys} textLength=$textLength")
+
+        // Step 2: Commit recovery snapshot durably in Main
+        LogKeeper.log(context, TAG, "DURABLE_SAVE_START id=$instanceId state=SLEEPING")
         val snapshot = try {
             val s = durableStore.loadSnapshot(instanceId) ?: MiniAppRecoverySnapshot(
                 instanceId = instanceId,
                 appType = appType,
-                state = MiniAppState.SLEEPING
+                state = MiniAppState.SLEEPING,
+                windowBounds = window?.bounds?.copyBounds() ?: WindowBounds(120, 150, 650, 850)
             )
             s.state = MiniAppState.SLEEPING
-            if (returnedPayload.isNotEmpty()) {
-                s.payload.putAll(returnedPayload)
+            // Preserve normal floating bounds (never let temporary maximized bounds overwrite normal bounds)
+            window?.let { w ->
+                if (!w.isMaximized) {
+                    s.windowBounds = w.bounds.copyBounds()
+                } else {
+                    w.maximizeRestoreBounds?.let { r -> s.windowBounds = r.copyBounds() }
+                }
             }
-            if (editedPayload.isNotEmpty()) {
-                s.payload.putAll(editedPayload)
+            s.payload.putAll(finalPayload)
+            val saveOk = durableStore.saveSnapshot(s)
+            if (!saveOk) {
+                LogKeeper.log(context, TAG, "DURABLE_SAVE_FAILURE id=$instanceId")
+                LogKeeper.log(context, TAG, "FOLD_TRANSACTION_ABORTED id=$instanceId reason=durable_save_failed")
+                return
             }
-            durableStore.saveSnapshot(s)
-            val sTextLen = s.payload["text"]?.length ?: 0
-            LogKeeper.log(context, TAG, "RECOVERY_SAVE_SUCCESS id=$instanceId keys=${s.payload.keys} textLength=$sTextLen")
+            LogKeeper.log(context, TAG, "DURABLE_SAVE_SUCCESS id=$instanceId keys=${s.payload.keys} textLength=$textLength")
             s
         } catch (e: Throwable) {
-            LogKeeper.logCrash(context, "$TAG: RECOVERY_SAVE_FAILURE id=$instanceId", e)
-            MiniAppRecoverySnapshot(instanceId = instanceId, appType = appType, state = MiniAppState.SLEEPING)
+            LogKeeper.logCrash(context, "$TAG: DURABLE_SAVE_FAILURE id=$instanceId", e)
+            LogKeeper.log(context, TAG, "FOLD_TRANSACTION_ABORTED id=$instanceId reason=durable_save_exception")
+            return
         }
 
-        // Step 4: Show launcher bubble in Main at independent buttonPosition
+        // Step 3: Snapshot and save succeeded. Release Heavy mini-app runtime and detach Main window
+        LogKeeper.log(context, TAG, "HEAVY_RELEASE id=$instanceId")
+        LogKeeper.log(context, TAG, "CONTENT_RELEASE id=$instanceId")
+        LogKeeper.log(context, TAG, "WINDOW_HIDDEN id=$instanceId")
+        windowManager.unregisterWindow(instanceId)
+
+        // Step 4: Now release Heavy consumer so Heavy can teardown when idle
+        LogKeeper.log(context, TAG, "CONSUMER_RELEASE id=miniapp_$instanceId reason=fold_complete")
+        connectionManager.releaseConsumer("miniapp_$instanceId", reason = "fold_complete:$instanceId")
+
+        // Step 5: Show compact folded launcher bubble in Main at independent buttonPosition
         showLauncherBubble(snapshot)
         LogKeeper.log(context, TAG, "FOLDED_LAUNCHER_SHOWN id=$instanceId buttonPosition=${snapshot.buttonPosition}")
+        LogKeeper.log(context, TAG, "FOLD_TRANSACTION_COMPLETE id=$instanceId")
         LogKeeper.log(context, TAG, "FLOATING_SESSION_END id=$instanceId reason=sleep")
     }
 
     /**
      * Wakes a sleeping mini-app:
      * 1. Removes launcher bubble.
-     * 2. Opens floating window restored from snapshot.
+     * 2. Loads durable recovery snapshot from Main.
+     * 3. Opens floating window restored from snapshot with exactly one logical reconstruction.
      */
     fun wakeMiniApp(instanceId: String) {
         LogKeeper.log(context, TAG, "FLOATING_SESSION_START source=wake id=$instanceId")

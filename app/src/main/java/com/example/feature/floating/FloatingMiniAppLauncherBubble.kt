@@ -32,16 +32,23 @@ class FloatingMiniAppLauncherBubble(
     private val onBubbleTapped: (String) -> Unit
 ) : FloatingWindow("bubble_$instanceId", context, TYPE_BUBBLE) {
 
+    private val bubbleSizePx = (52 * context.resources.displayMetrics.density).toInt()
+
     init {
-        val bubbleSizePx = (52 * context.resources.displayMetrics.density).toInt()
-        bounds = WindowBounds(initialX, initialY, bubbleSizePx, bubbleSizePx)
+        // Enforce exact compact dimensions in both bounds and WindowManager.LayoutParams
+        setWindowBounds(WindowBounds(initialX, initialY, bubbleSizePx, bubbleSizePx))
     }
 
     private var startRawX = 0f
     private var startRawY = 0f
-    private var initialX = 0
-    private var initialY = 0
+    private var initialBoundsX = 0
+    private var initialBoundsY = 0
     private var isDragging = false
+
+    override fun onRegister(manager: FloatingWindowManager) {
+        super.onRegister(manager)
+        com.example.core.LogKeeper.log(context, "FloatingMiniAppLauncherBubble", "LAUNCHER_ATTACH bounds=$bounds")
+    }
 
     override fun createContentView(context: Context): View {
         val root = FrameLayout(context).apply {
@@ -52,6 +59,7 @@ class FloatingMiniAppLauncherBubble(
             }
             background = bg
             elevation = 12 * context.resources.displayMetrics.density
+            layoutParams = FrameLayout.LayoutParams(bubbleSizePx, bubbleSizePx)
         }
 
         val label = TextView(context).apply {
@@ -75,13 +83,13 @@ class FloatingMiniAppLauncherBubble(
         root.addView(label)
 
         root.setOnTouchListener { _, event ->
-            val touchSlop = 10 * context.resources.displayMetrics.density
+            val touchSlop = 8 * context.resources.displayMetrics.density
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
                     startRawX = event.rawX
                     startRawY = event.rawY
-                    initialX = bounds.x
-                    initialY = bounds.y
+                    initialBoundsX = bounds.x
+                    initialBoundsY = bounds.y
                     isDragging = false
                     true
                 }
@@ -91,19 +99,25 @@ class FloatingMiniAppLauncherBubble(
                     val dy = event.rawY - startRawY
                     if (!isDragging && (abs(dx) > touchSlop || abs(dy) > touchSlop)) {
                         isDragging = true
+                        com.example.core.LogKeeper.log(context, "FloatingMiniAppLauncherBubble", "LAUNCHER_MOVE_START bounds=$bounds")
                     }
                     if (isDragging) {
                         val wm = manager ?: FloatingWindowManager.getInstance(context)
                         val screenW = wm.screenWidth
                         val screenH = wm.screenHeight
 
-                        val newX = (initialX + dx.toInt()).coerceIn(0, maxOf(0, screenW - bounds.width))
-                        val newY = (initialY + dy.toInt()).coerceIn(0, maxOf(0, screenH - bounds.height))
+                        val newX = (initialBoundsX + dx.toInt()).coerceIn(0, maxOf(0, screenW - bubbleSizePx))
+                        val newY = (initialBoundsY + dy.toInt()).coerceIn(0, maxOf(0, screenH - bubbleSizePx))
 
+                        // NEVER alter width or height during drag
                         bounds.x = newX
                         bounds.y = newY
+                        bounds.width = bubbleSizePx
+                        bounds.height = bubbleSizePx
                         layoutParams.x = newX
                         layoutParams.y = newY
+                        layoutParams.width = bubbleSizePx
+                        layoutParams.height = bubbleSizePx
                         wm.updateBounds(windowId, bounds)
                     }
                     true
@@ -111,6 +125,7 @@ class FloatingMiniAppLauncherBubble(
 
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                     if (isDragging) {
+                        com.example.core.LogKeeper.log(context, "FloatingMiniAppLauncherBubble", "LAUNCHER_MOVE_END bounds=$bounds")
                         // Persist ONLY buttonPosition in Main's authoritative store
                         DurableMiniAppStore.getInstance(context).updateButtonPosition(instanceId, bounds.x, bounds.y)
                         com.example.core.LogKeeper.log(context, "FloatingMiniAppLauncherBubble", "LAUNCHER_POSITION_CHANGED instance=$instanceId buttonPosition=(${bounds.x},${bounds.y})")

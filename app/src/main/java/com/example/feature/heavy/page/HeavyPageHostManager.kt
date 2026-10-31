@@ -773,10 +773,29 @@ class HeavyPageHostManager private constructor(private val context: Context) {
                             }
                         }
                     }
+                    "test_notes", "work_notes", "reader", "dictionary", "translation", "test_app", "generic" -> {
+                        LogKeeper.log(context, TAG, "Instantiating mini-app embedded view in :heavy for pageId='$pageId', type='$pageType'")
+                        val heavyFloatingHost = com.example.feature.floating.HeavyFloatingHost.getInstance(context)
+                        val miniAppInstance = heavyFloatingHost.getActiveInstance(pageId)
+                            ?: heavyFloatingHost.startInstance(pageId, pageType)
+                        miniAppInstance?.createContentView(context) ?: View(context).apply {
+                            setBackgroundColor(android.graphics.Color.parseColor("#181825"))
+                        }
+                    }
                     else -> {
-                        LogKeeper.log(context, TAG, "Unsupported embedded page type '$pageType'")
-                        latch.countDown()
-                        return@post
+                        if (params.getBoolean("isMiniApp", false)) {
+                            LogKeeper.log(context, TAG, "Instantiating generic mini-app view in :heavy for pageId='$pageId', type='$pageType'")
+                            val heavyFloatingHost = com.example.feature.floating.HeavyFloatingHost.getInstance(context)
+                            val miniAppInstance = heavyFloatingHost.getActiveInstance(pageId)
+                                ?: heavyFloatingHost.startInstance(pageId, pageType)
+                            miniAppInstance?.createContentView(context) ?: View(context).apply {
+                                setBackgroundColor(android.graphics.Color.parseColor("#181825"))
+                            }
+                        } else {
+                            LogKeeper.log(context, TAG, "Unsupported embedded page type '$pageType'")
+                            latch.countDown()
+                            return@post
+                        }
                     }
                 }
 

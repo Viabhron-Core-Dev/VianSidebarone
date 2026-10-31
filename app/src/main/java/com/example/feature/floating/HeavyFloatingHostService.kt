@@ -63,6 +63,7 @@ class HeavyFloatingHostService : Service() {
             }
 
             if (instanceId.isNotEmpty()) {
+                LogKeeper.log(this@HeavyFloatingHostService, "HeavyFloatingHostService", "CMD_START_OPERATION id=$instanceId type=$appType bounds=$bounds")
                 val inst = host.startInstance(instanceId, appType, bounds, payload)
                 if (inst != null) {
                     IpcResult.success("Started $instanceId")
@@ -140,6 +141,7 @@ class HeavyFloatingHostService : Service() {
                 val bounds = WindowBounds(bx, by, bw, bh)
 
                 if (!instanceId.isNullOrEmpty()) {
+                    LogKeeper.log(this@HeavyFloatingHostService, "HeavyFloatingHostService", "INTENT_START_MINIAPP id=$instanceId type=$appType bounds=$bounds")
                     host.startInstance(instanceId, appType, bounds)
                 }
             }
