@@ -283,6 +283,9 @@ class AddElementActivity : ComponentActivity() {
         addItem(android.R.drawable.ic_menu_edit, "Work Notes") {
             handleElementSelected("system:work_notes", "Work Notes")
         }
+        addItem(android.R.drawable.ic_menu_edit, "Test Notes") {
+            handleElementSelected("system:test_notes", "Test Notes")
+        }
         addItem(android.R.drawable.ic_menu_gallery, "Page Window") {
 //             startActivityForResult(Intent(this, PageWindowPickerActivity::class.java), 900)
         }

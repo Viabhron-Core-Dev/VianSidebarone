@@ -316,6 +316,7 @@ val ALL_UTILITIES_ACTIONS = listOf(
 )
 
 val ALL_FLOATING_WINDOWS = listOf(
+    SidebarItem.SystemAction("test_notes", "Test Notes", android.R.drawable.ic_menu_edit),
     SidebarItem.SystemAction("ebook_reader", "eBook Reader", com.example.R.drawable.ic_library_books),
     SidebarItem.SystemAction("dictionary_floating", "Dictionary (Floating)", android.R.drawable.ic_menu_sort_alphabetically),
     SidebarItem.SystemAction("translation_floating", "Translation (Floating)", android.R.drawable.ic_menu_sort_alphabetically),

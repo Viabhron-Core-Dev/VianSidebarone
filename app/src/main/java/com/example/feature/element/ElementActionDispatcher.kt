@@ -197,6 +197,10 @@ object ElementActionDispatcher {
                 MiniAppManager.toggleApp(context, "work_notes")
                 true
             }
+            "test_notes" -> {
+                MiniAppManager.toggleApp(context, "test_notes")
+                true
+            }
             "ebook_reader" -> {
                 MiniAppManager.toggleApp(context, "reader")
                 true

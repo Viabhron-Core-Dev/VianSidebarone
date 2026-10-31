@@ -369,3 +369,98 @@ Capped at 500 lines per file.
 * How it was verified: local build only (`gradle :app:testDebugUnitTest` passed all 317 unit tests; `compile_applet` passed cleanly).
 * Any deviation from what was requested, and why: None. All existing architectures preserved; no unrelated features touched.
 * Any known issue or follow-up needed: Ready for on-device physical testing.
+
+---
+
+### Entry 106
+* Timestamp: 2026-10-31T07:20:00Z
+* One-line summary: Implemented Floating Mini-App Framework Foundation with Main-authoritative durable recovery, sleep contract, independent coordinates, floating shell, and idle teardown.
+* Exact files touched:
+  - app/src/main/java/com/example/feature/floating/MiniAppContract.kt
+  - app/src/main/java/com/example/feature/floating/DurableMiniAppStore.kt
+  - app/src/main/java/com/example/feature/floating/HeavyFloatingHost.kt
+  - app/src/main/java/com/example/feature/floating/HeavyFloatingHostService.kt
+  - app/src/main/java/com/example/feature/floating/FloatingMiniAppWindow.kt
+  - app/src/main/java/com/example/feature/floating/FloatingMiniAppLauncherBubble.kt
+  - app/src/main/java/com/example/feature/floating/FloatingMiniAppBridge.kt
+  - app/src/main/java/com/example/feature/floating/DefaultMiniAppFactory.kt
+  - app/src/main/java/com/example/feature/miniapps/MiniAppManager.kt
+  - app/src/test/java/com/example/feature/floating/FloatingMiniAppFrameworkTest.kt
+  - receipts/RECEIPTS_098.md
+* What was actually done:
+  - Refactored `MiniAppContract.kt`:
+    * Defined `MiniAppState` (`ACTIVE`, `SLEEPING`, `CLOSED`) and fine-grained `MiniAppLifecycleState`.
+    * Created compact, versioned `MiniAppRecoverySnapshot` capturing instanceId, appType, title, state, windowBounds, maximizeRestoreBounds, buttonPosition, payload map, version, and timestamp.
+    * Extended `MiniAppInstance` with formal sleep contract: `prepareForSleep(): Map<String, String>`, `releaseRuntime()`, `restoreFromSnapshot()`.
+  - Refactored `DurableMiniAppStore.kt`:
+    * Main process established as single authoritative owner of durable mini-app state; eliminated dual file-backed writers across processes.
+    * Implemented atomic JSON persistence using temp file renames.
+    * Guaranteed strict separation between `windowBounds` and `buttonPosition` so neither can overwrite or corrupt the other.
+  - Updated `HeavyFloatingHost.kt` & `HeavyFloatingHostService.kt`:
+    * Heavy process operates purely in-memory with zero disk writes.
+    * On sleep (`prepareSleep`), gathers recovery payload, dismantles instance runtime, and returns payload to Main.
+    * Sleeping mini-apps return 0 in `getActiveInstanceCount()`, allowing `HeavyFloatingHostService.checkDisposableTeardown()` to trigger `stopSelf()` when idle.
+  - Implemented Floating Window Shell (`FloatingMiniAppWindow.kt`):
+    * Reusable View-based floating shell with top bar (icon, title, sleep/minimize button, maximize/restore button, close button).
+    * Double-tap on top bar toggles maximize / restore using `maximizeRestoreBounds`.
+    * Dragging top bar moves window; interactive bottom-right corner drag resizes window.
+    * Added `ViewTreeObserver.OnGlobalLayoutListener` to shift window upward when obscured by software keyboard, restoring exact bounds on close.
+    * Supports multiple concurrent floating windows without arbitrary limits.
+  - Implemented Persistent Floating Launcher Bubble (`FloatingMiniAppLauncherBubble.kt`):
+    * Represents sleeping mini-apps in Main with 0 MB Heavy memory overhead.
+    * Draggable across screen (updates `buttonPosition` exclusively); tap wakes mini-app back to `ACTIVE`.
+  - Updated `FloatingMiniAppBridge.kt` & `MiniAppManager.kt`:
+    * Implemented lifecycle transitions (`ACTIVE` <-> `SLEEPING` <-> `CLOSED`).
+    * Connected `MiniAppManager.toggleApp(context, pageType)` to `FloatingMiniAppBridge.toggleMiniApp(pageType)`.
+    * Implemented `restoreActiveMiniApps()` restoring active windows and sleeping launcher bubbles on cold start.
+  - Verification & Unit Testing:
+    * Created `FloatingMiniAppFrameworkTest.kt` with 5 targeted tests covering snapshot serialization, independent coordinates, sleep contract, Heavy host idle teardown, and MiniAppManager wiring.
+* How it was verified: local build only (`gradle :app:testDebugUnitTest` passed all 322 tests; `compile_applet` passed cleanly).
+* Any deviation from what was requested, and why: None. Internet Speed Monitor, Media, Scheduler, Notifications, Calculator, and Compass untouched.
+* Any known issue or follow-up needed: Ready for on-device verification.
+
+---
+
+### Entry 107
+* Timestamp: 2026-10-31T08:15:00Z
+* One-line summary: Implemented concrete `test_notes` internal floating mini-app with factory registration, sleep/wake payload persistence, independent coordinates, and complete framework wiring.
+* Exact files touched:
+  - app/src/main/java/com/example/feature/floating/TestNotesMiniApp.kt
+  - app/src/main/java/com/example/feature/floating/HeavyFloatingHost.kt
+  - app/src/main/java/com/example/feature/floating/HeavyFloatingHostService.kt
+  - app/src/main/java/com/example/feature/floating/FloatingMiniAppWindow.kt
+  - app/src/main/java/com/example/feature/floating/FloatingMiniAppBridge.kt
+  - app/src/main/java/com/example/feature/floating/FloatingMiniAppLauncherBubble.kt
+  - app/src/main/java/com/example/feature/sidebar/SidebarItem.kt
+  - app/src/main/java/com/example/feature/element/ElementActionDispatcher.kt
+  - app/src/main/java/com/example/feature/settings/AddElementActivity.kt
+  - app/src/main/java/com/example/feature/element/ElementIdParser.kt
+  - app/src/main/java/com/example/feature/sidebar/SidebarAppsManager.kt
+  - app/src/test/java/com/example/feature/floating/FloatingMiniAppFrameworkTest.kt
+  - receipts/RECEIPTS_098.md
+* What was actually done:
+  - Implemented concrete `TestNotesMiniAppInstance` and `TestNotesMiniAppFactory` in `TestNotesMiniApp.kt`:
+    * Title: "Test Notes" with initial instructional text ("Floating framework test.\nMove, resize, maximize, sleep, wake, and edit this text.").
+    * Pure Android Views / EditText with no Compose, WebView, database, or external dependencies.
+    * Implemented full `MiniAppInstance` lifecycle (`onCreate`, `onStart`, `onResume`, `onPause`, `onStop`, `onDestroy`).
+    * Implemented sleep contract: `prepareForSleep()` serializes current note text into payload key `note_text`; `releaseRuntime()` tears down Views; `restoreFromSnapshot()` reconstructs view and populates saved text.
+  - Registered `TestNotesMiniAppFactory` in `HeavyFloatingHost` for type `test_notes`.
+  - Updated `HeavyFloatingHost` and `HeavyFloatingHostService` to pass incoming command payload into `prepareSleep(instanceId, payload)` before invoking `prepareForSleep()`.
+  - Updated `FloatingMiniAppWindow.kt`:
+    * Embedded editable client View for `test_notes` capturing real-time text edits into `getCurrentPayload()`.
+    * Synchronized note text across lifecycle events (`onShow`, `onDestroy`, and sleep).
+  - Updated `FloatingMiniAppBridge.kt`:
+    * On `sleepMiniApp`, gathers current text payload from window, dispatches command to Heavy, persists snapshot to `DurableMiniAppStore`, and displays `FloatingMiniAppLauncherBubble`.
+    * On `wakeMiniApp`, passes saved payload snapshot to Heavy and window, restoring exact note text and `windowBounds`.
+  - Added "Test Notes" to Sidebar & Element dispatchers:
+    * `SidebarItem.kt`: Added `SidebarItem.SystemAction("test_notes", "Test Notes", ic_menu_edit)`.
+    * `ElementActionDispatcher.kt`: Routed `"test_notes"` to `MiniAppManager.toggleApp(context, "test_notes")`.
+    * `AddElementActivity.kt`: Added "Test Notes" under Floating Windows.
+    * `ElementIdParser.kt` & `SidebarAppsManager.kt`: Added ID parsing and title lookup for `test_notes`.
+  - Verification & Unit Testing:
+    * Added 3 targeted unit tests in `FloatingMiniAppFrameworkTest.kt` verifying `TestNotesMiniAppInstance` text persistence/restoration, `HeavyFloatingHost` factory dispatch and lifecycle, and `MiniAppManager.toggleApp("test_notes")` integration.
+* How it was verified: local build and unit tests only (`gradle :app:testDebugUnitTest` passed all 322 tests; `compile_applet` passed cleanly).
+* Any deviation from what was requested, and why: None. Unrelated modules, PWAs, eReader, and frozen Internet Speed Monitor left untouched.
+* Any known issue or follow-up needed: Ready for on-device physical testing.
+
+
