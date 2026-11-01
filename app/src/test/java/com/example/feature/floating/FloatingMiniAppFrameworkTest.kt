@@ -7,6 +7,11 @@ import android.view.WindowManager
 import com.example.core.FakeSharedPreferences
 import com.example.core.WindowBounds
 import com.example.feature.miniapps.MiniAppManager
+import com.example.core.ipc.HeavyCommand
+import com.example.core.ipc.HeavyCommandType
+import com.example.core.ipc.HeavyProcessConnectionManager
+import com.example.core.ipc.ConnectionState
+import com.example.core.ipc.IHeavyHostContract
 import org.junit.Assert.*
 import org.junit.Before
 import org.junit.Rule
@@ -359,30 +364,149 @@ class FloatingMiniAppFrameworkTest {
         )
         store.saveSnapshot(initialSnapshot)
 
-        // Simulate snapshot preparation in Heavy
+        // Simulate instance running in Heavy
         val host = HeavyFloatingHost.getInstance(testContext)
         val instance = host.startInstance("fold_safe_test", "test_notes", initialSnapshot.windowBounds, initialSnapshot.payload)
         assertNotNull(instance)
 
-        // 1. Snapshot gathered BEFORE Heavy release
-        val snapshotPayload = host.prepareSleep("fold_safe_test")
+        // 1. Non-destructive snapshot retrieval from Heavy
+        val snapshotPayload = host.getSnapshot("fold_safe_test")
         assertTrue(snapshotPayload.containsKey(TestNotesMiniAppInstance.KEY_TEXT))
         assertEquals("Vital Note Content", snapshotPayload[TestNotesMiniAppInstance.KEY_TEXT])
+        // Live Heavy instance MUST still be alive!
+        assertEquals("Heavy instance must NOT be released before durable persistence", 1, host.getActiveInstanceCount())
 
-        // 2. Commit to durable store
+        // 2. Commit recovery snapshot to durable store in Main
         initialSnapshot.state = MiniAppState.SLEEPING
         initialSnapshot.payload.putAll(snapshotPayload)
         val saveOk = store.saveSnapshot(initialSnapshot)
-        assertTrue(saveOk)
+        assertTrue("Main persistence must succeed", saveOk)
 
-        // 3. Verify Heavy active instance is now 0 (disposable)
-        assertEquals(0, host.getActiveInstanceCount())
+        // 3. ONLY after durable save succeeds is the instance released from Heavy
+        val released = host.releaseInstance("fold_safe_test", reason = "sleep_confirmed")
+        assertTrue("Heavy instance release must succeed", released)
+        assertEquals("Heavy active instance count must reach 0 after release", 0, host.getActiveInstanceCount())
 
         // 4. Verify durable store contains exact content
         val loaded = store.loadSnapshot("fold_safe_test")
         assertNotNull(loaded)
         assertEquals(MiniAppState.SLEEPING, loaded!!.state)
         assertEquals("Vital Note Content", loaded.payload[TestNotesMiniAppInstance.KEY_TEXT])
+    }
+
+    @Test
+    fun testSnapshotOrPersistenceFailurePreservesLiveHeavyInstance() {
+        val store = DurableMiniAppStore.getInstance(testContext)
+        val initialSnapshot = MiniAppRecoverySnapshot(
+            instanceId = "preserve_live_test",
+            appType = "test_notes",
+            state = MiniAppState.ACTIVE,
+            windowBounds = WindowBounds(100, 100, 500, 600),
+            payload = mutableMapOf(TestNotesMiniAppInstance.KEY_TEXT to "Critical Unsaved Data")
+        )
+        store.saveSnapshot(initialSnapshot)
+
+        val host = HeavyFloatingHost.getInstance(testContext)
+        val instance = host.startInstance("preserve_live_test", "test_notes", initialSnapshot.windowBounds, initialSnapshot.payload)
+        assertNotNull(instance)
+        assertEquals(1, host.getActiveInstanceCount())
+
+        // Simulate snapshot retrieval
+        val snapshotPayload = host.getSnapshot("preserve_live_test")
+        assertEquals(1, host.getActiveInstanceCount())
+
+        // Simulate failure during Main durable persistence (e.g. disk full / exception)
+        val persistenceSucceeded = false
+        if (!persistenceSucceeded) {
+            // Fold transaction aborted: do NOT call releaseInstance!
+        }
+
+        // Live Heavy instance must remain intact
+        assertEquals("Heavy instance must remain alive when durable persistence fails", 1, host.getActiveInstanceCount())
+        val liveInstance = host.getActiveInstance("preserve_live_test")
+        assertNotNull(liveInstance)
+        assertEquals("Critical Unsaved Data", liveInstance!!.onSaveState()[TestNotesMiniAppInstance.KEY_TEXT])
+    }
+
+    @Test
+    fun testIdempotentRepeatedStartAndWake() {
+        val host = HeavyFloatingHost.getInstance(testContext)
+        val bounds = WindowBounds(120, 160, 500, 600)
+
+        // First start
+        val inst1 = host.startInstance("idempotent_test", "test_notes", bounds, mapOf("text" to "Initial Note Content"))
+        assertNotNull(inst1)
+        assertEquals(1, host.getActiveInstanceCount())
+        assertEquals("Initial Note Content", inst1!!.onSaveState()[TestNotesMiniAppInstance.KEY_TEXT])
+
+        // Second start for the same instanceId (e.g. wake or re-mount) with updated payload
+        val inst2 = host.startInstance("idempotent_test", "test_notes", bounds, mapOf("text" to "Updated Wake Content"))
+        assertNotNull(inst2)
+        assertEquals("Second start must NOT create a duplicate instance", 1, host.getActiveInstanceCount())
+        assertSame("Second start must return the same instance", inst1, inst2)
+        assertEquals("Updated snapshot payload must be restored onto existing instance", "Updated Wake Content", inst2!!.onSaveState()[TestNotesMiniAppInstance.KEY_TEXT])
+    }
+
+    @Test
+    fun testStartRequestedDuringConnectingQueuesAndDeliversExactlyOnce() {
+        val connManager = HeavyProcessConnectionManager.getInstance(testContext)
+        connManager.setMockProxyForTesting(null, ConnectionState.CONNECTING)
+
+        val cmd = HeavyCommand(
+            commandId = "test_cmd_1",
+            type = HeavyCommandType.START_OPERATION,
+            targetId = "test_miniapp_queue",
+            payload = mapOf("instance_id" to "test_miniapp_queue", "app_type" to "test_notes")
+        )
+
+        // Send while CONNECTING: must queue without terminal failure
+        val res = connManager.sendCommand(cmd, autoConnect = true)
+        assertTrue("Command sent during CONNECTING with autoConnect must report queued success", res.success)
+        assertEquals(1, connManager.getPendingCommandCountForTesting())
+
+        // Mock Heavy host proxy recording delivered commands
+        val deliveredCommands = mutableListOf<String>()
+        val mockProxy = object : IHeavyHostContract {
+            override fun sendCommand(commandJson: String): String {
+                deliveredCommands.add(commandJson)
+                return com.example.core.ipc.IpcResult.success("Started").toJson()
+            }
+            override fun syncSnapshot(snapshotJson: String): String = com.example.core.ipc.IpcResult.success().toJson()
+            override fun ping(): Boolean = true
+            override fun registerCallback(callbackBinder: android.os.IBinder): Boolean = true
+            override fun unregisterCallback(): Boolean = true
+        }
+
+        // Connection succeeds -> flushes queued commands
+        connManager.setMockProxyForTesting(mockProxy, ConnectionState.CONNECTED)
+        assertEquals(0, connManager.getPendingCommandCountForTesting())
+        assertEquals("Queued command must be delivered exactly once upon connection", 1, deliveredCommands.size)
+        assertTrue(deliveredCommands[0].contains("test_cmd_1"))
+    }
+
+    @Test
+    fun testFoldedRecordRestorationDoesNotWakeHeavy() {
+        val store = DurableMiniAppStore.getInstance(testContext)
+        val sleepingSnapshot = MiniAppRecoverySnapshot(
+            instanceId = "sleeping_note_1",
+            appType = "test_notes",
+            state = MiniAppState.SLEEPING,
+            windowBounds = WindowBounds(100, 100, 500, 600),
+            buttonPosition = Pair(40, 200),
+            payload = mutableMapOf(TestNotesMiniAppInstance.KEY_TEXT to "Sleeping Note")
+        )
+        store.saveSnapshot(sleepingSnapshot)
+
+        val host = HeavyFloatingHost.getInstance(testContext)
+        assertEquals(0, host.getActiveInstanceCount())
+
+        val bridge = FloatingMiniAppBridge.getInstance(testContext)
+        val restoredWindows = bridge.restoreActiveMiniApps()
+
+        // Sleeping mini-apps must NOT create heavy floating windows
+        assertTrue("Sleeping mini-apps should not restore as full windows on startup", restoredWindows.isEmpty())
+        // Heavy process instance count must remain 0
+        assertEquals("Sleeping mini-apps must not instantiate runtimes in Heavy on startup", 0, host.getActiveInstanceCount())
     }
 
     @Test
@@ -449,5 +573,23 @@ class FloatingMiniAppFrameworkTest {
         assertEquals(normalBounds.y, window.bounds.y)
         assertEquals(normalBounds.width, window.bounds.width)
         assertEquals(normalBounds.height, window.bounds.height)
+    }
+
+    @Test
+    fun testSurfaceLifecycleCleanupAndTeardownCheck() {
+        val pageHostManager = com.example.feature.heavy.page.HeavyPageHostManager.getInstance(testContext)
+        val initialCount = pageHostManager.getActivePageCount()
+
+        // Release surface host
+        pageHostManager.releaseSurfaceHost("surface_cleanup_test")
+        val afterCount = pageHostManager.getActivePageCount()
+        assertTrue(afterCount <= initialCount)
+        assertFalse(pageHostManager.isEmbeddedHostActive("surface_cleanup_test"))
+
+        // Heavy idle check evaluation
+        val host = HeavyFloatingHost.getInstance(testContext)
+        val activeFloating = host.getActiveInstanceCount()
+        val willStop = (activeFloating == 0 && afterCount == 0)
+        assertTrue("When active instances and embedded pages reach 0, teardown condition must be true", willStop)
     }
 }

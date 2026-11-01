@@ -235,7 +235,11 @@ class HeavyHostProxy(
             data.writeBundle(params)
             remote.transact(IpcTransactions.TRANSACTION_CREATE_SURFACE_PACKAGE, data, reply, 0)
             reply.readException()
-            reply.readBundle(javaClass.classLoader)
+            val bundle = reply.readBundle(javaClass.classLoader)
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+                bundle?.classLoader = android.view.SurfaceControlViewHost.SurfacePackage::class.java.classLoader
+            }
+            bundle
         } catch (e: Throwable) {
             null
         } finally {

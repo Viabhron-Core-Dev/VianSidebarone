@@ -16,6 +16,7 @@ import android.view.WindowManager
 import android.widget.FrameLayout
 import androidx.annotation.RequiresApi
 import com.example.core.LogKeeper
+import com.example.core.WindowBounds
 import com.example.core.ipc.HeavyCommand
 import com.example.core.ipc.HeavyEvent
 import com.example.core.ipc.HeavyEventType
@@ -524,36 +525,24 @@ class HeavyPageHostManager private constructor(private val context: Context) {
             return null
         }
 
-        // Idempotency: if already created, update bounds and return existing SurfacePackage
-        val existing = activeEmbeddedHosts[pageId]
+        // If host already exists for pageId, release the stale host before binding to the new hostToken
+        val existing = activeEmbeddedHosts.remove(pageId)
         if (existing != null) {
-            LogKeeper.log(context, TAG, "Embedded host for '$pageId' already exists; updating dimensions ${width}x$height")
+            LogKeeper.log(context, TAG, "Releasing previous embedded host for '$pageId' before creating fresh SurfaceControlViewHost with new hostToken")
             mainHandler.post {
                 try {
-                    (existing.host as? android.view.SurfaceControlViewHost)?.relayout(width, height)
-                    if (backgroundColor != 0) {
-                        (existing.pageView as? CalculatorPageView)?.applyThemeBackground(backgroundColor, isRight)
-                        (existing.pageView as? HybridGridPageView)?.applyThemeBackground(backgroundColor, isRight)
-                        (existing.pageView as? AppsPageView)?.applyThemeBackground(backgroundColor, isRight)
-                        (existing.pageView as? WidgetsGridPageView)?.applyThemeBackground(backgroundColor, isRight)
-                        (existing.pageView as? WidgetPageView)?.applyThemeBackground(backgroundColor, isRight)
-                        (existing.pageView as? CompassPageView)?.applyThemeBackground(backgroundColor, isRight)
-                        (existing.pageView as? SchedulerPageView)?.applyThemeBackground(backgroundColor, isRight)
-                        (existing.pageView as? AppTrackerPageView)?.applyThemeBackground(backgroundColor, isRight)
-                    }
+                    (existing.host as? android.view.SurfaceControlViewHost)?.release()
                 } catch (e: Throwable) {
                     LogKeeper.logCrash(context, TAG, e)
                 }
             }
-            val sp = (existing.host as? android.view.SurfaceControlViewHost)?.surfacePackage
-            return Bundle().apply {
-                putBoolean("success", true)
-                putParcelable("surfacePackage", sp)
-            }
         }
 
         val displayManager = context.getSystemService(Context.DISPLAY_SERVICE) as? android.hardware.display.DisplayManager
+        @Suppress("DEPRECATION")
         val display = displayManager?.getDisplay(displayId)
+            ?: displayManager?.getDisplay(android.view.Display.DEFAULT_DISPLAY)
+            ?: (context.getSystemService(Context.WINDOW_SERVICE) as? WindowManager)?.defaultDisplay
         if (display == null) {
             LogKeeper.log(context, TAG, "Cannot find displayId=$displayId for embedded page '$pageId'")
             return null
@@ -776,8 +765,19 @@ class HeavyPageHostManager private constructor(private val context: Context) {
                     "test_notes", "work_notes", "reader", "dictionary", "translation", "test_app", "generic" -> {
                         LogKeeper.log(context, TAG, "Instantiating mini-app embedded view in :heavy for pageId='$pageId', type='$pageType'")
                         val heavyFloatingHost = com.example.feature.floating.HeavyFloatingHost.getInstance(context)
+                        val initialPayload = LinkedHashMap<String, String>()
+                        val payloadBundle = params.getBundle("initialPayload")
+                        if (payloadBundle != null) {
+                            for (k in payloadBundle.keySet()) {
+                                payloadBundle.getString(k)?.let { initialPayload[k] = it }
+                            }
+                        }
+                        val bx = params.getInt("bounds_x", 100)
+                        val by = params.getInt("bounds_y", 100)
+                        val bw = if (width > 0) width else 600
+                        val bh = if (height > 0) height else 800
                         val miniAppInstance = heavyFloatingHost.getActiveInstance(pageId)
-                            ?: heavyFloatingHost.startInstance(pageId, pageType)
+                            ?: heavyFloatingHost.startInstance(pageId, pageType, WindowBounds(bx, by, bw, bh), initialPayload)
                         miniAppInstance?.createContentView(context) ?: View(context).apply {
                             setBackgroundColor(android.graphics.Color.parseColor("#181825"))
                         }
@@ -786,8 +786,19 @@ class HeavyPageHostManager private constructor(private val context: Context) {
                         if (params.getBoolean("isMiniApp", false)) {
                             LogKeeper.log(context, TAG, "Instantiating generic mini-app view in :heavy for pageId='$pageId', type='$pageType'")
                             val heavyFloatingHost = com.example.feature.floating.HeavyFloatingHost.getInstance(context)
+                            val initialPayload = LinkedHashMap<String, String>()
+                            val payloadBundle = params.getBundle("initialPayload")
+                            if (payloadBundle != null) {
+                                for (k in payloadBundle.keySet()) {
+                                    payloadBundle.getString(k)?.let { initialPayload[k] = it }
+                                }
+                            }
+                            val bx = params.getInt("bounds_x", 100)
+                            val by = params.getInt("bounds_y", 100)
+                            val bw = if (width > 0) width else 600
+                            val bh = if (height > 0) height else 800
                             val miniAppInstance = heavyFloatingHost.getActiveInstance(pageId)
-                                ?: heavyFloatingHost.startInstance(pageId, pageType)
+                                ?: heavyFloatingHost.startInstance(pageId, pageType, WindowBounds(bx, by, bw, bh), initialPayload)
                             miniAppInstance?.createContentView(context) ?: View(context).apply {
                                 setBackgroundColor(android.graphics.Color.parseColor("#181825"))
                             }

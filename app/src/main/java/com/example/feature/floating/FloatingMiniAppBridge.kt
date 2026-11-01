@@ -113,12 +113,13 @@ class FloatingMiniAppBridge private constructor(private val context: Context) {
             ?: durableStore.loadSnapshot(instanceId)?.appType
             ?: "generic"
 
-        // Step 1: Request sleep from Heavy via Binder while consumer is STILL ACQUIRED
+        // Step 1: Request non-destructive snapshot from Heavy via Binder while consumer is STILL ACQUIRED
         LogKeeper.log(context, TAG, "SNAPSHOT_REQUEST id=$instanceId target=Heavy")
         val payloadToSend = LinkedHashMap<String, String>().apply {
             put("instance_id", instanceId)
-            put("action", "sleep")
+            put("action", "get_snapshot")
             put("sleep", "true")
+            put("release", "false")
             putAll(editedPayload)
         }
         val cmd = HeavyCommand(
@@ -181,8 +182,20 @@ class FloatingMiniAppBridge private constructor(private val context: Context) {
             return
         }
 
-        // Step 3: Snapshot and save succeeded. Release Heavy mini-app runtime and detach Main window
+        // Step 3: Snapshot and save succeeded. Release Heavy mini-app runtime and surface host
         LogKeeper.log(context, TAG, "HEAVY_RELEASE id=$instanceId")
+        val releaseCmd = HeavyCommand(
+            commandId = UUID.randomUUID().toString(),
+            type = HeavyCommandType.STOP_OPERATION,
+            targetId = instanceId,
+            payload = mapOf(
+                "action" to "release_sleeping_instance",
+                "instance_id" to instanceId
+            )
+        )
+        connectionManager.sendCommand(releaseCmd, autoConnect = false)
+        connectionManager.releaseSurfaceHost(instanceId)
+
         LogKeeper.log(context, TAG, "CONTENT_RELEASE id=$instanceId")
         LogKeeper.log(context, TAG, "WINDOW_HIDDEN id=$instanceId")
         windowManager.unregisterWindow(instanceId)
@@ -242,6 +255,8 @@ class FloatingMiniAppBridge private constructor(private val context: Context) {
         windowManager.unregisterWindow(instanceId)
 
         val connectionManager = HeavyProcessConnectionManager.getInstance(context)
+        connectionManager.releaseSurfaceHost(instanceId)
+
         val cmd = HeavyCommand(
             commandId = UUID.randomUUID().toString(),
             type = HeavyCommandType.STOP_OPERATION,

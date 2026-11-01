@@ -82,7 +82,7 @@ class TestNotesMiniAppInstance(
 
     override fun restoreFromSnapshot(snapshot: MiniAppRecoverySnapshot) {
         val payload = snapshot.payload
-        val restored = payload[KEY_TEXT] ?: payload["note_content"]
+        val restored = payload[KEY_TEXT] ?: payload["text"] ?: payload["note_content"]
         if (!restored.isNullOrEmpty()) {
             noteText = restored
         }
@@ -91,7 +91,7 @@ class TestNotesMiniAppInstance(
 
     override fun onSaveState(): Map<String, String> {
         saveTextFromUi()
-        return mapOf(KEY_TEXT to noteText)
+        return mapOf(KEY_TEXT to noteText, "text" to noteText)
     }
 
     private fun saveTextFromUi() {

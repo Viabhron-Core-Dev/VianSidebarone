@@ -8,6 +8,8 @@ import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.view.Display
 import android.view.GestureDetector
 import android.view.Gravity
@@ -28,8 +30,10 @@ import com.example.core.FloatingWindow
 import com.example.core.FloatingWindowManager
 import com.example.core.LogKeeper
 import com.example.core.WindowBounds
+import com.example.core.ipc.ConnectionState
 import com.example.core.ipc.HeavyCommand
 import com.example.core.ipc.HeavyCommandType
+import com.example.core.ipc.HeavyConnectionListener
 import com.example.core.ipc.HeavyProcessConnectionManager
 import java.util.UUID
 import kotlin.math.abs
@@ -57,6 +61,7 @@ class FloatingMiniAppWindow(
 ) : FloatingWindow(instanceId, context, TYPE_MINIAPP) {
 
     private val durableStore = DurableMiniAppStore.getInstance(context)
+    private val mainHandler = Handler(Looper.getMainLooper())
 
     // Geometry separation
     var isMaximized: Boolean = false
@@ -79,6 +84,24 @@ class FloatingMiniAppWindow(
     private var currentNoteText: String = ""
     private var embeddedSurfaceView: SurfaceView? = null
     private var currentSurfacePackage: Any? = null // SurfaceControlViewHost.SurfacePackage
+    private var surfaceReady: Boolean = false
+    private var isSurfaceAttached: Boolean = false
+
+    private val connectionListener = object : HeavyConnectionListener {
+        override fun onConnected() {
+            mainHandler.post {
+                tryAttachSurfacePackage()
+            }
+        }
+        override fun onDisconnected() {}
+        override fun onHeavyProcessDied() {
+            mainHandler.post {
+                if (isAttached && Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+                    contentContainer?.let { attachFallbackContentView(context, it, "heavy_process_died") }
+                }
+            }
+        }
+    }
 
     init {
         val saved = durableStore.loadSnapshot(instanceId)
@@ -170,46 +193,8 @@ class FloatingMiniAppWindow(
 
             sv.holder.addCallback(object : SurfaceHolder.Callback {
                 override fun surfaceCreated(holder: SurfaceHolder) {
-                    val hostToken = sv.hostToken
-                    if (hostToken != null) {
-                        val displayId = try {
-                            sv.display?.displayId ?: Display.DEFAULT_DISPLAY
-                        } catch (_: Exception) {
-                            Display.DEFAULT_DISPLAY
-                        }
-                        val w = if (container.width > 0) container.width else bounds.width
-                        val h = if (container.height > 0) container.height else bounds.height
-
-                        val params = Bundle().apply {
-                            putString("pageId", instanceId)
-                            putString("pageType", appType)
-                            putBoolean("isMiniApp", true)
-                            putBinder("hostToken", hostToken)
-                            putInt("displayId", displayId)
-                            putInt("width", w)
-                            putInt("height", h)
-                        }
-
-                        val connectionManager = HeavyProcessConnectionManager.getInstance(context)
-                        val reply = connectionManager.createSurfacePackage(params)
-                        if (reply != null && reply.getBoolean("success")) {
-                            @Suppress("DEPRECATION")
-                            val sp = reply.getParcelable<SurfaceControlViewHost.SurfacePackage>("surfacePackage")
-                            if (sp != null) {
-                                currentSurfacePackage = sp
-                                sv.setChildSurfacePackage(sp)
-                                container.background = null
-                                LogKeeper.log(context, "FloatingMiniAppWindow", "CONTENT_MODE_SELECTED mode=surface_package reason=API30+_surface_package_embedded")
-                                LogKeeper.log(context, "FloatingMiniAppWindow", "CONTENT_CREATED id=$instanceId mode=embedded_heavy")
-                                LogKeeper.log(context, "FloatingMiniAppWindow", "SURFACE_ATTACHED id=$instanceId mode=embedded_heavy")
-                                return
-                            }
-                        }
-                    }
-
-                    // Fallback if surface package creation failed
-                    LogKeeper.log(context, "FloatingMiniAppWindow", "CONTENT_MODE_SELECTED mode=fallback reason=surface_package_creation_returned_null")
-                    attachFallbackContentView(context, container)
+                    surfaceReady = true
+                    tryAttachSurfacePackage()
                 }
 
                 override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
@@ -217,6 +202,8 @@ class FloatingMiniAppWindow(
                 }
 
                 override fun surfaceDestroyed(holder: SurfaceHolder) {
+                    surfaceReady = false
+                    isSurfaceAttached = false
                     try {
                         (currentSurfacePackage as? SurfaceControlViewHost.SurfacePackage)?.release()
                     } catch (_: Throwable) {}
@@ -227,7 +214,84 @@ class FloatingMiniAppWindow(
             container.addView(sv)
         } else {
             LogKeeper.log(context, "FloatingMiniAppWindow", "CONTENT_MODE_SELECTED mode=fallback reason=SDK_${Build.VERSION.SDK_INT}_below_30")
-            attachFallbackContentView(context, container)
+            attachFallbackContentView(context, container, "SDK_${Build.VERSION.SDK_INT}_below_30")
+        }
+    }
+
+    private fun tryAttachSurfacePackage() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+            contentContainer?.let { attachFallbackContentView(context, it, "SDK_${Build.VERSION.SDK_INT}_below_30") }
+            return
+        }
+
+        if (isSurfaceAttached) return
+        if (!surfaceReady) return
+
+        val sv = embeddedSurfaceView ?: return
+        val container = contentContainer ?: return
+        val hostToken = sv.hostToken
+        if (hostToken == null) {
+            LogKeeper.log(context, "FloatingMiniAppWindow", "SURFACE_WAITING_FOR_TOKEN id=$instanceId")
+            return
+        }
+
+        val connectionManager = HeavyProcessConnectionManager.getInstance(context)
+        if (connectionManager.state != ConnectionState.CONNECTED) {
+            LogKeeper.log(context, "FloatingMiniAppWindow", "SURFACE_WAITING_FOR_CONNECTION id=$instanceId state=${connectionManager.state}")
+            connectionManager.connect(autoCreate = true, reason = "tryAttachSurfacePackage:$instanceId")
+            return
+        }
+
+        val displayId = try {
+            sv.display?.displayId ?: Display.DEFAULT_DISPLAY
+        } catch (_: Exception) {
+            Display.DEFAULT_DISPLAY
+        }
+        val w = if (container.width > 0) container.width else bounds.width
+        val h = if (container.height > 0) container.height else bounds.height
+
+        val snapshot = durableStore.loadSnapshot(instanceId)
+        val initialPayloadBundle = Bundle()
+        snapshot?.payload?.forEach { (k, v) -> initialPayloadBundle.putString(k, v) }
+
+        val params = Bundle().apply {
+            putString("pageId", instanceId)
+            putString("pageType", appType)
+            putBoolean("isMiniApp", true)
+            putBinder("hostToken", hostToken)
+            putInt("displayId", displayId)
+            putInt("width", w)
+            putInt("height", h)
+            putInt("bounds_x", bounds.x)
+            putInt("bounds_y", bounds.y)
+            putBundle("initialPayload", initialPayloadBundle)
+        }
+
+        val reply = connectionManager.createSurfacePackage(params)
+        if (reply != null && reply.getBoolean("success")) {
+            reply.classLoader = SurfaceControlViewHost.SurfacePackage::class.java.classLoader
+            @Suppress("DEPRECATION")
+            val sp = reply.getParcelable<SurfaceControlViewHost.SurfacePackage>("surfacePackage")
+            if (sp != null) {
+                currentSurfacePackage = sp
+                sv.setChildSurfacePackage(sp)
+                container.background = null
+                isSurfaceAttached = true
+                val fallback = container.findViewById<View>(android.R.id.text1)
+                if (fallback != null) {
+                    container.removeView(fallback)
+                }
+                LogKeeper.log(context, "FloatingMiniAppWindow", "CONTENT_MODE_SELECTED mode=surface_package reason=API30+_surface_package_embedded")
+                LogKeeper.log(context, "FloatingMiniAppWindow", "CONTENT_CREATED id=$instanceId mode=embedded_heavy")
+                LogKeeper.log(context, "FloatingMiniAppWindow", "SURFACE_ATTACHED id=$instanceId mode=embedded_heavy")
+                return
+            }
+        }
+
+        LogKeeper.log(context, "FloatingMiniAppWindow", "SURFACE_PACKAGE_PENDING id=$instanceId replyNull=${reply == null}")
+        if (connectionManager.state == ConnectionState.DEAD) {
+            LogKeeper.log(context, "FloatingMiniAppWindow", "CONTENT_MODE_SELECTED mode=fallback reason=heavy_connection_dead")
+            attachFallbackContentView(context, container, "heavy_connection_dead")
         }
     }
 
@@ -239,7 +303,7 @@ class FloatingMiniAppWindow(
         }
     }
 
-    private fun attachFallbackContentView(context: Context, container: FrameLayout) {
+    private fun attachFallbackContentView(context: Context, container: FrameLayout, reason: String = "fallback") {
         if (container.findViewById<View>(android.R.id.text1) != null) return
 
         val density = context.resources.displayMetrics.density
@@ -248,7 +312,7 @@ class FloatingMiniAppWindow(
             ?: savedSnapshot?.payload?.get("note_content")
             ?: TestNotesMiniAppInstance.DEFAULT_INSTRUCTIONAL_TEXT
 
-        LogKeeper.log(context, "FloatingMiniAppWindow", "CONTENT_CREATED id=$instanceId mode=in_process_fallback textLength=${currentNoteText.length}")
+        LogKeeper.log(context, "FloatingMiniAppWindow", "CONTENT_CREATED id=$instanceId mode=in_process_fallback reason=$reason textLength=${currentNoteText.length}")
 
         val clientView = LinearLayout(context).apply {
             id = android.R.id.text1
@@ -806,8 +870,19 @@ class FloatingMiniAppWindow(
         }
     }
 
+    override fun onAttach(wm: WindowManager) {
+        super.onAttach(wm)
+        HeavyProcessConnectionManager.getInstance(context).addListener(connectionListener)
+    }
+
+    override fun onDetach(wm: WindowManager) {
+        super.onDetach(wm)
+        HeavyProcessConnectionManager.getInstance(context).removeListener(connectionListener)
+    }
+
     override fun onDestroy() {
         super.onDestroy()
+        HeavyProcessConnectionManager.getInstance(context).removeListener(connectionListener)
         globalLayoutListener?.let {
             getView()?.viewTreeObserver?.removeOnGlobalLayoutListener(it)
         }

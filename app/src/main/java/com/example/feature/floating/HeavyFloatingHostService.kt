@@ -87,14 +87,19 @@ class HeavyFloatingHostService : Service() {
             val instanceId = cmd.targetId ?: cmd.payload["instance_id"] ?: ""
             if (instanceId.isNotEmpty()) {
                 val isSleep = cmd.payload["sleep"] == "true" || action == "sleep"
-                val returnedData = if (isSleep) {
+                val isSnapshotOnly = action == "get_snapshot" || (isSleep && cmd.payload["release"] != "true")
+                val returnedData = if (isSnapshotOnly) {
+                    // Non-destructive snapshot gathering: keep instance alive in Heavy until Main confirms durable save
+                    host.getSnapshot(instanceId, cmd.payload)
+                } else if (isSleep) {
                     val payload = host.prepareSleep(instanceId, cmd.payload)
+                    com.example.feature.heavy.page.HeavyPageHostManager.getInstance(this@HeavyFloatingHostService).releaseSurfaceHost(instanceId)
                     checkDisposableTeardown()
                     payload
                 } else {
                     host.pauseInstance(instanceId)
                 }
-                IpcResult.success(if (isSleep) "Slept $instanceId" else "Paused $instanceId", returnedData)
+                IpcResult.success(if (isSnapshotOnly) "Snapshot $instanceId" else if (isSleep) "Slept $instanceId" else "Paused $instanceId", returnedData)
             } else {
                 IpcResult.error(IpcErrorCode.MARSHAL_ERROR, "Missing instanceId")
             }
@@ -111,9 +116,17 @@ class HeavyFloatingHostService : Service() {
             }
             val instanceId = cmd.targetId ?: cmd.payload["instance_id"] ?: ""
             if (instanceId.isNotEmpty()) {
-                val payload = host.stopInstance(instanceId)
-                checkDisposableTeardown()
-                IpcResult.success("Stopped $instanceId", payload)
+                if (action == "release_sleeping_instance") {
+                    host.releaseInstance(instanceId, reason = "sleep_confirmed")
+                    com.example.feature.heavy.page.HeavyPageHostManager.getInstance(this@HeavyFloatingHostService).releaseSurfaceHost(instanceId)
+                    checkDisposableTeardown()
+                    IpcResult.success("Released $instanceId")
+                } else {
+                    val payload = host.stopInstance(instanceId)
+                    com.example.feature.heavy.page.HeavyPageHostManager.getInstance(this@HeavyFloatingHostService).releaseSurfaceHost(instanceId)
+                    checkDisposableTeardown()
+                    IpcResult.success("Stopped $instanceId", payload)
+                }
             } else {
                 IpcResult.error(IpcErrorCode.MARSHAL_ERROR, "Missing instanceId")
             }

@@ -63,6 +63,15 @@ class HeavyFloatingHost private constructor(private val context: Context) {
         synchronized(lock) {
             val existing = activeInstances[instanceId]
             if (existing != null) {
+                if (initialPayload.isNotEmpty()) {
+                    val snapshot = MiniAppRecoverySnapshot(
+                        instanceId = instanceId,
+                        appType = appType,
+                        windowBounds = initialBounds?.copyBounds() ?: WindowBounds(100, 100, 600, 800),
+                        payload = LinkedHashMap(initialPayload)
+                    )
+                    existing.restoreFromSnapshot(snapshot)
+                }
                 if (existing.lifecycleState == MiniAppLifecycleState.PAUSED ||
                     existing.lifecycleState == MiniAppLifecycleState.STOPPED ||
                     existing.lifecycleState == MiniAppLifecycleState.SLEEPING
@@ -70,7 +79,7 @@ class HeavyFloatingHost private constructor(private val context: Context) {
                     existing.onStart()
                     existing.onResume()
                 }
-                log("INSTANCE_ACTIVE id=$instanceId type=$appType resumedExisting=true state=${existing.lifecycleState}")
+                log("INSTANCE_ACTIVE id=$instanceId type=$appType resumedExisting=true state=${existing.lifecycleState} updatedPayloadKeys=${initialPayload.keys}")
                 return existing
             }
 
@@ -105,8 +114,72 @@ class HeavyFloatingHost private constructor(private val context: Context) {
     }
 
     /**
+     * Non-destructive snapshot retrieval: gathers state from the active instance WITHOUT releasing it.
+     * Keeps instance in activeInstances and leaves runtime intact until Main confirms durable save.
+     */
+    fun getSnapshot(instanceId: String, additionalPayload: Map<String, String> = emptyMap()): Map<String, String> {
+        log("SNAPSHOT_RETRIEVE_REQUEST id=$instanceId additionalKeys=${additionalPayload.keys}")
+        synchronized(lock) {
+            val instance = activeInstances[instanceId] ?: run {
+                log("SNAPSHOT_RETRIEVE_FAILURE id=$instanceId reason=instance_not_found")
+                return emptyMap()
+            }
+            return try {
+                if (additionalPayload.isNotEmpty()) {
+                    instance.restoreFromSnapshot(
+                        MiniAppRecoverySnapshot(
+                            instanceId = instanceId,
+                            appType = instance.appType,
+                            payload = LinkedHashMap(additionalPayload)
+                        )
+                    )
+                }
+                if (instance.lifecycleState == MiniAppLifecycleState.RESUMED) {
+                    instance.onPause()
+                }
+                val payload = instance.onSaveState()
+                val textLen = payload["text"]?.length ?: 0
+                log("STATE_SAVED id=$instanceId reason=snapshot keys=${payload.keys} textLength=$textLen liveRetained=true")
+                payload
+            } catch (e: Throwable) {
+                logCrash("getSnapshot failed for $instanceId", e)
+                emptyMap()
+            }
+        }
+    }
+
+    /**
+     * Explicit release of a mini-app runtime after Main confirms durable persistence or when closing.
+     */
+    fun releaseInstance(instanceId: String, reason: String = "sleep"): Boolean {
+        log("INSTANCE_RELEASE_REQUEST id=$instanceId reason=$reason")
+        synchronized(lock) {
+            val instance = activeInstances.remove(instanceId) ?: run {
+                log("INSTANCE_RELEASED id=$instanceId reason=$reason foundInMemory=false")
+                return false
+            }
+            return try {
+                if (instance.lifecycleState == MiniAppLifecycleState.RESUMED) {
+                    instance.onPause()
+                }
+                if (instance.lifecycleState != MiniAppLifecycleState.STOPPED) {
+                    instance.onStop()
+                }
+                instance.releaseRuntime()
+                instance.onDestroy()
+                log("INSTANCE_RELEASED id=$instanceId reason=$reason remainingActive=${activeInstances.size}")
+                true
+            } catch (e: Throwable) {
+                logCrash("releaseInstance failed for $instanceId", e)
+                false
+            }
+        }
+    }
+
+    /**
      * Prepares an active instance for sleep: gathers its recovery payload, releases its runtime,
      * destroys the in-memory instance, and returns the payload to Main for durable storage.
+     * Maintained for backwards compatibility.
      */
     fun prepareSleep(instanceId: String, additionalPayload: Map<String, String> = emptyMap()): Map<String, String> {
         log("INSTANCE_RELEASE_REQUEST id=$instanceId reason=sleep additionalKeys=${additionalPayload.keys}")

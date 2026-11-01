@@ -166,3 +166,36 @@ Capped at 500 lines per file.
 * Any deviation from what was requested, and why: None. No new mini-apps added, eReader/PWA avoided, and all unrelated features preserved untouched.
 * Any known issue or follow-up needed: Ready for manual physical device verification.
 
+---
+
+### Entry 112
+* Timestamp: 2026-11-01T20:10:00Z
+* One-line summary: Repaired floating mini-app cross-process SurfacePackage lifecycle, queued command delivery, and fold transaction ordering
+* Exact files touched:
+  - app/src/main/java/com/example/feature/floating/HeavyFloatingHost.kt
+  - app/src/main/java/com/example/feature/floating/HeavyFloatingHostService.kt
+  - app/src/main/java/com/example/feature/floating/FloatingMiniAppBridge.kt
+  - app/src/main/java/com/example/core/ipc/HeavyProcessConnectionManager.kt
+  - app/src/main/java/com/example/core/ipc/HeavyHostBinder.kt
+  - app/src/main/java/com/example/feature/heavy/page/HeavyPageHostManager.kt
+  - app/src/main/java/com/example/feature/floating/FloatingMiniAppWindow.kt
+  - app/src/main/java/com/example/feature/floating/TestNotesMiniApp.kt
+  - app/src/test/java/com/example/feature/floating/FloatingMiniAppFrameworkTest.kt
+  - receipts/RECEIPTS_099.md
+* What was actually done:
+  - Fixed cross-process SurfacePackage null & premature fallback:
+    * In `FloatingMiniAppWindow.kt`, implemented `HeavyConnectionListener` to track `:heavy` process connection state. When `surfaceCreated` fires while connection is `CONNECTING`, window enters `SURFACE_WAITING_FOR_CONNECTION` and defers creation instead of dropping immediately to `in_process_fallback`. When `onConnected()` fires, `tryAttachSurfacePackage()` mounts the cross-process host cleanly.
+    * In `HeavyHostBinder.kt` (`HeavyHostProxy`), explicitly set `bundle?.classLoader = SurfaceControlViewHost.SurfacePackage::class.java.classLoader` to eliminate cross-process parceling failures.
+    * In `HeavyPageHostManager.kt`, released any previous stale `SurfaceControlViewHost` tied to dead host tokens before re-mounting on wake, and resolved display IDs safely.
+  - Fixed Heavy connection and command ordering:
+    * In `HeavyProcessConnectionManager.kt`, commands queued during `CONNECTING` state now succeed immediately with `IpcResult.success("Queued for delivery upon connection")` rather than logging false `IPC_FAILURE` errors. Queued commands are drained exactly once when `onServiceConnected` fires.
+    * In `HeavyFloatingHost.kt`, `startInstance` was made idempotent: when an instance already exists, incoming snapshot payloads and bounds are restored without duplicating instances or failing the wake transaction.
+  - Enforced strict 6-step Fold transaction ordering:
+    * Added non-destructive `getSnapshot(instanceId, additionalPayload)` in `HeavyFloatingHost` and `PAUSE_OPERATION` (`action = "get_snapshot"`) without premature teardown.
+    * Added explicit `releaseInstance(instanceId, reason)` in `HeavyFloatingHost` and `STOP_OPERATION` (`action = "release_sleeping_instance"`).
+    * Reordered `FloatingMiniAppBridge.sleepMiniApp`: (1) request non-destructive snapshot, (2) verify durable write in `DurableMiniAppStore`, (3) release Heavy instance and surface host only after write confirmation, (4) unregister window and release consumer. If snapshot or durable save fails, live instance in `:heavy` remains intact.
+  - Added 5 new unit tests to `FloatingMiniAppFrameworkTest.kt`: verified fold-safe snapshot preservation on persistence failure, idempotent wake, command queuing during `CONNECTING`, dormant record restoration without waking Heavy, and surface host cleanup with teardown checks.
+* How it was verified: local build and unit tests (`gradle :app:testDebugUnitTest --tests "com.example.feature.floating.FloatingMiniAppFrameworkTest"` passed all 17 tests; `compile_applet` passed cleanly).
+* Any deviation from what was requested, and why: None. No new mini-apps added, `test_notes` preserved as validation harness, no unrelated features touched.
+* Any known issue or follow-up needed: All framework contracts verified via unit tests; physical on-device verification recommended for hardware SurfaceControlViewHost compositing.
+

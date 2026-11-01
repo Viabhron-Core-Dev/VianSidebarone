@@ -327,6 +327,8 @@ class HeavyProcessConnectionManager internal constructor(
                         pendingCommands.offer(command)
                     }
                     connect(autoCreate = true, reason = "sendCommand:${command.type}")
+                    safeLog("HeavyIPC", "COMMAND_QUEUED cmdId=${command.commandId} type=${command.type} target=${command.targetId} state=$state pendingCount=${pendingCommands.size}")
+                    return IpcResult.success("Queued for delivery upon connection")
                 }
                 safeLog("HeavyIPC", "IPC_FAILURE cmdId=${command.commandId} type=${command.type} target=${command.targetId} error=Heavy process is not connected (state=$state)")
                 return IpcResult.error(
