@@ -267,27 +267,11 @@ class AddElementActivity : ComponentActivity() {
                 startActivityForResult(intent, 700)
             }
         }
-        addItem(android.R.drawable.ic_menu_gallery, "Hybrid Grid") {
-            handleElementSelected("system:hybrid_grid_floating", "Hybrid Grid")
-        }
-
         addItem(com.example.R.drawable.ic_library_books, "eBook Reader") {
             handleElementSelected("system:ebook_reader", "eBook Reader")
         }
-        addItem(android.R.drawable.ic_menu_sort_alphabetically, "Dictionary") {
-            handleElementSelected("system:dictionary_floating", "Dictionary")
-        }
-        addItem(android.R.drawable.ic_menu_compass, "Cursor Trackpad") {
-            handleElementSelected("system:cursor", "Cursor Trackpad")
-        }
-        addItem(android.R.drawable.ic_menu_edit, "Work Notes") {
-            handleElementSelected("system:work_notes", "Work Notes")
-        }
         addItem(android.R.drawable.ic_menu_edit, "Test Notes") {
             handleElementSelected("system:test_notes", "Test Notes")
-        }
-        addItem(android.R.drawable.ic_menu_gallery, "Page Window") {
-//             startActivityForResult(Intent(this, PageWindowPickerActivity::class.java), 900)
         }
 
         scrollView.addView(contentLayout)

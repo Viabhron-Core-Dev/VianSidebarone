@@ -32,7 +32,8 @@ class FloatingMiniAppLauncherBubble(
     private val onBubbleTapped: (String) -> Unit
 ) : FloatingWindow("bubble_$instanceId", context, TYPE_BUBBLE) {
 
-    private val bubbleSizePx = (52 * context.resources.displayMetrics.density).toInt()
+    // Fixed 36dp dimensions matching the standalone Reader's folded icon specification
+    private val bubbleSizePx = (36 * context.resources.displayMetrics.density).toInt()
 
     init {
         // Enforce exact compact dimensions in both bounds and WindowManager.LayoutParams
@@ -51,36 +52,41 @@ class FloatingMiniAppLauncherBubble(
     }
 
     override fun createContentView(context: Context): View {
+        val density = context.resources.displayMetrics.density
         val root = FrameLayout(context).apply {
             val bg = GradientDrawable().apply {
                 shape = GradientDrawable.OVAL
                 setColor(Color.parseColor("#313244"))
-                setStroke((2 * context.resources.displayMetrics.density).toInt(), Color.parseColor("#89B4FA"))
+                setStroke((1.5f * density).toInt(), Color.parseColor("#89B4FA"))
             }
             background = bg
-            elevation = 12 * context.resources.displayMetrics.density
+            elevation = 10 * density
             layoutParams = FrameLayout.LayoutParams(bubbleSizePx, bubbleSizePx)
         }
 
-        val label = TextView(context).apply {
-            val shortText = when (appType) {
-                "test_notes" -> "Notes"
-                "work_notes" -> "Notes"
-                "reader" -> "Read"
-                "dictionary" -> "Dict"
-                "translation" -> "Trans"
-                else -> appType.take(4).uppercase()
-            }
-            text = shortText
-            setTextColor(Color.WHITE)
-            textSize = 11f
-            gravity = Gravity.CENTER
+        // Centered App Icon (no text label, matching standalone Reader folded bubble)
+        val iconRes = when (appType) {
+            "reader", "ebook_reader" -> com.example.R.drawable.ic_library_books
+            "dictionary" -> android.R.drawable.ic_menu_sort_alphabetically
+            "translation" -> android.R.drawable.ic_menu_sort_alphabetically
+            "test_notes", "work_notes" -> android.R.drawable.ic_menu_edit
+            else -> android.R.drawable.ic_menu_edit
+        }
+
+        val iconView = android.widget.ImageView(context).apply {
+            setImageResource(iconRes)
+            setColorFilter(Color.WHITE)
+            scaleType = android.widget.ImageView.ScaleType.FIT_CENTER
+            val iconPadding = (7 * density).toInt()
+            setPadding(iconPadding, iconPadding, iconPadding, iconPadding)
             layoutParams = FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
-                FrameLayout.LayoutParams.MATCH_PARENT
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                Gravity.CENTER
             )
+            contentDescription = "Folded $appType icon"
         }
-        root.addView(label)
+        root.addView(iconView)
 
         root.setOnTouchListener { _, event ->
             val touchSlop = 8 * context.resources.displayMetrics.density

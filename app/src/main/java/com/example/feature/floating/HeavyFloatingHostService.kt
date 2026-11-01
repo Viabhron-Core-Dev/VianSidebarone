@@ -149,6 +149,7 @@ class HeavyFloatingHostService : Service() {
             MiniAppIpcContracts.ACTION_SLEEP_MINIAPP -> {
                 if (!instanceId.isNullOrEmpty()) {
                     host.prepareSleep(instanceId)
+                    checkDisposableTeardown()
                 }
             }
 
@@ -161,17 +162,18 @@ class HeavyFloatingHostService : Service() {
             MiniAppIpcContracts.ACTION_STOP_MINIAPP -> {
                 if (!instanceId.isNullOrEmpty()) {
                     host.stopInstance(instanceId)
+                    checkDisposableTeardown()
                 }
             }
 
             MiniAppIpcContracts.ACTION_DESTROY_MINIAPP -> {
                 if (!instanceId.isNullOrEmpty()) {
                     host.destroyInstance(instanceId)
+                    checkDisposableTeardown()
                 }
             }
         }
 
-        checkDisposableTeardown()
         return START_NOT_STICKY
     }
 

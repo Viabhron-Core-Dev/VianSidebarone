@@ -398,7 +398,7 @@ class FloatingMiniAppFrameworkTest {
 
         val initialW = bubble.bounds.width
         val initialH = bubble.bounds.height
-        assertTrue("Bubble size must be compact (around 52dp * density = 104px)", initialW > 0)
+        assertTrue("Bubble size must be compact (around 36dp * density)", initialW > 0)
         assertEquals(initialW, initialH)
         assertEquals("LayoutParams width must match bounds width", initialW, bubble.layoutParams.width)
         assertEquals("LayoutParams height must match bounds height", initialH, bubble.layoutParams.height)

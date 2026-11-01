@@ -127,3 +127,42 @@ Capped at 500 lines per file.
 * How it was verified: local build and unit tests (`gradle :app:testDebugUnitTest` passed all 326 tests; `compile_applet` compiled cleanly).
 * Any deviation from what was requested, and why: None. No new mini-apps added, eReader/PWA avoided, and all unrelated features preserved untouched.
 * Any known issue or follow-up needed: Ready for physical device acceptance validation.
+
+---
+
+### Entry 111
+* Timestamp: 2026-11-01T11:32:00Z
+* One-line summary: Repaired floating mini-app framework Heavy lifecycle and disconnects, fixed SurfacePackage full-height measurement and rendering, replaced folded launcher bubble with 36dp circular icon, and cleaned up Add Element floating items.
+* Exact files touched:
+  - app/src/main/java/com/example/feature/floating/FloatingMiniAppLauncherBubble.kt
+  - app/src/main/java/com/example/feature/settings/AddElementActivity.kt
+  - app/src/main/java/com/example/feature/heavy/page/HeavyPageHostManager.kt
+  - app/src/main/java/com/example/feature/floating/FloatingMiniAppWindow.kt
+  - app/src/main/java/com/example/feature/floating/HeavyFloatingHostService.kt
+  - app/src/main/java/com/example/core/ipc/HeavyProcessConnectionManager.kt
+  - app/src/test/java/com/example/feature/floating/FloatingMiniAppFrameworkTest.kt
+  - receipts/RECEIPTS_099.md
+* What was actually done:
+  - Identified and eliminated root cause of immediate Heavy disconnect/reconnect on mini-app launch:
+    * In `HeavyFloatingHostService.kt`, `checkDisposableTeardown()` was previously invoked on every `onStartCommand()`. Because the start command arrives before the asynchronous Binder command `START_OPERATION` registers the active instance, `getActiveInstanceCount()` was 0, triggering an immediate `stopSelf()` and causing Main's Binder DeathRecipient to trip `DISCONNECTED`.
+    * Removed premature teardown calls on startup/`ACTION_START_MINIAPP`; teardown check is now restricted to explicit sleep, stop, destroy, and unmount triggers.
+  - Repaired SurfaceControlViewHost measurement and touch routing in Heavy process:
+    * In `HeavyPageHostManager.kt` (`createSurfacePackageApi30`), mini-app root views were previously measured with `MeasureSpec.UNSPECIFIED` height. Weighted views (such as `EditText` with `height=0dp, weight=1f` in `TestNotesMiniAppInstance`) collapsed to 0, resulting in a host height of only ~120px (the title header) inside an 800px window. Content below was truncated and unreceptive to touch.
+    * Measured with `MeasureSpec.EXACTLY` for both width and height, establishing full-window dimensions (`finalHostHeight = height`).
+  - Corrected surface visibility and compositing in Main floating window:
+    * In `FloatingMiniAppWindow.kt`, set `holder.setFormat(PixelFormat.TRANSLUCENT)` and `setZOrderMediaOverlay(true)` on `embeddedSurfaceView`.
+    * Cleared `container.background = null` upon attaching `SurfaceControlViewHost` so the card container's opaque background does not occlude the embedded view.
+    * Added structured `CMD_START_RESULT` diagnostic logging.
+  - Fixed explicit Component Intent in `HeavyProcessConnectionManager.kt`:
+    * Replaced string package lookup with explicit `Intent(ctx, HeavyFloatingHostService::class.java)` to prevent `NullPointerException` during `bindService`.
+  - Replaced folded launcher bubble with compact 36dp circular icon bubble matching standalone Reader:
+    * Resized `FloatingMiniAppLauncherBubble.kt` to fixed 36dp × 36dp (matching `36dp` in `layout_floating_reader.xml`).
+    * Removed text label `TextView`.
+    * Centered app icon via `ImageView` inside circular background with 36dp drag clamping and tap-to-wake.
+  - Cleaned up Add Element floating windows section:
+    * In `AddElementActivity.kt`, updated `floatingItems` to show only "Floating Trigger", "eBook Reader", and "Test Notes".
+    * Removed obsolete items (Hybrid Grid, Dictionary, Cursor Trackpad, Work Notes, Page Window) from the UI picker while preserving catalog definitions (`ALL_FLOATING_WINDOWS`), legacy dispatchers, and PWAs untouched.
+* How it was verified: local build and unit tests (`gradle :app:testDebugUnitTest --tests "com.example.feature.floating.FloatingMiniAppFrameworkTest"` passed all tests; `compile_applet` passed cleanly).
+* Any deviation from what was requested, and why: None. No new mini-apps added, eReader/PWA avoided, and all unrelated features preserved untouched.
+* Any known issue or follow-up needed: Ready for manual physical device verification.
+

@@ -219,10 +219,7 @@ class HeavyProcessConnectionManager internal constructor(
 
             state = ConnectionState.CONNECTING
             return try {
-                val intent = Intent().setClassName(
-                    pkgName,
-                    "com.example.feature.floating.HeavyFloatingHostService"
-                )
+                val intent = Intent(ctx, com.example.feature.floating.HeavyFloatingHostService::class.java)
                 val flags = if (autoCreate) Context.BIND_AUTO_CREATE else 0
                 safeLog("HeavyIPC", "BIND_REQUEST pkg=$pkgName flags=$flags")
                 val bound = ctx.bindService(intent, serviceConnection, flags)

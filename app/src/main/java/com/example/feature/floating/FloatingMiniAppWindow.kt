@@ -163,6 +163,8 @@ class FloatingMiniAppWindow(
                     FrameLayout.LayoutParams.MATCH_PARENT,
                     FrameLayout.LayoutParams.MATCH_PARENT
                 )
+                setZOrderMediaOverlay(true)
+                holder.setFormat(android.graphics.PixelFormat.TRANSLUCENT)
             }
             embeddedSurfaceView = sv
 
@@ -196,6 +198,7 @@ class FloatingMiniAppWindow(
                             if (sp != null) {
                                 currentSurfacePackage = sp
                                 sv.setChildSurfacePackage(sp)
+                                container.background = null
                                 LogKeeper.log(context, "FloatingMiniAppWindow", "CONTENT_MODE_SELECTED mode=surface_package reason=API30+_surface_package_embedded")
                                 LogKeeper.log(context, "FloatingMiniAppWindow", "CONTENT_CREATED id=$instanceId mode=embedded_heavy")
                                 LogKeeper.log(context, "FloatingMiniAppWindow", "SURFACE_ATTACHED id=$instanceId mode=embedded_heavy")
@@ -766,6 +769,7 @@ class FloatingMiniAppWindow(
             payload = payloadMap
         )
         val res = connectionManager.sendCommand(cmd, autoConnect = true)
+        LogKeeper.log(context, "FloatingMiniAppWindow", "CMD_START_RESULT id=$instanceId success=${res.success} msg=${res.message}")
         // Only dispatch intent fallback if connection manager is completely DEAD to prevent duplicate start
         if (!res.success && connectionManager.state == com.example.core.ipc.ConnectionState.DEAD) {
             FloatingMiniAppBridge.dispatchToHeavy(
