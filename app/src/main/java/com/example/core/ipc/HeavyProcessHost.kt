@@ -136,7 +136,10 @@ open class HeavyProcessHost internal constructor(private val context: Context? =
      * Registers a command handler for a specific command type in the Heavy process.
      */
     fun registerCommandHandler(type: HeavyCommandType, handler: HeavyCommandHandler) {
-        commandHandlers.computeIfAbsent(type) { CopyOnWriteArrayList() }.add(handler)
+        val list = commandHandlers.computeIfAbsent(type) { CopyOnWriteArrayList() }
+        if (!list.contains(handler)) {
+            list.add(handler)
+        }
     }
 
     /**

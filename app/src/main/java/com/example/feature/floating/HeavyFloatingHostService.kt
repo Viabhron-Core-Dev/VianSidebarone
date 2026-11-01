@@ -5,6 +5,8 @@ import android.content.Intent
 import android.os.IBinder
 import com.example.core.LogKeeper
 import com.example.core.WindowBounds
+import com.example.core.ipc.HeavyCommand
+import com.example.core.ipc.HeavyCommandHandler
 import com.example.core.ipc.HeavyCommandType
 import com.example.core.ipc.HeavyProcessHost
 import com.example.core.ipc.IpcErrorCode
@@ -25,6 +27,9 @@ class HeavyFloatingHostService : Service() {
 
     private lateinit var host: HeavyFloatingHost
     private lateinit var ipcHost: HeavyProcessHost
+    private var startHandler: HeavyCommandHandler? = null
+    private var pauseHandler: HeavyCommandHandler? = null
+    private var stopHandler: HeavyCommandHandler? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -37,14 +42,14 @@ class HeavyFloatingHostService : Service() {
         }
 
         // Wire incoming Binder commands to HeavyFloatingHost
-        ipcHost.registerCommandHandler(HeavyCommandType.START_OPERATION) { cmd ->
+        val sHandler = HeavyCommandHandler { cmd ->
             val action = cmd.payload["action"]
             if (action in listOf("mount", "use", "unmount", "unmountAll") ||
                 cmd.payload.containsKey("capabilityId") ||
                 cmd.payload.containsKey("moduleId") ||
                 (!cmd.payload.containsKey("instance_id") && !cmd.payload.containsKey("app_type"))
             ) {
-                return@registerCommandHandler IpcResult.success()
+                return@HeavyCommandHandler IpcResult.success()
             }
             val instanceId = cmd.targetId ?: cmd.payload["instance_id"] ?: ""
             val appType = cmd.payload["app_type"] ?: "generic"
@@ -74,15 +79,17 @@ class HeavyFloatingHostService : Service() {
                 IpcResult.error(IpcErrorCode.MARSHAL_ERROR, "Missing instanceId")
             }
         }
+        startHandler = sHandler
+        ipcHost.registerCommandHandler(HeavyCommandType.START_OPERATION, sHandler)
 
-        ipcHost.registerCommandHandler(HeavyCommandType.PAUSE_OPERATION) { cmd ->
+        val pHandler = HeavyCommandHandler { cmd ->
             val action = cmd.payload["action"]
             if (action in listOf("mount", "use", "unmount", "unmountAll") ||
                 cmd.payload.containsKey("capabilityId") ||
                 cmd.payload.containsKey("moduleId") ||
                 (!cmd.payload.containsKey("instance_id") && !cmd.payload.containsKey("app_type"))
             ) {
-                return@registerCommandHandler IpcResult.success()
+                return@HeavyCommandHandler IpcResult.success()
             }
             val instanceId = cmd.targetId ?: cmd.payload["instance_id"] ?: ""
             if (instanceId.isNotEmpty()) {
@@ -104,15 +111,17 @@ class HeavyFloatingHostService : Service() {
                 IpcResult.error(IpcErrorCode.MARSHAL_ERROR, "Missing instanceId")
             }
         }
+        pauseHandler = pHandler
+        ipcHost.registerCommandHandler(HeavyCommandType.PAUSE_OPERATION, pHandler)
 
-        ipcHost.registerCommandHandler(HeavyCommandType.STOP_OPERATION) { cmd ->
+        val stHandler = HeavyCommandHandler { cmd ->
             val action = cmd.payload["action"]
             if (action in listOf("mount", "use", "unmount", "unmountAll") ||
                 cmd.payload.containsKey("capabilityId") ||
                 cmd.payload.containsKey("moduleId") ||
                 (!cmd.payload.containsKey("instance_id") && !cmd.payload.containsKey("app_type"))
             ) {
-                return@registerCommandHandler IpcResult.success()
+                return@HeavyCommandHandler IpcResult.success()
             }
             val instanceId = cmd.targetId ?: cmd.payload["instance_id"] ?: ""
             if (instanceId.isNotEmpty()) {
@@ -131,6 +140,8 @@ class HeavyFloatingHostService : Service() {
                 IpcResult.error(IpcErrorCode.MARSHAL_ERROR, "Missing instanceId")
             }
         }
+        stopHandler = stHandler
+        ipcHost.registerCommandHandler(HeavyCommandType.STOP_OPERATION, stHandler)
 
         LogKeeper.log(this, "HeavyFloatingHostService", "Heavy process floating service created with Binder IPC")
     }
@@ -216,6 +227,12 @@ class HeavyFloatingHostService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         LogKeeper.log(this, "HeavyFloatingHostService", "HEAVY_SERVICE_DESTROY timestamp=${System.currentTimeMillis()}")
+        startHandler?.let { ipcHost.unregisterCommandHandler(HeavyCommandType.START_OPERATION, it) }
+        pauseHandler?.let { ipcHost.unregisterCommandHandler(HeavyCommandType.PAUSE_OPERATION, it) }
+        stopHandler?.let { ipcHost.unregisterCommandHandler(HeavyCommandType.STOP_OPERATION, it) }
+        startHandler = null
+        pauseHandler = null
+        stopHandler = null
         com.example.feature.heavy.module.HeavyModuleManager.getInstance(this).setIdleListener(null)
         com.example.feature.heavy.page.HeavyPageHostManager.getInstance(this).unmountAll()
     }

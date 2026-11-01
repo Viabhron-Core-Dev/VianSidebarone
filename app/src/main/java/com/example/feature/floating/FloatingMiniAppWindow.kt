@@ -86,6 +86,14 @@ class FloatingMiniAppWindow(
     private var currentSurfacePackage: Any? = null // SurfaceControlViewHost.SurfacePackage
     private var surfaceReady: Boolean = false
     private var isSurfaceAttached: Boolean = false
+    private var lastRelayoutWidth: Int = -1
+    private var lastRelayoutHeight: Int = -1
+
+    private fun getContentViewportHeight(windowHeight: Int): Int {
+        val density = context.resources.displayMetrics.density
+        val topBarHeight = (38 * density).toInt()
+        return maxOf(0, windowHeight - topBarHeight)
+    }
 
     private val connectionListener = object : HeavyConnectionListener {
         override fun onConnected() {
@@ -248,7 +256,7 @@ class FloatingMiniAppWindow(
             Display.DEFAULT_DISPLAY
         }
         val w = if (container.width > 0) container.width else bounds.width
-        val h = if (container.height > 0) container.height else bounds.height
+        val h = if (container.height > 0) container.height else getContentViewportHeight(bounds.height)
 
         val snapshot = durableStore.loadSnapshot(instanceId)
         val initialPayloadBundle = Bundle()
@@ -295,10 +303,14 @@ class FloatingMiniAppWindow(
         }
     }
 
-    private fun relayoutEmbeddedSurface(width: Int, height: Int) {
+    private fun relayoutEmbeddedSurface(viewportWidth: Int, viewportHeight: Int) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && embeddedSurfaceView != null) {
+            if (viewportWidth <= 0 || viewportHeight <= 0) return
+            if (viewportWidth == lastRelayoutWidth && viewportHeight == lastRelayoutHeight) return
+            lastRelayoutWidth = viewportWidth
+            lastRelayoutHeight = viewportHeight
             try {
-                HeavyProcessConnectionManager.getInstance(context).relayoutSurfaceHost(instanceId, width, height)
+                HeavyProcessConnectionManager.getInstance(context).relayoutSurfaceHost(instanceId, viewportWidth, viewportHeight)
             } catch (_: Throwable) {}
         }
     }
@@ -638,7 +650,7 @@ class FloatingMiniAppWindow(
                         layoutParams.width = newW
                         layoutParams.height = newH
                         manager?.updateBounds(windowId, bounds)
-                        relayoutEmbeddedSurface(newW, newH)
+                        relayoutEmbeddedSurface(newW, getContentViewportHeight(newH))
                     }
                     true
                 }
@@ -740,7 +752,7 @@ class FloatingMiniAppWindow(
         layoutParams.width = bounds.width
         layoutParams.height = bounds.height
         wm.updateBounds(windowId, bounds)
-        relayoutEmbeddedSurface(bounds.width, bounds.height)
+        relayoutEmbeddedSurface(bounds.width, getContentViewportHeight(bounds.height))
     }
 
     /**

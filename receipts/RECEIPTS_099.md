@@ -199,3 +199,46 @@ Capped at 500 lines per file.
 * Any deviation from what was requested, and why: None. No new mini-apps added, `test_notes` preserved as validation harness, no unrelated features touched.
 * Any known issue or follow-up needed: All framework contracts verified via unit tests; physical on-device verification recommended for hardware SurfaceControlViewHost compositing.
 
+---
+
+### Entry 113
+* Timestamp: 2026-11-01T21:25:00Z
+* One-line summary: Resolved duplicate START_OPERATION during wake, fixed SurfaceControlViewHost resize oscillation, and made closeMiniApp a deterministic transaction
+* Exact files touched:
+  - app/src/main/java/com/example/core/ipc/HeavyProcessHost.kt
+  - app/src/main/java/com/example/feature/floating/HeavyFloatingHostService.kt
+  - app/src/main/java/com/example/feature/floating/HeavyFloatingHost.kt
+  - app/src/main/java/com/example/core/ipc/HeavyProcessConnectionManager.kt
+  - app/src/main/java/com/example/feature/floating/FloatingMiniAppWindow.kt
+  - app/src/main/java/com/example/feature/floating/FloatingMiniAppBridge.kt
+  - app/src/test/java/com/example/feature/floating/FloatingMiniAppFrameworkTest.kt
+  - receipts/RECEIPTS_099.md
+* What was actually done:
+  - Fixed duplicate START_OPERATION during wake:
+    * In `HeavyFloatingHostService.kt`, stored command handlers as fields and explicitly unregistered them in `onDestroy()` so repeated service restarts across idle teardowns do not accumulate duplicate handlers on the singleton `HeavyProcessHost`.
+    * In `HeavyProcessHost.kt`, guarded `registerCommandHandler` to prevent duplicate handler registration.
+    * In `HeavyFloatingHost.kt`, updated `startInstance`: when an existing instance is already in `STARTED` or `RESUMED` state, it preserves live state and skips overwriting with older snapshot payloads.
+    * In `HeavyProcessConnectionManager.kt`, deduplicated pending `START_OPERATION` commands in `pendingCommands` to guarantee exactly one command queued and delivered per logical wake.
+  - Fixed SurfaceControlViewHost resize relayout oscillation:
+    * Identified root cause: Main shell outer window height (`572`) was passed in `relayoutEmbeddedSurface` during resize/bounds changes, while `SurfaceHolder.Callback.surfaceChanged` passed actual content container height (`496` after subtracting top bar height `76`). Heavy repeatedly relayouted between `592x572` and `592x496`.
+    * Fixed `FloatingMiniAppWindow.kt`: added `getContentViewportHeight(windowHeight)` subtracting top bar chrome (`38 * density`); `tryAttachSurfacePackage`, resize drag `ACTION_MOVE`, and `setWindowBounds` now consistently pass content viewport height (`496`). Added relayout deduplication (`lastRelayoutWidth`, `lastRelayoutHeight`) in `relayoutEmbeddedSurface`.
+  - Fixed Close ordering and disconnect race:
+    * Reordered `FloatingMiniAppBridge.closeMiniApp` transaction:
+      (1) Dismiss launcher bubble and unregister window from Main.
+      (2) While Heavy is connected, deliver `STOP_OPERATION` and release surface host before releasing consumer.
+      (3) If Heavy was already disconnected/dead, treat as normal unavailable-process path without spurious failure logs or intent dispatch.
+      (4) Release consumer: Heavy disconnects only if no other consumers remain.
+      (5) Clean up durable recovery snapshot.
+  - Added / updated 7 focused unit tests in `FloatingMiniAppFrameworkTest.kt` (all 22 tests passing):
+    (1) `testStartRequestedDuringConnectingQueuesAndDeliversExactlyOnce` (deduplicates queue & delivers once)
+    (2) `testIdempotentRepeatedStartAndWake` (preserves live active state without overwrite)
+    (3) `testRepeatedResizeMeasurementsRemainStableAndConverge` (verifies stable 592x496 viewport convergence)
+    (4) `testCloseReleasesInstanceAndSurfaceBeforeFinalConsumerDisconnect`
+    (5) `testCloseAfterDeadHeavyCompletesCleanlyWithoutIpcFailure`
+    (6) `testClosingOneWindowDoesNotTerminateHeavyWhileAnotherConsumerActive`
+    (7) `testFoldPersistsSuccessfullyBeforeReleasingHeavy`
+* How it was verified: local build (`compile_applet`) succeeded; all 22 unit tests in `com.example.feature.floating.FloatingMiniAppFrameworkTest` passed cleanly.
+* Any deviation from what was requested, and why: None. No new mini-apps added, `test_notes` preserved as validation harness, no unrelated features touched.
+* Any known issue or follow-up needed: All framework contracts verified via unit tests; physical on-device verification recommended for hardware SurfaceControlViewHost compositing.
+
+

@@ -323,11 +323,15 @@ class HeavyProcessConnectionManager internal constructor(
         synchronized(lock) {
             if (state != ConnectionState.CONNECTED) {
                 if (autoConnect) {
-                    if (pendingCommands.size < 20) {
+                    val alreadyQueued = pendingCommands.any {
+                        it.commandId == command.commandId ||
+                        (it.type == command.type && it.targetId == command.targetId && command.type == HeavyCommandType.START_OPERATION)
+                    }
+                    if (!alreadyQueued && pendingCommands.size < 20) {
                         pendingCommands.offer(command)
                     }
                     connect(autoCreate = true, reason = "sendCommand:${command.type}")
-                    safeLog("HeavyIPC", "COMMAND_QUEUED cmdId=${command.commandId} type=${command.type} target=${command.targetId} state=$state pendingCount=${pendingCommands.size}")
+                    safeLog("HeavyIPC", "COMMAND_QUEUED cmdId=${command.commandId} type=${command.type} target=${command.targetId} state=$state pendingCount=${pendingCommands.size} alreadyQueued=$alreadyQueued")
                     return IpcResult.success("Queued for delivery upon connection")
                 }
                 safeLog("HeavyIPC", "IPC_FAILURE cmdId=${command.commandId} type=${command.type} target=${command.targetId} error=Heavy process is not connected (state=$state)")

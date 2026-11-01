@@ -9,6 +9,7 @@ import com.example.core.WindowState
 import com.example.core.ipc.HeavyCommand
 import com.example.core.ipc.HeavyCommandType
 import com.example.core.ipc.HeavyProcessConnectionManager
+import com.example.core.ipc.ConnectionState
 import java.util.UUID
 
 /**
@@ -246,35 +247,36 @@ class FloatingMiniAppBridge private constructor(private val context: Context) {
     fun closeMiniApp(instanceId: String, deleteDurable: Boolean = false) {
         LogKeeper.log(context, TAG, "CLOSE_REQUEST id=$instanceId deleteDurable=$deleteDurable")
 
-        // Release active consumer on Heavy process
-        LogKeeper.log(context, TAG, "CONSUMER_RELEASE id=miniapp_$instanceId reason=close")
-        HeavyProcessConnectionManager.getInstance(context).releaseConsumer("miniapp_$instanceId", reason = "closeMiniApp:$instanceId")
-
+        // 1. Dismiss launcher bubble first if present
         dismissLauncherBubble(instanceId)
+
+        // 2. Unregister and destroy floating window in Main
         LogKeeper.log(context, TAG, "WINDOW_UNREGISTER id=$instanceId")
         windowManager.unregisterWindow(instanceId)
 
         val connectionManager = HeavyProcessConnectionManager.getInstance(context)
-        connectionManager.releaseSurfaceHost(instanceId)
 
-        val cmd = HeavyCommand(
-            commandId = UUID.randomUUID().toString(),
-            type = HeavyCommandType.STOP_OPERATION,
-            targetId = instanceId,
-            payload = mapOf("instance_id" to instanceId)
-        )
-        val res = connectionManager.sendCommand(cmd, autoConnect = false)
-        if (!res.success) {
-            dispatchToHeavy(
-                context,
-                Intent(MiniAppIpcContracts.ACTION_DESTROY_MINIAPP).apply {
-                    putExtra(MiniAppIpcContracts.EXTRA_INSTANCE_ID, instanceId)
-                    putExtra(MiniAppIpcContracts.EXTRA_DELETE_DURABLE, deleteDurable)
-                }
+        // 3. While Heavy is connected, explicitly release instance and surface BEFORE releasing the consumer
+        if (connectionManager.state == ConnectionState.CONNECTED) {
+            val cmd = HeavyCommand(
+                commandId = UUID.randomUUID().toString(),
+                type = HeavyCommandType.STOP_OPERATION,
+                targetId = instanceId,
+                payload = mapOf("instance_id" to instanceId, "action" to "close")
             )
+            val res = connectionManager.sendCommand(cmd, autoConnect = false)
+            LogKeeper.log(context, TAG, "HEAVY_STOP_RESULT id=$instanceId success=${res.success}")
+            connectionManager.releaseSurfaceHost(instanceId)
+        } else {
+            // Heavy is already disconnected or dead: treat as expected unavailable-process path, not a failure
+            LogKeeper.log(context, TAG, "HEAVY_UNAVAILABLE_ON_CLOSE id=$instanceId state=${connectionManager.state}")
         }
-        LogKeeper.log(context, TAG, "INSTANCE_CLOSED id=$instanceId")
 
+        // 4. Release active consumer on Heavy process; Heavy disconnects only if no other consumers remain
+        LogKeeper.log(context, TAG, "CONSUMER_RELEASE id=miniapp_$instanceId reason=close")
+        connectionManager.releaseConsumer("miniapp_$instanceId", reason = "closeMiniApp:$instanceId")
+
+        // 5. Update or remove durable recovery record in Main
         if (deleteDurable) {
             durableStore.deleteSnapshot(instanceId)
             LogKeeper.log(context, TAG, "RECOVERY_DELETED id=$instanceId")
@@ -282,6 +284,7 @@ class FloatingMiniAppBridge private constructor(private val context: Context) {
             durableStore.updateState(instanceId, MiniAppState.CLOSED)
             LogKeeper.log(context, TAG, "RECOVERY_RETAINED id=$instanceId state=CLOSED")
         }
+        LogKeeper.log(context, TAG, "INSTANCE_CLOSED id=$instanceId")
         LogKeeper.log(context, TAG, "FLOATING_SESSION_END id=$instanceId reason=close")
     }
 

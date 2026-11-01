@@ -63,21 +63,27 @@ class HeavyFloatingHost private constructor(private val context: Context) {
         synchronized(lock) {
             val existing = activeInstances[instanceId]
             if (existing != null) {
-                if (initialPayload.isNotEmpty()) {
-                    val snapshot = MiniAppRecoverySnapshot(
-                        instanceId = instanceId,
-                        appType = appType,
-                        windowBounds = initialBounds?.copyBounds() ?: WindowBounds(100, 100, 600, 800),
-                        payload = LinkedHashMap(initialPayload)
-                    )
-                    existing.restoreFromSnapshot(snapshot)
-                }
-                if (existing.lifecycleState == MiniAppLifecycleState.PAUSED ||
-                    existing.lifecycleState == MiniAppLifecycleState.STOPPED ||
-                    existing.lifecycleState == MiniAppLifecycleState.SLEEPING
-                ) {
-                    existing.onStart()
-                    existing.onResume()
+                val isAlreadyActive = existing.lifecycleState == MiniAppLifecycleState.RESUMED ||
+                    existing.lifecycleState == MiniAppLifecycleState.STARTED
+                if (!isAlreadyActive) {
+                    if (initialPayload.isNotEmpty()) {
+                        val snapshot = MiniAppRecoverySnapshot(
+                            instanceId = instanceId,
+                            appType = appType,
+                            windowBounds = initialBounds?.copyBounds() ?: WindowBounds(100, 100, 600, 800),
+                            payload = LinkedHashMap(initialPayload)
+                        )
+                        existing.restoreFromSnapshot(snapshot)
+                    }
+                    if (existing.lifecycleState == MiniAppLifecycleState.PAUSED ||
+                        existing.lifecycleState == MiniAppLifecycleState.STOPPED ||
+                        existing.lifecycleState == MiniAppLifecycleState.SLEEPING
+                    ) {
+                        existing.onStart()
+                        existing.onResume()
+                    }
+                } else {
+                    log("INSTANCE_ALREADY_ACTIVE id=$instanceId type=$appType preserving live state without applying older snapshot")
                 }
                 log("INSTANCE_ACTIVE id=$instanceId type=$appType resumedExisting=true state=${existing.lifecycleState} updatedPayloadKeys=${initialPayload.keys}")
                 return existing

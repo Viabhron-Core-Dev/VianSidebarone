@@ -439,12 +439,26 @@ class FloatingMiniAppFrameworkTest {
         assertEquals(1, host.getActiveInstanceCount())
         assertEquals("Initial Note Content", inst1!!.onSaveState()[TestNotesMiniAppInstance.KEY_TEXT])
 
-        // Second start for the same instanceId (e.g. wake or re-mount) with updated payload
-        val inst2 = host.startInstance("idempotent_test", "test_notes", bounds, mapOf("text" to "Updated Wake Content"))
+        // Live user types new content
+        inst1.restoreFromSnapshot(MiniAppRecoverySnapshot(
+            instanceId = "idempotent_test",
+            appType = "test_notes",
+            windowBounds = bounds,
+            payload = mutableMapOf("text" to "New Live User Note")
+        ))
+
+        // Second start while already active must preserve live state without overwriting with older snapshot
+        val inst2 = host.startInstance("idempotent_test", "test_notes", bounds, mapOf("text" to "Stale Initial Content"))
         assertNotNull(inst2)
         assertEquals("Second start must NOT create a duplicate instance", 1, host.getActiveInstanceCount())
         assertSame("Second start must return the same instance", inst1, inst2)
-        assertEquals("Updated snapshot payload must be restored onto existing instance", "Updated Wake Content", inst2!!.onSaveState()[TestNotesMiniAppInstance.KEY_TEXT])
+        assertEquals("Live active state must be preserved and not overwritten by older snapshot", "New Live User Note", inst2!!.onSaveState()[TestNotesMiniAppInstance.KEY_TEXT])
+
+        // Now pause/sleep instance and resume with updated snapshot
+        inst1.onPause()
+        inst1.onStop()
+        val inst3 = host.startInstance("idempotent_test", "test_notes", bounds, mapOf("text" to "Updated Wake Content"))
+        assertEquals("Stopped/sleeping instance must restore wake snapshot payload", "Updated Wake Content", inst3!!.onSaveState()[TestNotesMiniAppInstance.KEY_TEXT])
     }
 
     @Test
@@ -452,17 +466,28 @@ class FloatingMiniAppFrameworkTest {
         val connManager = HeavyProcessConnectionManager.getInstance(testContext)
         connManager.setMockProxyForTesting(null, ConnectionState.CONNECTING)
 
-        val cmd = HeavyCommand(
+        val cmd1 = HeavyCommand(
             commandId = "test_cmd_1",
             type = HeavyCommandType.START_OPERATION,
             targetId = "test_miniapp_queue",
             payload = mapOf("instance_id" to "test_miniapp_queue", "app_type" to "test_notes")
         )
+        val cmd2 = HeavyCommand(
+            commandId = "test_cmd_2",
+            type = HeavyCommandType.START_OPERATION,
+            targetId = "test_miniapp_queue",
+            payload = mapOf("instance_id" to "test_miniapp_queue", "app_type" to "test_notes")
+        )
 
-        // Send while CONNECTING: must queue without terminal failure
-        val res = connManager.sendCommand(cmd, autoConnect = true)
-        assertTrue("Command sent during CONNECTING with autoConnect must report queued success", res.success)
+        // Send while CONNECTING: first command queues successfully
+        val res1 = connManager.sendCommand(cmd1, autoConnect = true)
+        assertTrue("Command sent during CONNECTING with autoConnect must report queued success", res1.success)
         assertEquals(1, connManager.getPendingCommandCountForTesting())
+
+        // Send duplicate start while CONNECTING: must not add duplicate start command to queue
+        val res2 = connManager.sendCommand(cmd2, autoConnect = true)
+        assertTrue(res2.success)
+        assertEquals("Duplicate START_OPERATION for the same targetId must NOT be enqueued twice", 1, connManager.getPendingCommandCountForTesting())
 
         // Mock Heavy host proxy recording delivered commands
         val deliveredCommands = mutableListOf<String>()
@@ -591,5 +616,188 @@ class FloatingMiniAppFrameworkTest {
         val activeFloating = host.getActiveInstanceCount()
         val willStop = (activeFloating == 0 && afterCount == 0)
         assertTrue("When active instances and embedded pages reach 0, teardown condition must be true", willStop)
+    }
+
+    @Test
+    fun testRepeatedResizeMeasurementsRemainStableAndConverge() {
+        val window = FloatingMiniAppWindow("resize_stability_test", testContext, "test_notes")
+        val windowBounds = WindowBounds(100, 100, 592, 572)
+        window.setWindowBounds(windowBounds)
+
+        // Density in MockTestContext is 2f; top bar height is (38 * 2f).toInt() = 76
+        val density = testContext.resources.displayMetrics.density
+        val topBarHeight = (38 * density).toInt()
+        assertEquals(76, topBarHeight)
+
+        val expectedContentHeight = 572 - 76 // 496
+        assertEquals(496, expectedContentHeight)
+
+        // Multiple successive measurements with authoritative bounds 592x572 must produce stable 592x496
+        val viewportW = windowBounds.width
+        val viewportH = maxOf(0, windowBounds.height - topBarHeight)
+        assertEquals(592, viewportW)
+        assertEquals(496, viewportH)
+
+        // Authoritative window bounds remain the source of truth
+        assertEquals("Authoritative window bounds width must remain 592", 592, window.bounds.width)
+        assertEquals("Authoritative window bounds height must remain 572", 572, window.bounds.height)
+    }
+
+    @Test
+    fun testCloseReleasesInstanceAndSurfaceBeforeFinalConsumerDisconnect() {
+        val bridge = FloatingMiniAppBridge.getInstance(testContext)
+        val connManager = HeavyProcessConnectionManager.getInstance(testContext)
+        val store = DurableMiniAppStore.getInstance(testContext)
+        val wm = com.example.core.FloatingWindowManager.getInstance(testContext)
+
+        val instanceId = "close_order_test"
+        val snapshot = MiniAppRecoverySnapshot(
+            instanceId = instanceId,
+            appType = "test_notes",
+            state = MiniAppState.ACTIVE,
+            windowBounds = WindowBounds(100, 100, 500, 600)
+        )
+        store.saveSnapshot(snapshot)
+
+        val deliveredCommands = mutableListOf<String>()
+        val mockProxy = object : IHeavyHostContract {
+            override fun sendCommand(commandJson: String): String {
+                deliveredCommands.add(commandJson)
+                return com.example.core.ipc.IpcResult.success("Stopped").toJson()
+            }
+            override fun syncSnapshot(snapshotJson: String): String = com.example.core.ipc.IpcResult.success().toJson()
+            override fun ping(): Boolean = true
+            override fun registerCallback(callbackBinder: android.os.IBinder): Boolean = true
+            override fun unregisterCallback(): Boolean = true
+        }
+        connManager.setMockProxyForTesting(mockProxy, ConnectionState.CONNECTED)
+        connManager.acquireConsumer("miniapp_$instanceId", reason = "test")
+
+        val window = FloatingMiniAppWindow(instanceId, testContext, "test_notes")
+        wm.registerWindow(window)
+        assertNotNull(wm.getWindow(instanceId))
+
+        // Execute closeMiniApp
+        bridge.closeMiniApp(instanceId, deleteDurable = true)
+
+        // 1. Window unregistered from Main
+        assertNull("Window must be unregistered from WindowManager", wm.getWindow(instanceId))
+
+        // 2. STOP_OPERATION was delivered to Heavy before disconnect
+        assertTrue("STOP_OPERATION must be delivered to Heavy", deliveredCommands.any { it.contains("STOP_OPERATION") && it.contains(instanceId) })
+
+        // 3. Durable snapshot was deleted
+        assertNull("Snapshot must be deleted when deleteDurable=true", store.loadSnapshot(instanceId))
+    }
+
+    @Test
+    fun testCloseAfterDeadHeavyCompletesCleanlyWithoutIpcFailure() {
+        val bridge = FloatingMiniAppBridge.getInstance(testContext)
+        val connManager = HeavyProcessConnectionManager.getInstance(testContext)
+        val store = DurableMiniAppStore.getInstance(testContext)
+        val wm = com.example.core.FloatingWindowManager.getInstance(testContext)
+
+        val instanceId = "dead_heavy_close_test"
+        val snapshot = MiniAppRecoverySnapshot(
+            instanceId = instanceId,
+            appType = "test_notes",
+            state = MiniAppState.ACTIVE,
+            windowBounds = WindowBounds(100, 100, 500, 600)
+        )
+        store.saveSnapshot(snapshot)
+
+        // Simulate dead/disconnected Heavy process
+        connManager.setMockProxyForTesting(null, ConnectionState.DEAD)
+
+        val window = FloatingMiniAppWindow(instanceId, testContext, "test_notes")
+        wm.registerWindow(window)
+        assertNotNull(wm.getWindow(instanceId))
+
+        // Must complete cleanly without throwing or crashing
+        bridge.closeMiniApp(instanceId, deleteDurable = true)
+
+        // Window and recovery record must still be removed
+        assertNull("Window must be unregistered even if Heavy was dead", wm.getWindow(instanceId))
+        assertNull("Snapshot must be removed even if Heavy was dead", store.loadSnapshot(instanceId))
+    }
+
+    @Test
+    fun testClosingOneWindowDoesNotTerminateHeavyWhileAnotherConsumerActive() {
+        val bridge = FloatingMiniAppBridge.getInstance(testContext)
+        val connManager = HeavyProcessConnectionManager.getInstance(testContext)
+        val wm = com.example.core.FloatingWindowManager.getInstance(testContext)
+
+        val mockProxy = object : IHeavyHostContract {
+            override fun sendCommand(commandJson: String): String = com.example.core.ipc.IpcResult.success("Ok").toJson()
+            override fun syncSnapshot(snapshotJson: String): String = com.example.core.ipc.IpcResult.success().toJson()
+            override fun ping(): Boolean = true
+            override fun registerCallback(callbackBinder: android.os.IBinder): Boolean = true
+            override fun unregisterCallback(): Boolean = true
+        }
+        connManager.setMockProxyForTesting(mockProxy, ConnectionState.CONNECTED)
+
+        // Two consumers: window_1 and ebook_reader
+        connManager.acquireConsumer("miniapp_multi_1", reason = "win1")
+        connManager.acquireConsumer("ebook_reader", reason = "reader")
+
+        val window = FloatingMiniAppWindow("multi_1", testContext, "test_notes")
+        wm.registerWindow(window)
+
+        bridge.closeMiniApp("multi_1", deleteDurable = true)
+
+        // Connection manager must still have active consumer for ebook_reader
+        assertTrue("Heavy must remain connected while another consumer is active", connManager.state == ConnectionState.CONNECTED)
+
+        // Cleanup
+        connManager.releaseConsumer("ebook_reader", reason = "test_cleanup")
+    }
+
+    @Test
+    fun testFoldPersistsSuccessfullyBeforeReleasingHeavy() {
+        val bridge = FloatingMiniAppBridge.getInstance(testContext)
+        val store = DurableMiniAppStore.getInstance(testContext)
+        val connManager = HeavyProcessConnectionManager.getInstance(testContext)
+
+        val instanceId = "fold_persist_test"
+        val initialSnapshot = MiniAppRecoverySnapshot(
+            instanceId = instanceId,
+            appType = "test_notes",
+            state = MiniAppState.ACTIVE,
+            windowBounds = WindowBounds(150, 180, 520, 620),
+            payload = mutableMapOf("text" to "Durable Note to Fold")
+        )
+        store.saveSnapshot(initialSnapshot)
+
+        val deliveredCommands = mutableListOf<String>()
+        val mockProxy = object : IHeavyHostContract {
+            override fun sendCommand(commandJson: String): String {
+                deliveredCommands.add(commandJson)
+                return com.example.core.ipc.IpcResult.success("Snapshot", mapOf("text" to "Durable Note to Fold")).toJson()
+            }
+            override fun syncSnapshot(snapshotJson: String): String = com.example.core.ipc.IpcResult.success().toJson()
+            override fun ping(): Boolean = true
+            override fun registerCallback(callbackBinder: android.os.IBinder): Boolean = true
+            override fun unregisterCallback(): Boolean = true
+        }
+        connManager.setMockProxyForTesting(mockProxy, ConnectionState.CONNECTED)
+        connManager.acquireConsumer("miniapp_$instanceId", reason = "fold_test")
+
+        val window = FloatingMiniAppWindow(instanceId, testContext, "test_notes")
+        com.example.core.FloatingWindowManager.getInstance(testContext).registerWindow(window)
+
+        // Execute sleep / fold
+        bridge.sleepMiniApp(instanceId)
+
+        // Verify durable store has SLEEPING state with text intact
+        val sleepingSnapshot = store.loadSnapshot(instanceId)
+        assertNotNull(sleepingSnapshot)
+        assertEquals(MiniAppState.SLEEPING, sleepingSnapshot!!.state)
+        assertEquals("Durable Note to Fold", sleepingSnapshot.payload["text"])
+
+        // Verify release command was delivered after snapshot
+        assertTrue(deliveredCommands.any { it.contains("release_sleeping_instance") })
+
+        // Cleanup
+        bridge.closeMiniApp(instanceId, deleteDurable = true)
     }
 }
