@@ -322,17 +322,19 @@ class HeavyProcessConnectionManager internal constructor(
         val proxy: IHeavyHostContract?
         synchronized(lock) {
             if (state != ConnectionState.CONNECTED) {
-                if (autoConnect) {
-                    val alreadyQueued = pendingCommands.any {
-                        it.commandId == command.commandId ||
-                        (it.type == command.type && it.targetId == command.targetId && command.type == HeavyCommandType.START_OPERATION)
+                if (autoConnect && state != ConnectionState.DEAD) {
+                    val didConnect = if (state == ConnectionState.CONNECTING) true else connect(autoCreate = true, reason = "sendCommand:${command.type}")
+                    if (didConnect || state == ConnectionState.CONNECTING) {
+                        val alreadyQueued = pendingCommands.any {
+                            it.commandId == command.commandId ||
+                            (it.type == command.type && it.targetId == command.targetId && command.type == HeavyCommandType.START_OPERATION)
+                        }
+                        if (!alreadyQueued && pendingCommands.size < 20) {
+                            pendingCommands.offer(command)
+                        }
+                        safeLog("HeavyIPC", "COMMAND_QUEUED cmdId=${command.commandId} type=${command.type} target=${command.targetId} state=$state pendingCount=${pendingCommands.size} alreadyQueued=$alreadyQueued")
+                        return IpcResult.success("Queued for delivery upon connection")
                     }
-                    if (!alreadyQueued && pendingCommands.size < 20) {
-                        pendingCommands.offer(command)
-                    }
-                    connect(autoCreate = true, reason = "sendCommand:${command.type}")
-                    safeLog("HeavyIPC", "COMMAND_QUEUED cmdId=${command.commandId} type=${command.type} target=${command.targetId} state=$state pendingCount=${pendingCommands.size} alreadyQueued=$alreadyQueued")
-                    return IpcResult.success("Queued for delivery upon connection")
                 }
                 safeLog("HeavyIPC", "IPC_FAILURE cmdId=${command.commandId} type=${command.type} target=${command.targetId} error=Heavy process is not connected (state=$state)")
                 return IpcResult.error(
@@ -709,6 +711,17 @@ class HeavyProcessConnectionManager internal constructor(
         fun getInstance(context: Context): HeavyProcessConnectionManager {
             return instance ?: synchronized(this) {
                 instance ?: HeavyProcessConnectionManager(context.applicationContext).also { instance = it }
+            }
+        }
+
+        fun resetForTesting() {
+            synchronized(this) {
+                instance?.let {
+                    it.pendingCommands.clear()
+                    it.activeConsumers.clear()
+                    it.listeners.clear()
+                }
+                instance = null
             }
         }
     }

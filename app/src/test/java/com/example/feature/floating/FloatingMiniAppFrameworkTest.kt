@@ -78,6 +78,7 @@ class FloatingMiniAppFrameworkTest {
         DurableMiniAppStore.resetForTesting()
         HeavyFloatingHost.resetForTesting()
         FloatingMiniAppBridge.resetForTesting()
+        HeavyProcessConnectionManager.resetForTesting()
 
         fakePrefs = FakeSharedPreferences()
         testContext = MockTestContext(fakePrefs, tempFolder.root)
@@ -799,5 +800,144 @@ class FloatingMiniAppFrameworkTest {
 
         // Cleanup
         bridge.closeMiniApp(instanceId, deleteDurable = true)
+    }
+
+    @Test
+    fun testSafeDisplayBoundsCachedDuringRapidInquiries() {
+        val window = FloatingMiniAppWindow("cache_test", testContext, "test_notes")
+        val bounds1 = window.getSafeDisplayBounds(testContext)
+        val bounds2 = window.getSafeDisplayBounds(testContext)
+        assertSame("Subsequent calls within 1 second must return the cached instance", bounds1, bounds2)
+    }
+
+    @Test
+    fun testResizeEndSettlesCleanlyWithoutContinuingRelayout() {
+        val window = FloatingMiniAppWindow("resize_settle_test", testContext, "test_notes")
+        window.setWindowBounds(WindowBounds(100, 100, 500, 600))
+        val expectedViewportH = window.getContentViewportHeight(600)
+
+        // Initial relayout to normal dimensions
+        window.relayoutEmbeddedSurface(500, expectedViewportH)
+        val initialDims = window.getLastRelayoutDimensions()
+        assertEquals(500, initialDims.first)
+        assertEquals(expectedViewportH, initialDims.second)
+
+        // Simulate resize drag start
+        window.isResizing = true
+        assertTrue(window.isResizing)
+
+        // Simulate resize to 600x700
+        val resizedViewportH = window.getContentViewportHeight(700)
+        window.relayoutEmbeddedSurface(600, resizedViewportH)
+        val dragDims = window.getLastRelayoutDimensions()
+        assertEquals(600, dragDims.first)
+        assertEquals(resizedViewportH, dragDims.second)
+
+        // Simulate RESIZE_END
+        window.isResizing = false
+        assertFalse(window.isResizing)
+
+        // Settle embedded surface
+        window.relayoutEmbeddedSurface(600, resizedViewportH)
+        val finalDims = window.getLastRelayoutDimensions()
+        assertEquals(600, finalDims.first)
+        assertEquals(resizedViewportH, finalDims.second)
+    }
+
+    @Test
+    fun testKeyboardOpenAppliesTemporaryShiftWithoutOverwritingNormalFloatingBounds() {
+        val window = FloatingMiniAppWindow("ime_shift_test", testContext, "test_notes")
+        val initialBounds = WindowBounds(100, 700, 500, 800)
+        window.setWindowBounds(initialBounds)
+        assertEquals(700, window.normalFloatingBounds.y)
+        assertEquals(700, window.layoutParams.y)
+
+        // Simulate soft keyboard opening (display bottom shrinks to 1200; window bottom is 700 + 800 = 1500)
+        window.simulateImeVisibilityForTesting(isKeyboardOpen = true, keypadHeight = 600, displayBottom = 1200)
+
+        // Window must be shifted upward temporarily
+        assertTrue("isImeShifted must be true when window is occluded by keyboard", window.isImeShifted)
+        assertTrue("layoutParams.y must shift upward", window.layoutParams.y < 700)
+        assertTrue("imeShiftOffsetY must be positive", window.imeShiftOffsetY > 0)
+
+        // CRITICAL CONTRACT: normalFloatingBounds must NOT be overwritten!
+        assertEquals("normalFloatingBounds.y must remain pristine 700", 700, window.normalFloatingBounds.y)
+
+        // Simulate soft keyboard closing
+        window.simulateImeVisibilityForTesting(isKeyboardOpen = false, keypadHeight = 0, displayBottom = 1800)
+
+        // Window must restore exact original position
+        assertFalse("isImeShifted must be false when keyboard is dismissed", window.isImeShifted)
+        assertEquals(0, window.imeShiftOffsetY)
+        assertEquals("layoutParams.y must restore to exact 700", 700, window.layoutParams.y)
+        assertEquals("bounds.y must restore to exact 700", 700, window.bounds.y)
+    }
+
+    @Test
+    fun testFoldWhileKeyboardShiftedSavesNormalFloatingBounds() {
+        val bridge = FloatingMiniAppBridge.getInstance(testContext)
+        val store = DurableMiniAppStore.getInstance(testContext)
+        val connManager = HeavyProcessConnectionManager.getInstance(testContext)
+
+        val instanceId = "fold_ime_test"
+        val window = FloatingMiniAppWindow(instanceId, testContext, "test_notes")
+        window.setWindowBounds(WindowBounds(100, 700, 500, 800))
+        com.example.core.FloatingWindowManager.getInstance(testContext).registerWindow(window)
+
+        val mockProxy = object : IHeavyHostContract {
+            override fun sendCommand(commandJson: String): String = com.example.core.ipc.IpcResult.success("Ok").toJson()
+            override fun syncSnapshot(snapshotJson: String): String = com.example.core.ipc.IpcResult.success().toJson()
+            override fun ping(): Boolean = true
+            override fun registerCallback(callbackBinder: android.os.IBinder): Boolean = true
+            override fun unregisterCallback(): Boolean = true
+        }
+        connManager.setMockProxyForTesting(mockProxy, ConnectionState.CONNECTED)
+        connManager.acquireConsumer("miniapp_$instanceId", reason = "fold_ime")
+
+        // Shift window with keyboard
+        window.simulateImeVisibilityForTesting(isKeyboardOpen = true, keypadHeight = 600, displayBottom = 1200)
+        assertTrue(window.isImeShifted)
+        val shiftedLayoutY = window.layoutParams.y
+        assertTrue(shiftedLayoutY < 700)
+
+        // Fold while shifted
+        bridge.sleepMiniApp(instanceId)
+
+        // Snapshot must have recorded pristine normal bounds, NEVER shiftedLayoutY
+        val snapshot = store.loadSnapshot(instanceId)
+        assertNotNull(snapshot)
+        assertEquals("Saved snapshot windowBounds.y must be unshifted normal Y (700)", 700, snapshot!!.windowBounds.y)
+        assertNotEquals("Saved snapshot windowBounds.y must not be the shifted coordinate", shiftedLayoutY, snapshot.windowBounds.y)
+
+        // Cleanup
+        bridge.closeMiniApp(instanceId, deleteDurable = true)
+    }
+
+    @Test
+    fun testMaximizeWhileKeyboardShiftedDoesNotCorruptMaximizeRestoreBounds() {
+        val window = FloatingMiniAppWindow("max_ime_test", testContext, "test_notes")
+        window.setWindowBounds(WindowBounds(100, 700, 500, 800))
+        com.example.core.FloatingWindowManager.getInstance(testContext).registerWindow(window)
+
+        // Shift window with keyboard
+        window.simulateImeVisibilityForTesting(isKeyboardOpen = true, keypadHeight = 600, displayBottom = 1200)
+        assertTrue(window.isImeShifted)
+
+        // Maximize while IME is shifted
+        window.toggleMaximize()
+        assertTrue(window.isMaximized)
+
+        // maximizeRestoreBounds must store normal pristine bounds (700), not shifted coordinate
+        val restoreBounds = window.maximizeRestoreBounds
+        assertNotNull(restoreBounds)
+        assertEquals("maximizeRestoreBounds.y must be pristine 700", 700, restoreBounds!!.y)
+
+        // Restore from maximized
+        window.toggleMaximize()
+        assertFalse(window.isMaximized)
+        assertFalse(window.isImeShifted)
+        assertEquals("Restored bounds.y must be pristine 700", 700, window.bounds.y)
+        assertEquals("Restored normalFloatingBounds.y must be pristine 700", 700, window.normalFloatingBounds.y)
+        assertEquals("Restored layoutParams.y must be pristine 700", 700, window.layoutParams.y)
     }
 }

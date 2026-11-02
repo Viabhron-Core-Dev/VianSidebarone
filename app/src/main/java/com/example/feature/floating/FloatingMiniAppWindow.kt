@@ -10,6 +10,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.view.Display
 import android.view.GestureDetector
 import android.view.Gravity
@@ -72,8 +73,19 @@ class FloatingMiniAppWindow(
         private set
 
     // IME temporary state
-    private var isImeShifted: Boolean = false
+    var isImeShifted: Boolean = false
+        internal set
+    var imeShiftOffsetY: Int = 0
+        internal set
     private var globalLayoutListener: ViewTreeObserver.OnGlobalLayoutListener? = null
+
+    // Resize state
+    var isResizing: Boolean = false
+        internal set
+
+    // Safe display bounds cache
+    private var cachedSafeDisplayBounds: WindowBounds? = null
+    private var lastSafeBoundsQueryTime: Long = 0L
 
     // View references
     private var rootCardView: FrameLayout? = null
@@ -89,10 +101,17 @@ class FloatingMiniAppWindow(
     private var lastRelayoutWidth: Int = -1
     private var lastRelayoutHeight: Int = -1
 
-    private fun getContentViewportHeight(windowHeight: Int): Int {
+    fun getContentViewportHeight(windowHeight: Int): Int {
         val density = context.resources.displayMetrics.density
         val topBarHeight = (38 * density).toInt()
         return maxOf(0, windowHeight - topBarHeight)
+    }
+
+    override fun setWindowBounds(newBounds: WindowBounds) {
+        super.setWindowBounds(newBounds)
+        if (!isMaximized && !isImeShifted) {
+            normalFloatingBounds = newBounds.copyBounds()
+        }
     }
 
     private val connectionListener = object : HeavyConnectionListener {
@@ -206,6 +225,11 @@ class FloatingMiniAppWindow(
                 }
 
                 override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
+                    if (isResizing) return
+                    val expectedViewportH = getContentViewportHeight(bounds.height)
+                    if (width != bounds.width || height != expectedViewportH) {
+                        return
+                    }
                     relayoutEmbeddedSurface(width, height)
                 }
 
@@ -303,17 +327,19 @@ class FloatingMiniAppWindow(
         }
     }
 
-    private fun relayoutEmbeddedSurface(viewportWidth: Int, viewportHeight: Int) {
+    fun relayoutEmbeddedSurface(viewportWidth: Int, viewportHeight: Int) {
+        if (viewportWidth <= 0 || viewportHeight <= 0) return
+        if (viewportWidth == lastRelayoutWidth && viewportHeight == lastRelayoutHeight) return
+        lastRelayoutWidth = viewportWidth
+        lastRelayoutHeight = viewportHeight
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && embeddedSurfaceView != null) {
-            if (viewportWidth <= 0 || viewportHeight <= 0) return
-            if (viewportWidth == lastRelayoutWidth && viewportHeight == lastRelayoutHeight) return
-            lastRelayoutWidth = viewportWidth
-            lastRelayoutHeight = viewportHeight
             try {
                 HeavyProcessConnectionManager.getInstance(context).relayoutSurfaceHost(instanceId, viewportWidth, viewportHeight)
             } catch (_: Throwable) {}
         }
     }
+
+    fun getLastRelayoutDimensions(): Pair<Int, Int> = Pair(lastRelayoutWidth, lastRelayoutHeight)
 
     private fun attachFallbackContentView(context: Context, container: FrameLayout, reason: String = "fallback") {
         if (container.findViewById<View>(android.R.id.text1) != null) return
@@ -430,6 +456,7 @@ class FloatingMiniAppWindow(
         var dragStartRawY = 0f
         var initialBoundsX = 0
         var initialBoundsY = 0
+        var cachedDragSafeBounds: WindowBounds? = null
 
         val gestureDetector = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
             override fun onDoubleTap(e: MotionEvent): Boolean {
@@ -457,8 +484,15 @@ class FloatingMiniAppWindow(
                 MotionEvent.ACTION_DOWN -> {
                     dragStartRawX = event.rawX
                     dragStartRawY = event.rawY
+                    if (isImeShifted) {
+                        bounds.y = layoutParams.y
+                        normalFloatingBounds.y = layoutParams.y
+                        isImeShifted = false
+                        imeShiftOffsetY = 0
+                    }
                     initialBoundsX = bounds.x
                     initialBoundsY = bounds.y
+                    cachedDragSafeBounds = getSafeDisplayBounds(context)
                     isDragging = false
                     LogKeeper.log(context, "FloatingMiniAppWindow", "TOPBAR_DOWN id=$instanceId rawX=${event.rawX} rawY=${event.rawY} bounds=$bounds")
 
@@ -481,7 +515,7 @@ class FloatingMiniAppWindow(
                     }
 
                     if (isDragging) {
-                        val safeBounds = getSafeDisplayBounds(context)
+                        val safeBounds = cachedDragSafeBounds ?: getSafeDisplayBounds(context).also { cachedDragSafeBounds = it }
                         val newX = (initialBoundsX + dx.toInt()).coerceIn(safeBounds.x, maxOf(safeBounds.x, safeBounds.right - bounds.width))
                         val newY = (initialBoundsY + dy.toInt()).coerceIn(safeBounds.y, maxOf(safeBounds.y, safeBounds.bottom - bounds.height))
 
@@ -499,6 +533,7 @@ class FloatingMiniAppWindow(
                 }
 
                 MotionEvent.ACTION_UP -> {
+                    cachedDragSafeBounds = null
                     if (isDragging) {
                         isDragging = false
                         LogKeeper.log(context, "FloatingMiniAppWindow", "MOVE_END id=$instanceId finalBounds=$bounds")
@@ -511,6 +546,7 @@ class FloatingMiniAppWindow(
                 }
 
                 MotionEvent.ACTION_CANCEL -> {
+                    cachedDragSafeBounds = null
                     if (isDragging) {
                         isDragging = false
                         LogKeeper.log(context, "FloatingMiniAppWindow", "MOVE_CANCEL id=$instanceId bounds=$bounds")
@@ -611,6 +647,8 @@ class FloatingMiniAppWindow(
         var resizeStartRawY = 0f
         var startWidth = 0
         var startHeight = 0
+        var cachedSafeBounds: WindowBounds? = null
+        var lastRelayoutDispatchTime = 0L
 
         resizeView.setOnTouchListener { _, event ->
             if (isMaximized) {
@@ -620,10 +658,13 @@ class FloatingMiniAppWindow(
 
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
+                    isResizing = true
                     resizeStartRawX = event.rawX
                     resizeStartRawY = event.rawY
                     startWidth = bounds.width
                     startHeight = bounds.height
+                    cachedSafeBounds = getSafeDisplayBounds(context)
+                    lastRelayoutDispatchTime = SystemClock.uptimeMillis()
                     LogKeeper.log(context, "FloatingMiniAppWindow", "RESIZE_START id=$instanceId initialSize=($startWidth,$startHeight)")
                     manager?.setFocus(windowId)
                     true
@@ -633,7 +674,7 @@ class FloatingMiniAppWindow(
                     val dw = (event.rawX - resizeStartRawX).toInt()
                     val dh = (event.rawY - resizeStartRawY).toInt()
 
-                    val safeBounds = getSafeDisplayBounds(context)
+                    val safeBounds = cachedSafeBounds ?: getSafeDisplayBounds(context).also { cachedSafeBounds = it }
                     val minW = (240 * density).toInt()
                     val minH = (200 * density).toInt()
                     val maxW = safeBounds.right - bounds.x
@@ -650,21 +691,35 @@ class FloatingMiniAppWindow(
                         layoutParams.width = newW
                         layoutParams.height = newH
                         manager?.updateBounds(windowId, bounds)
-                        relayoutEmbeddedSurface(newW, getContentViewportHeight(newH))
+
+                        val now = SystemClock.uptimeMillis()
+                        val viewportH = getContentViewportHeight(newH)
+                        val deltaW = abs(newW - lastRelayoutWidth)
+                        val deltaH = abs(viewportH - lastRelayoutHeight)
+                        if ((now - lastRelayoutDispatchTime >= 16L && (deltaW >= 2 || deltaH >= 2)) || deltaW >= 8 || deltaH >= 8) {
+                            lastRelayoutDispatchTime = now
+                            relayoutEmbeddedSurface(newW, viewportH)
+                        }
                     }
                     true
                 }
 
                 MotionEvent.ACTION_UP -> {
+                    isResizing = false
+                    cachedSafeBounds = null
                     LogKeeper.log(context, "FloatingMiniAppWindow", "RESIZE_END id=$instanceId finalSize=(${bounds.width},${bounds.height})")
                     normalFloatingBounds = bounds.copyBounds()
                     durableStore.updateWindowBounds(instanceId, normalFloatingBounds)
                     LogKeeper.log(context, "FloatingMiniAppWindow", "WINDOW_BOUNDS_PERSISTED id=$instanceId bounds=$normalFloatingBounds source=resize")
+                    relayoutEmbeddedSurface(bounds.width, getContentViewportHeight(bounds.height))
                     true
                 }
 
                 MotionEvent.ACTION_CANCEL -> {
+                    isResizing = false
+                    cachedSafeBounds = null
                     LogKeeper.log(context, "FloatingMiniAppWindow", "RESIZE_CANCEL id=$instanceId size=(${bounds.width},${bounds.height})")
+                    relayoutEmbeddedSurface(bounds.width, getContentViewportHeight(bounds.height))
                     true
                 }
 
@@ -676,7 +731,12 @@ class FloatingMiniAppWindow(
     /**
      * Determines ONE authoritative safe display rectangle using Android system bar, navigation bar, and cutout insets.
      */
-    fun getSafeDisplayBounds(context: Context): WindowBounds {
+    fun getSafeDisplayBounds(context: Context, forceRefresh: Boolean = false): WindowBounds {
+        val now = SystemClock.uptimeMillis()
+        val cached = cachedSafeDisplayBounds
+        if (!forceRefresh && cached != null && (now - lastSafeBoundsQueryTime < 1000L)) {
+            return cached
+        }
         val wm = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
         val safeBounds = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             val metrics = wm.currentWindowMetrics
@@ -700,6 +760,8 @@ class FloatingMiniAppWindow(
             val navBarH = if (navBarRes > 0) context.resources.getDimensionPixelSize(navBarRes) else (48 * dm.density).toInt()
             WindowBounds(0, statusBarH, dm.widthPixels, maxOf(400, dm.heightPixels - statusBarH - navBarH))
         }
+        cachedSafeDisplayBounds = safeBounds
+        lastSafeBoundsQueryTime = now
         LogKeeper.log(context, "FloatingMiniAppWindow", "SAFE_DISPLAY_BOUNDS bounds=$safeBounds")
         return safeBounds
     }
@@ -715,8 +777,11 @@ class FloatingMiniAppWindow(
             // Restore previous normal floating bounds
             val target = maximizeRestoreBounds?.copyBounds() ?: normalFloatingBounds.copyBounds()
             bounds = target.copyBounds()
+            normalFloatingBounds = target.copyBounds()
             isMaximized = false
             maximizeRestoreBounds = null
+            isImeShifted = false
+            imeShiftOffsetY = 0
             durableStore.updateMaximizeRestoreBounds(instanceId, null)
 
             // Restore rounded card shape
@@ -726,9 +791,14 @@ class FloatingMiniAppWindow(
             LogKeeper.log(context, "FloatingMiniAppWindow", "RESTORE_BOUNDS bounds=$target")
             durableStore.updateWindowBounds(instanceId, target)
         } else {
+            // If IME was shifted, reset IME shift to preserve pristine normal coordinates
+            if (isImeShifted) {
+                isImeShifted = false
+                imeShiftOffsetY = 0
+            }
             // Save current normal floating bounds before maximizing
-            normalFloatingBounds = bounds.copyBounds()
-            maximizeRestoreBounds = bounds.copyBounds()
+            val normalTarget = normalFloatingBounds.copyBounds()
+            maximizeRestoreBounds = normalTarget.copyBounds()
             durableStore.updateMaximizeRestoreBounds(instanceId, maximizeRestoreBounds)
             LogKeeper.log(context, "FloatingMiniAppWindow", "MAXIMIZE_RESTORE_BOUNDS id=$instanceId restoreBounds=$maximizeRestoreBounds")
 
@@ -769,32 +839,85 @@ class FloatingMiniAppWindow(
             val isKeyboardOpen = keypadHeight > screenH * 0.15
 
             if (isKeyboardOpen) {
-                val windowBottom = layoutParams.y + layoutParams.height
+                if (isMaximized) {
+                    return@OnGlobalLayoutListener
+                }
+
+                val baselineY = normalFloatingBounds.y
+                val windowBottom = baselineY + normalFloatingBounds.height
                 if (windowBottom > r.bottom) {
-                    val shift = (windowBottom - r.bottom) + (16 * context.resources.displayMetrics.density).toInt()
-                    val shiftedY = max(0, layoutParams.y - shift)
+                    val density = context.resources.displayMetrics.density
+                    val shift = (windowBottom - r.bottom) + (16 * density).toInt()
+                    val safeBounds = getSafeDisplayBounds(context)
+                    val shiftedY = maxOf(safeBounds.y, baselineY - shift)
 
                     if (layoutParams.y != shiftedY) {
                         LogKeeper.log(context, "FloatingMiniAppWindow", "IME_VISIBLE keypadHeight=$keypadHeight")
                         LogKeeper.log(context, "FloatingMiniAppWindow", "IME_TEMP_SHIFT id=$instanceId shift=$shift newY=$shiftedY previousY=${layoutParams.y}")
                         layoutParams.y = shiftedY
-                        isImeShifted = true
+                        isImeShifted = (shiftedY != baselineY)
+                        imeShiftOffsetY = baselineY - shiftedY
                         LogKeeper.log(context, "FloatingMiniAppWindow", "IME_SHIFT id=$instanceId y=$shiftedY")
+                        applyLayoutUpdate()
+                    }
+                } else if (isImeShifted) {
+                    val restoredY = normalFloatingBounds.y
+                    if (layoutParams.y != restoredY) {
+                        layoutParams.y = restoredY
+                        bounds.y = restoredY
+                        isImeShifted = false
+                        imeShiftOffsetY = 0
+                        LogKeeper.log(context, "FloatingMiniAppWindow", "IME_RESTORE id=$instanceId y=$restoredY")
                         applyLayoutUpdate()
                     }
                 }
             } else if (isImeShifted) {
-                // Restore exact persistent bounds.y on keyboard dismiss
+                // Restore exact persistent normalFloatingBounds.y on keyboard dismiss
+                val restoredY = normalFloatingBounds.y
                 LogKeeper.log(context, "FloatingMiniAppWindow", "IME_HIDDEN")
-                LogKeeper.log(context, "FloatingMiniAppWindow", "IME_TEMP_RESTORE id=$instanceId restoredY=${bounds.y}")
-                layoutParams.y = bounds.y
+                LogKeeper.log(context, "FloatingMiniAppWindow", "IME_TEMP_RESTORE id=$instanceId restoredY=$restoredY")
+                layoutParams.y = restoredY
+                bounds.y = restoredY
                 isImeShifted = false
-                LogKeeper.log(context, "FloatingMiniAppWindow", "IME_RESTORE id=$instanceId y=${bounds.y}")
+                imeShiftOffsetY = 0
+                LogKeeper.log(context, "FloatingMiniAppWindow", "IME_RESTORE id=$instanceId y=$restoredY")
                 applyLayoutUpdate()
             }
         }
         globalLayoutListener = listener
         root.viewTreeObserver.addOnGlobalLayoutListener(listener)
+    }
+
+    /**
+     * Testing hook to simulate IME state changes and test window positioning without a physical display.
+     */
+    fun simulateImeVisibilityForTesting(isKeyboardOpen: Boolean, keypadHeight: Int, displayBottom: Int) {
+        val r = Rect(0, 0, bounds.width, displayBottom)
+        if (isKeyboardOpen) {
+            if (isMaximized) return
+            val baselineY = normalFloatingBounds.y
+            val windowBottom = baselineY + normalFloatingBounds.height
+            if (windowBottom > r.bottom) {
+                val density = context.resources.displayMetrics.density
+                val shift = (windowBottom - r.bottom) + (16 * density).toInt()
+                val safeBounds = getSafeDisplayBounds(context)
+                val shiftedY = maxOf(safeBounds.y, baselineY - shift)
+
+                if (layoutParams.y != shiftedY) {
+                    layoutParams.y = shiftedY
+                    isImeShifted = (shiftedY != baselineY)
+                    imeShiftOffsetY = baselineY - shiftedY
+                    applyLayoutUpdate()
+                }
+            }
+        } else if (isImeShifted) {
+            val restoredY = normalFloatingBounds.y
+            layoutParams.y = restoredY
+            bounds.y = restoredY
+            isImeShifted = false
+            imeShiftOffsetY = 0
+            applyLayoutUpdate()
+        }
     }
 
     private fun applyLayoutUpdate() {

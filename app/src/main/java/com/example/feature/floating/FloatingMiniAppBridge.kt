@@ -160,12 +160,13 @@ class FloatingMiniAppBridge private constructor(private val context: Context) {
                 windowBounds = window?.bounds?.copyBounds() ?: WindowBounds(120, 150, 650, 850)
             )
             s.state = MiniAppState.SLEEPING
-            // Preserve normal floating bounds (never let temporary maximized bounds overwrite normal bounds)
+            // Preserve normal floating bounds (never let temporary maximized bounds or IME shift overwrite normal bounds)
             window?.let { w ->
                 if (!w.isMaximized) {
-                    s.windowBounds = w.bounds.copyBounds()
+                    s.windowBounds = w.normalFloatingBounds.copyBounds()
                 } else {
                     w.maximizeRestoreBounds?.let { r -> s.windowBounds = r.copyBounds() }
+                        ?: run { s.windowBounds = w.normalFloatingBounds.copyBounds() }
                 }
             }
             s.payload.putAll(finalPayload)

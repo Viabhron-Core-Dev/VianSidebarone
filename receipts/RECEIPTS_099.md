@@ -241,4 +241,38 @@ Capped at 500 lines per file.
 * Any deviation from what was requested, and why: None. No new mini-apps added, `test_notes` preserved as validation harness, no unrelated features touched.
 * Any known issue or follow-up needed: All framework contracts verified via unit tests; physical on-device verification recommended for hardware SurfaceControlViewHost compositing.
 
+---
+
+### Entry 114
+* Timestamp: 2026-11-02T19:47:00Z
+* One-line summary: Resolved excessive resize/layout work, eliminated post-RESIZE_END relayout queue, and made keyboard position adjustments strictly reversible and isolated from durable bounds
+* Exact files touched:
+  - app/src/main/java/com/example/feature/floating/FloatingMiniAppWindow.kt
+  - app/src/main/java/com/example/feature/floating/FloatingMiniAppBridge.kt
+  - app/src/main/java/com/example/core/ipc/HeavyProcessConnectionManager.kt
+  - app/src/test/java/com/example/feature/floating/FloatingMiniAppFrameworkTest.kt
+  - receipts/RECEIPTS_099.md
+* What was actually done:
+  - Fixed Excessive Resize/Layout Work (Objective A):
+    * Identified root cause of 202 `SAFE_DISPLAY_BOUNDS` queries: `ACTION_MOVE` touch handler invoked `getSafeDisplayBounds(context)` on every single touch point delta. Added gesture-start caching in `setupStickerResizeTouch` and `setupTopBarGestures`, plus 1-second TTL memoization in `getSafeDisplayBounds()`.
+    * Identified root cause of 29 relayouts after `RESIZE_END`: `WindowManager.updateViewLayout` during drag caused asynchronous `SurfaceHolder.Callback.surfaceChanged` events to queue up. When the user lifted their finger, the stale queue arrived with intermediate dimensions, triggering relayouts. Fixed by introducing `isResizing` state: intermediate `surfaceChanged` events during drag are ignored, stale events whose dimensions don't match authoritative `bounds` are discarded, and `ACTION_UP` settles the embedded surface once cleanly.
+    * Throttled Binder IPC `relayoutSurfaceHost` during active drag to ~60fps (16ms or >= 8px delta) while maintaining 120fps smooth window shell updates, preventing Binder buffer congestion.
+  - Fixed Keyboard Upward Shift and Position Stability (Objective B):
+    * Identified root cause of upward shift when typing: `setupImeObserver` calculated shift using live `layoutParams.y` and shifted whenever any part of the window exceeded `r.bottom`, causing recursive shift loops and position drift.
+    * Fixed `setupImeObserver`: anchored shift calculations strictly against `normalFloatingBounds.y` as an invariant baseline. Maximized windows do not shift off-screen.
+    * Ensured `normalFloatingBounds` is NEVER overwritten by keyboard adjustments; all shifts are recorded in temporary state (`imeShiftOffsetY` / `isImeShifted`) and restored to `normalFloatingBounds.y` on keyboard dismiss.
+    * Updated `FloatingMiniAppBridge.sleepMiniApp`: when folding while IME is shifted, records `w.normalFloatingBounds`, guaranteeing durable storage is never tainted by temporary keyboard coordinates.
+    * Updated `toggleMaximize()`: captures `normalFloatingBounds` into `maximizeRestoreBounds`, preventing keyboard offsets from corrupting maximize/restore bounds.
+    * Smoothly reset IME shift on manual top-bar drag without visual jumping.
+  - Added 5 focused unit tests in `FloatingMiniAppFrameworkTest.kt` (all 27 passing):
+    (1) `testSafeDisplayBoundsCachedDuringRapidInquiries`
+    (2) `testResizeEndSettlesCleanlyWithoutContinuingRelayout`
+    (3) `testKeyboardOpenAppliesTemporaryShiftWithoutOverwritingNormalFloatingBounds`
+    (4) `testFoldWhileKeyboardShiftedSavesNormalFloatingBounds`
+    (5) `testMaximizeWhileKeyboardShiftedDoesNotCorruptMaximizeRestoreBounds`
+* How it was verified: local build (`compile_applet`) succeeded cleanly; all 27 unit tests in `com.example.feature.floating.FloatingMiniAppFrameworkTest` passed; `WelcomeIpcTest` passed cleanly.
+* Any deviation from what was requested, and why: None. No new mini-apps added, `test_notes` preserved as validation harness, architecture strictly preserved.
+* Any known issue or follow-up needed: Ready for physical device testing per On-Device Verification Guide below.
+
+
 
