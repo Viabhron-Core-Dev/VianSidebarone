@@ -11,6 +11,11 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.text.Editable
+import android.text.InputType
+import android.text.TextWatcher
+import android.text.method.ArrowKeyMovementMethod
+import android.text.method.TextKeyListener
 import android.view.Display
 import android.view.GestureDetector
 import android.view.Gravity
@@ -22,6 +27,8 @@ import android.view.View
 import android.view.ViewTreeObserver
 import android.view.WindowInsets
 import android.view.WindowManager
+import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputMethodManager
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.ImageView
@@ -35,7 +42,9 @@ import com.example.core.ipc.ConnectionState
 import com.example.core.ipc.HeavyCommand
 import com.example.core.ipc.HeavyCommandType
 import com.example.core.ipc.HeavyConnectionListener
+import com.example.core.ipc.HeavyEvent
 import com.example.core.ipc.HeavyProcessConnectionManager
+import com.example.feature.floating.HeavyFloatingHost
 import java.util.UUID
 import kotlin.math.abs
 import kotlin.math.max
@@ -93,13 +102,19 @@ class FloatingMiniAppWindow(
     private var contentContainer: FrameLayout? = null
     private var titleView: TextView? = null
     private var noteEditText: EditText? = null
+    private var imeBridgeEditText: EditText? = null
+    private var isSyncingImeBridge: Boolean = false
     private var currentNoteText: String = ""
+    private var hasMainEditedText: Boolean = false
     private var embeddedSurfaceView: SurfaceView? = null
     private var currentSurfacePackage: Any? = null // SurfaceControlViewHost.SurfacePackage
     private var surfaceReady: Boolean = false
     private var isSurfaceAttached: Boolean = false
     private var lastRelayoutWidth: Int = -1
     private var lastRelayoutHeight: Int = -1
+
+    fun getImeBridgeEditTextForTesting(): EditText? = imeBridgeEditText
+    fun getFallbackEditTextForTesting(): EditText? = noteEditText
 
     fun getContentViewportHeight(windowHeight: Int): Int {
         val density = context.resources.displayMetrics.density
@@ -128,12 +143,48 @@ class FloatingMiniAppWindow(
                 }
             }
         }
+        override fun onHeavyEvent(event: HeavyEvent) {
+            val target = event.payload["instanceId"] ?: event.sourceId
+            if (target != instanceId) return
+            val action = event.payload["action"] ?: return
+            mainHandler.post {
+                when (action) {
+                    TestNotesMiniAppInstance.ACTION_MINIAPP_EDITOR_FOCUS -> {
+                        val text = event.payload[TestNotesMiniAppInstance.KEY_TEXT] ?: currentNoteText
+                        val selStart = event.payload["selStart"]?.toIntOrNull() ?: text.length
+                        val selEnd = event.payload["selEnd"]?.toIntOrNull() ?: selStart
+                        activateEmbeddedEditorIme(text, selStart, selEnd)
+                    }
+                    TestNotesMiniAppInstance.ACTION_MINIAPP_SELECTION_CHANGED -> {
+                        val selStart = event.payload["selStart"]?.toIntOrNull() ?: 0
+                        val selEnd = event.payload["selEnd"]?.toIntOrNull() ?: selStart
+                        updateImeBridgeSelection(selStart, selEnd)
+                    }
+                    TestNotesMiniAppInstance.ACTION_MINIAPP_TEXT_CHANGED -> {
+                        val text = event.payload[TestNotesMiniAppInstance.KEY_TEXT] ?: return@post
+                        val selStart = event.payload["selStart"]?.toIntOrNull() ?: text.length
+                        val selEnd = event.payload["selEnd"]?.toIntOrNull() ?: selStart
+                        currentNoteText = text
+                        hasMainEditedText = true
+                        updateImeBridgeTextAndSelection(text, selStart, selEnd)
+                    }
+                }
+            }
+        }
     }
 
     init {
+        layoutParams.softInputMode = WindowManager.LayoutParams.SOFT_INPUT_STATE_UNCHANGED or
+            WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING
         val saved = durableStore.loadSnapshot(instanceId)
         maximizeRestoreBounds = saved?.maximizeRestoreBounds
         normalFloatingBounds = saved?.windowBounds?.copyBounds() ?: bounds.copyBounds()
+        val initialSavedText = saved?.payload?.get(TestNotesMiniAppInstance.KEY_TEXT)
+            ?: saved?.payload?.get("text")
+            ?: saved?.payload?.get("note_content")
+        if (initialSavedText != null) {
+            currentNoteText = initialSavedText
+        }
         if (windowTitle.isEmpty()) {
             windowTitle = saved?.title?.takeIf { it.isNotEmpty() }
                 ?: if (appType == "test_notes") "Test Notes" else appType.replace('_', ' ').replaceFirstChar { it.uppercase() }
@@ -158,6 +209,11 @@ class FloatingMiniAppWindow(
             elevation = 16 * density
         }
         rootCardView = root
+
+        // Window-level IME InputConnection bridge for cross-process SurfaceControlViewHost editors
+        val bridgeEdit = createImeBridgeEditText(context)
+        imeBridgeEditText = bridgeEdit
+        root.addView(bridgeEdit)
 
         val mainLayout = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
@@ -195,6 +251,156 @@ class FloatingMiniAppWindow(
         setupImeObserver(root)
 
         return root
+    }
+
+    private fun createImeBridgeEditText(context: Context): EditText {
+        return object : EditText(context) {
+            override fun hasWindowFocus(): Boolean = true
+            override fun onCheckIsTextEditor(): Boolean = true
+            override fun onTouchEvent(event: MotionEvent?): Boolean = false
+            override fun onSelectionChanged(selStart: Int, selEnd: Int) {
+                super.onSelectionChanged(selStart, selEnd)
+                if (!isSyncingImeBridge && hasFocus()) {
+                    val txt = text?.toString() ?: ""
+                    syncLiveTextToHeavy(txt, selStart.coerceAtLeast(0), selEnd.coerceAtLeast(0))
+                }
+            }
+        }.apply {
+            alpha = 0f
+            isEnabled = true
+            isFocusable = true
+            isFocusableInTouchMode = true
+            isClickable = false
+            isLongClickable = false
+            isCursorVisible = false
+            isSingleLine = false
+            maxLines = Int.MAX_VALUE
+            setHorizontallyScrolling(false)
+            inputType = InputType.TYPE_CLASS_TEXT or
+                InputType.TYPE_TEXT_FLAG_MULTI_LINE or
+                InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+            imeOptions = EditorInfo.IME_FLAG_NO_EXTRACT_UI
+            movementMethod = ArrowKeyMovementMethod.getInstance()
+            keyListener = TextKeyListener.getInstance(true, TextKeyListener.Capitalize.SENTENCES)
+            layoutParams = FrameLayout.LayoutParams(1, 1, Gravity.TOP or Gravity.START)
+
+            isSyncingImeBridge = true
+            val initialText = currentNoteText.ifEmpty { TestNotesMiniAppInstance.DEFAULT_INSTRUCTIONAL_TEXT }
+            setText(initialText)
+            setSelection(initialText.length)
+            isSyncingImeBridge = false
+
+            addTextChangedListener(object : TextWatcher {
+                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                    if (isSyncingImeBridge) return
+                    val updated = s?.toString() ?: ""
+                    currentNoteText = updated
+                    hasMainEditedText = true
+                    val sStart = selectionStart.coerceIn(0, updated.length)
+                    val sEnd = selectionEnd.coerceIn(0, updated.length)
+                    syncLiveTextToHeavy(updated, sStart, sEnd)
+                }
+                override fun afterTextChanged(s: Editable?) {}
+            })
+        }
+    }
+
+    /**
+     * Activates the Main window's IME InputConnection bridge when the user taps the embedded
+     * EditText inside SurfaceControlViewHost in :heavy.
+     */
+    fun activateEmbeddedEditorIme(text: String, selStart: Int, selEnd: Int) {
+        currentNoteText = text
+        manager?.setFocus(windowId)
+        if (manager?.getTopVisibleWindow()?.windowId != windowId) {
+            manager?.bringToFront(windowId)
+        }
+
+        // Ensure top-level overlay window is focusable by InputMethodManagerService
+        val focusClearedFlags = layoutParams.flags and
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE.inv() and
+            WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM.inv()
+        if (layoutParams.flags != focusClearedFlags) {
+            layoutParams.flags = focusClearedFlags
+            applyLayoutUpdate()
+        }
+
+        val bridge = imeBridgeEditText ?: return
+        updateImeBridgeTextAndSelection(text, selStart, selEnd)
+        bridge.requestFocus()
+
+        try {
+            val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+            imm?.restartInput(bridge)
+            imm?.showSoftInput(bridge, InputMethodManager.SHOW_IMPLICIT)
+        } catch (_: Throwable) {}
+
+        LogKeeper.log(
+            context,
+            "FloatingMiniAppWindow",
+            "EDITOR_FOCUS_ACTIVATED id=$instanceId sel=($selStart,$selEnd) textLength=${text.length}"
+        )
+    }
+
+    private fun updateImeBridgeTextAndSelection(text: String, selStart: Int, selEnd: Int) {
+        val bridge = imeBridgeEditText ?: return
+        isSyncingImeBridge = true
+        try {
+            if (bridge.text?.toString() != text) {
+                bridge.setText(text)
+            }
+            val len = bridge.text?.length ?: 0
+            val sStart = selStart.coerceIn(0, len)
+            val sEnd = selEnd.coerceIn(sStart, len)
+            bridge.setSelection(sStart, sEnd)
+            try {
+                val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+                imm?.updateSelection(bridge, sStart, sEnd, -1, -1)
+            } catch (_: Throwable) {}
+        } finally {
+            isSyncingImeBridge = false
+        }
+    }
+
+    private fun updateImeBridgeSelection(selStart: Int, selEnd: Int) {
+        val bridge = imeBridgeEditText ?: return
+        isSyncingImeBridge = true
+        try {
+            val len = bridge.text?.length ?: 0
+            val sStart = selStart.coerceIn(0, len)
+            val sEnd = selEnd.coerceIn(sStart, len)
+            bridge.setSelection(sStart, sEnd)
+            try {
+                val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+                imm?.updateSelection(bridge, sStart, sEnd, -1, -1)
+            } catch (_: Throwable) {}
+        } finally {
+            isSyncingImeBridge = false
+        }
+    }
+
+    private fun syncLiveTextToHeavy(text: String, selStart: Int, selEnd: Int) {
+        val connectionManager = HeavyProcessConnectionManager.getInstance(context)
+        val cmd = HeavyCommand(
+            commandId = UUID.randomUUID().toString(),
+            type = HeavyCommandType.PAUSE_OPERATION,
+            targetId = instanceId,
+            payload = mapOf(
+                "action" to "sync_live_text",
+                "instance_id" to instanceId,
+                "app_type" to appType,
+                TestNotesMiniAppInstance.KEY_TEXT to text,
+                "text" to text,
+                "sel_start" to selStart.toString(),
+                "sel_end" to selEnd.toString()
+            )
+        )
+        if (connectionManager.state == ConnectionState.CONNECTED) {
+            connectionManager.sendCommand(cmd, autoConnect = false)
+        } else {
+            HeavyFloatingHost.getInstance(context).updateLiveInstanceText(instanceId, text, selStart, selEnd)
+        }
     }
 
     private fun applyCardCornerRadius(maximized: Boolean) {
@@ -347,6 +553,7 @@ class FloatingMiniAppWindow(
         val density = context.resources.displayMetrics.density
         val savedSnapshot = durableStore.loadSnapshot(instanceId)
         currentNoteText = savedSnapshot?.payload?.get(TestNotesMiniAppInstance.KEY_TEXT)
+            ?: savedSnapshot?.payload?.get("text")
             ?: savedSnapshot?.payload?.get("note_content")
             ?: TestNotesMiniAppInstance.DEFAULT_INSTRUCTIONAL_TEXT
 
@@ -371,10 +578,21 @@ class FloatingMiniAppWindow(
         }
         clientView.addView(subtitleView)
 
-        val edit = EditText(context).apply {
+        val edit = EmbeddedNoteEditText(
+            context = context,
+            onEditorFocusedOrTouched = { text, selStart, selEnd ->
+                currentNoteText = text
+                manager?.setFocus(windowId)
+                if (manager?.getTopVisibleWindow()?.windowId != windowId) {
+                    manager?.bringToFront(windowId)
+                }
+            },
+            onEditorSelectionChanged = { _, _ -> }
+        ).apply {
             hint = "Type here... Text is persisted durably on Sleep."
             setHintTextColor(Color.parseColor("#6C7086"))
             setTextColor(Color.WHITE)
+            highlightColor = Color.parseColor("#585B70")
             textSize = 13f
             val editBg = GradientDrawable().apply {
                 shape = GradientDrawable.RECTANGLE
@@ -391,12 +609,14 @@ class FloatingMiniAppWindow(
                 1f
             )
             setText(currentNoteText)
-            addTextChangedListener(object : android.text.TextWatcher {
+            setSelection(currentNoteText.length)
+            addTextChangedListener(object : TextWatcher {
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
                 override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
                     currentNoteText = s?.toString() ?: ""
+                    hasMainEditedText = true
                 }
-                override fun afterTextChanged(s: android.text.Editable?) {}
+                override fun afterTextChanged(s: Editable?) {}
             })
         }
         noteEditText = edit
@@ -935,9 +1155,14 @@ class FloatingMiniAppWindow(
     fun getCurrentPayload(): Map<String, String> {
         noteEditText?.let {
             currentNoteText = it.text.toString()
+            hasMainEditedText = true
         }
-        return if (currentNoteText.isNotEmpty()) {
-            mapOf(TestNotesMiniAppInstance.KEY_TEXT to currentNoteText)
+        return if (hasMainEditedText || noteEditText != null) {
+            mapOf(
+                TestNotesMiniAppInstance.KEY_TEXT to currentNoteText,
+                "text" to currentNoteText,
+                "source" to "ime_bridge"
+            )
         } else {
             emptyMap()
         }
@@ -1025,11 +1250,19 @@ class FloatingMiniAppWindow(
 
         noteEditText?.let {
             currentNoteText = it.text.toString()
-            if (currentNoteText.isNotEmpty()) {
-                durableStore.updatePayload(instanceId, mapOf(TestNotesMiniAppInstance.KEY_TEXT to currentNoteText))
-            }
+            hasMainEditedText = true
+        }
+        if (hasMainEditedText) {
+            durableStore.updatePayload(
+                instanceId,
+                mapOf(
+                    TestNotesMiniAppInstance.KEY_TEXT to currentNoteText,
+                    "text" to currentNoteText
+                )
+            )
         }
         noteEditText = null
+        imeBridgeEditText = null
 
         try {
             (currentSurfacePackage as? SurfaceControlViewHost.SurfacePackage)?.release()

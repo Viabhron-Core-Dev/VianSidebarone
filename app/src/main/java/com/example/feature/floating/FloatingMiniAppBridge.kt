@@ -147,7 +147,10 @@ class FloatingMiniAppBridge private constructor(private val context: Context) {
         }
 
         val finalPayload = returnedPayload ?: editedPayload
-        val textLength = (finalPayload["text"] ?: editedPayload["text"])?.length ?: 0
+        val textLength = (finalPayload[TestNotesMiniAppInstance.KEY_TEXT]
+            ?: finalPayload["text"]
+            ?: editedPayload[TestNotesMiniAppInstance.KEY_TEXT]
+            ?: editedPayload["text"])?.length ?: 0
         LogKeeper.log(context, TAG, "SNAPSHOT_SUCCESS id=$instanceId keys=${finalPayload.keys} textLength=$textLength")
 
         // Step 2: Commit recovery snapshot durably in Main
@@ -227,7 +230,8 @@ class FloatingMiniAppBridge private constructor(private val context: Context) {
         LogKeeper.log(context, TAG, "RECOVERY_LOAD_START id=$instanceId")
         val snapshot = try {
             val s = durableStore.loadSnapshot(instanceId)
-            val textLen = s?.payload?.get("text")?.length ?: 0
+            val textLen = (s?.payload?.get(TestNotesMiniAppInstance.KEY_TEXT)
+                ?: s?.payload?.get("text"))?.length ?: 0
             LogKeeper.log(context, TAG, "RECOVERY_LOAD_SUCCESS id=$instanceId found=${s != null} keys=${s?.payload?.keys} textLength=$textLen")
             s
         } catch (e: Throwable) {
@@ -271,6 +275,7 @@ class FloatingMiniAppBridge private constructor(private val context: Context) {
         } else {
             // Heavy is already disconnected or dead: treat as expected unavailable-process path, not a failure
             LogKeeper.log(context, TAG, "HEAVY_UNAVAILABLE_ON_CLOSE id=$instanceId state=${connectionManager.state}")
+            HeavyFloatingHost.getInstance(context).destroyInstance(instanceId)
         }
 
         // 4. Release active consumer on Heavy process; Heavy disconnects only if no other consumers remain

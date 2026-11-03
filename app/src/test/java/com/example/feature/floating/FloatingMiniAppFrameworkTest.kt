@@ -940,4 +940,166 @@ class FloatingMiniAppFrameworkTest {
         assertEquals("Restored normalFloatingBounds.y must be pristine 700", 700, window.normalFloatingBounds.y)
         assertEquals("Restored layoutParams.y must be pristine 700", 700, window.layoutParams.y)
     }
+
+    @Test
+    fun testTestNotesViewContainsEditableMultilineEditTextWithFocusAndSelection() {
+        val instance = TestNotesMiniAppInstance("editor_view_test")
+        instance.onCreate(null)
+        instance.onStart()
+        instance.onResume()
+
+        val rootView = instance.createContentView(testContext)
+        assertTrue("Root view must report hasWindowFocus() == true for embedded surface", rootView.hasWindowFocus())
+
+        val editText = (rootView.findViewById<android.widget.EditText>(android.R.id.edit) ?: instance.getEditTextForTesting()) as? EmbeddedNoteEditText
+        assertNotNull("Test Notes content view must contain an EmbeddedNoteEditText", editText)
+        assertSame("getEditTextForTesting() must match mounted EditText", editText, instance.getEditTextForTesting())
+
+        // Verify editable, multiline, focusable, and windowless-surface properties
+        assertTrue("EditText must be enabled", editText!!.isEnabled)
+        assertTrue("EditText must be focusable", editText.isConfiguredFocusable())
+        assertTrue("EditText must be focusableInTouchMode", editText.isConfiguredFocusableInTouchMode())
+        assertTrue("EditText must have cursor visible", editText.isCursorVisible)
+        assertTrue("EditText must report hasWindowFocus() == true inside SurfaceControlViewHost", editText.hasWindowFocus())
+        assertTrue("EditText must report onCheckIsTextEditor() == true", editText.onCheckIsTextEditor())
+        assertNotNull("EditText must have a non-null KeyListener", editText.getConfiguredKeyListener())
+        assertNotNull("EditText must have a non-null MovementMethod", editText.getConfiguredMovementMethod())
+
+        val inputType = editText.inputType
+        assertTrue(
+            "EditText must have TYPE_CLASS_TEXT",
+            (inputType and android.text.InputType.TYPE_CLASS_TEXT) != 0
+        )
+        assertTrue(
+            "EditText must have TYPE_TEXT_FLAG_MULTI_LINE",
+            (inputType and android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE) != 0
+        )
+
+        // Verify programmatic focus, typing, cursor placement, and text selection
+        editText.requestFocus()
+        editText.setText("Line 1\nLine 2\nEditable Note", android.widget.TextView.BufferType.EDITABLE)
+        assertEquals("Line 1\nLine 2\nEditable Note", instance.noteText)
+
+        // Verify cursor placement
+        editText.setSelection(7)
+        assertEquals(7, editText.selectionStart)
+        assertEquals(7, editText.selectionEnd)
+
+        // Verify text range selection
+        editText.setSelection(0, 6)
+        assertEquals(0, editText.selectionStart)
+        assertEquals(6, editText.selectionEnd)
+
+        // Verify live host text synchronization updates EditText and selection without feedback corruption
+        instance.applyLiveTextFromHost("Updated via IME Bridge\nSecond Line", 8, 11)
+        assertEquals("Updated via IME Bridge\nSecond Line", editText.text.toString())
+        assertEquals("Updated via IME Bridge\nSecond Line", instance.noteText)
+        assertEquals(8, editText.selectionStart)
+        assertEquals(11, editText.selectionEnd)
+    }
+
+    @Test
+    fun testTestNotesEditedTextSurvivesSnapshotFoldAndWakeAndDiscardsOnClose() {
+        val host = HeavyFloatingHost.getInstance(testContext)
+        val store = DurableMiniAppStore.getInstance(testContext)
+        val bridge = FloatingMiniAppBridge.getInstance(testContext)
+        val connManager = HeavyProcessConnectionManager.getInstance(testContext)
+        val wm = com.example.core.FloatingWindowManager.getInstance(testContext)
+
+        val instanceId = "editor_recovery_test"
+        val initialBounds = WindowBounds(110, 140, 540, 640)
+
+        // 1. Start Test Notes in Heavy and mount its view
+        val instance = host.startInstance(instanceId, "test_notes", initialBounds, emptyMap()) as? TestNotesMiniAppInstance
+        assertNotNull("TestNotesMiniAppInstance must be created", instance)
+        val rootView = instance!!.createContentView(testContext)
+        val editText = rootView.findViewById<android.widget.EditText>(android.R.id.edit) ?: instance.getEditTextForTesting()
+        assertNotNull(editText)
+
+        // 2. User edits multiline text directly in the EditText
+        val userEditedText = "First edited line in Test Notes\nSecond line with custom note content"
+        editText!!.setText(userEditedText, android.widget.TextView.BufferType.EDITABLE)
+        editText.setSelection(userEditedText.length)
+        assertEquals(userEditedText, instance.noteText)
+
+        // Also verify HeavyFloatingHost.updateLiveInstanceText updates the live EditText
+        val furtherEditedText = "$userEditedText\nThird line via live IME sync"
+        assertTrue(host.updateLiveInstanceText(instanceId, furtherEditedText, furtherEditedText.length, furtherEditedText.length))
+        assertEquals(furtherEditedText, editText.text.toString())
+
+        // 3. Configure mock IPC proxy that delegates snapshot & release commands directly to HeavyFloatingHost
+        val mockProxy = object : IHeavyHostContract {
+            override fun sendCommand(commandJson: String): String {
+                val cmd = HeavyCommand.fromJson(commandJson)
+                return when (cmd.type) {
+                    HeavyCommandType.PAUSE_OPERATION -> {
+                        val snapPayload = host.getSnapshot(instanceId, additionalPayload = cmd.payload)
+                        if (snapPayload.isNotEmpty()) {
+                            com.example.core.ipc.IpcResult.success("Snapshot", snapPayload).toJson()
+                        } else {
+                            com.example.core.ipc.IpcResult.error(com.example.core.ipc.IpcErrorCode.COMMAND_FAILED, "No instance").toJson()
+                        }
+                    }
+                    HeavyCommandType.STOP_OPERATION -> {
+                        val action = cmd.payload["action"]
+                        if (action == "release_sleeping_instance") {
+                            host.releaseInstance(instanceId)
+                        } else {
+                            host.destroyInstance(instanceId)
+                        }
+                        com.example.core.ipc.IpcResult.success("Stopped").toJson()
+                    }
+                    else -> com.example.core.ipc.IpcResult.success("Ok").toJson()
+                }
+            }
+            override fun syncSnapshot(snapshotJson: String): String = com.example.core.ipc.IpcResult.success().toJson()
+            override fun ping(): Boolean = true
+            override fun registerCallback(callbackBinder: android.os.IBinder): Boolean = true
+            override fun unregisterCallback(): Boolean = true
+        }
+        connManager.setMockProxyForTesting(mockProxy, ConnectionState.CONNECTED)
+        connManager.acquireConsumer("miniapp_$instanceId", reason = "test_fold")
+
+        val window = FloatingMiniAppWindow(instanceId, testContext, "test_notes")
+        window.setWindowBounds(initialBounds)
+        wm.registerWindow(window)
+
+        // 4. Fold (sleepMiniApp): must capture live EditText text from Heavy, persist durably, and release Heavy instance
+        bridge.sleepMiniApp(instanceId)
+        assertEquals("Heavy instance must be released after fold", 0, host.getActiveInstanceCount())
+
+        val persistedSnapshot = store.loadSnapshot(instanceId)
+        assertNotNull("Durable snapshot must exist after fold", persistedSnapshot)
+        assertEquals(MiniAppState.SLEEPING, persistedSnapshot!!.state)
+        assertEquals(
+            "Persisted note_text must match edited text",
+            furtherEditedText,
+            persistedSnapshot.payload[TestNotesMiniAppInstance.KEY_TEXT]
+        )
+        assertEquals(
+            "Persisted text key must also match edited text",
+            furtherEditedText,
+            persistedSnapshot.payload["text"]
+        )
+
+        // 5. Wake: reconstruct a fresh TestNotesMiniAppInstance from the durable snapshot and mount its EditText
+        val wokenInstance = host.startInstance(instanceId, "test_notes", persistedSnapshot.windowBounds, persistedSnapshot.payload) as? TestNotesMiniAppInstance
+        assertNotNull(wokenInstance)
+        val wokenView = wokenInstance!!.createContentView(testContext)
+        val wokenEditText = wokenView.findViewById<android.widget.EditText>(android.R.id.edit) ?: wokenInstance.getEditTextForTesting()
+        assertNotNull(wokenEditText)
+        assertEquals(
+            "Woken EditText must restore the exact edited text from snapshot",
+            furtherEditedText,
+            wokenEditText!!.text.toString()
+        )
+
+        // 6. Close with discard (deleteDurable = true): unsaved edits and durable snapshot must be discarded
+        wokenEditText.setText("Temporary unsaved text before close", android.widget.TextView.BufferType.EDITABLE)
+        bridge.closeMiniApp(instanceId, deleteDurable = true)
+
+        assertNull("Durable snapshot must be deleted on close with deleteDurable=true", store.loadSnapshot(instanceId))
+        assertEquals("Active instance in Heavy must be destroyed on close", 0, host.getActiveInstanceCount())
+    }
 }
+

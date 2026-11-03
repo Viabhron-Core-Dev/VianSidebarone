@@ -52,6 +52,13 @@ class HeavyFloatingHostService : Service() {
                 return@HeavyCommandHandler IpcResult.success()
             }
             val instanceId = cmd.targetId ?: cmd.payload["instance_id"] ?: ""
+            if (action == "sync_live_text" && instanceId.isNotEmpty()) {
+                val liveText = cmd.payload[TestNotesMiniAppInstance.KEY_TEXT] ?: cmd.payload["text"] ?: ""
+                val selStart = cmd.payload["sel_start"]?.toIntOrNull() ?: -1
+                val selEnd = cmd.payload["sel_end"]?.toIntOrNull() ?: -1
+                host.updateLiveInstanceText(instanceId, liveText, selStart, selEnd)
+                return@HeavyCommandHandler IpcResult.success("Synced live text for $instanceId")
+            }
             val appType = cmd.payload["app_type"] ?: "generic"
             val bx = cmd.payload["bounds_x"]?.toIntOrNull() ?: 100
             val by = cmd.payload["bounds_y"]?.toIntOrNull() ?: 100
@@ -93,6 +100,13 @@ class HeavyFloatingHostService : Service() {
             }
             val instanceId = cmd.targetId ?: cmd.payload["instance_id"] ?: ""
             if (instanceId.isNotEmpty()) {
+                if (action == "sync_live_text") {
+                    val liveText = cmd.payload[TestNotesMiniAppInstance.KEY_TEXT] ?: cmd.payload["text"] ?: ""
+                    val selStart = cmd.payload["sel_start"]?.toIntOrNull() ?: -1
+                    val selEnd = cmd.payload["sel_end"]?.toIntOrNull() ?: -1
+                    host.updateLiveInstanceText(instanceId, liveText, selStart, selEnd)
+                    return@HeavyCommandHandler IpcResult.success("Synced live text for $instanceId")
+                }
                 val isSleep = cmd.payload["sleep"] == "true" || action == "sleep"
                 val isSnapshotOnly = action == "get_snapshot" || (isSleep && cmd.payload["release"] != "true")
                 val returnedData = if (isSnapshotOnly) {

@@ -346,7 +346,32 @@
 
 ---
 
+## Phase 13: Floating Mini-App Framework Optimization — Resize Efficiency & Keyboard Position Stability (Completed)
+- [x] **Safe Display Bounds Lookup Caching (`FloatingMiniAppWindow.kt`)**:
+  - Eliminated repetitive WindowManager display inquiries (previously ~202 queries during a single drag session).
+  - Cached `safeDisplayBounds` at gesture start (`ACTION_DOWN`) for both sticker resize (`setupStickerResizeTouch`) and top-bar drag (`setupTopBarGestures`).
+  - Added 1-second TTL memoization to `getSafeDisplayBounds(context)` so high-frequency mid-gesture coordinate clamping never queries WindowManager repeatedly.
+- [x] **Surface Relayout Suppression & Post-RESIZE_END Settlement (`FloatingMiniAppWindow.kt`)**:
+  - Resolved root cause of 29 relayouts occurring after `RESIZE_END`: `WindowManager.updateViewLayout` during active resizing triggered asynchronous `SurfaceHolder.Callback.surfaceChanged` events which queued up on the main looper.
+  - Added `isResizing` state flag to suppress intermediate `surfaceChanged` callbacks during active resize and drop stale queued callbacks whose dimensions do not match authoritative `bounds`.
+  - Added ~60fps / 8px delta throttling to embedded SurfaceControl IPC relayout during active drag to maintain 120fps smooth window frame motion without Binder buffer congestion.
+  - Added single unconditional surface settlement upon `ACTION_UP` (`RESIZE_END`), guaranteeing 0 subsequent relayouts arrive after resize concludes.
+- [x] **Keyboard Position Stability & Reversible Elevation (`FloatingMiniAppWindow.kt`, `FloatingMiniAppBridge.kt`)**:
+  - Shift calculations anchored strictly against `normalFloatingBounds.y` (`baselineY`) rather than live `layoutParams.y`, eliminating recursive upward drift and offscreen pushing.
+  - `normalFloatingBounds` is strictly invariant to keyboard state; all keyboard elevation adjustments are recorded in temporary state (`imeShiftOffsetY` / `isImeShifted`).
+  - Restores exact original `normalFloatingBounds.y` resting coordinates upon keyboard dismissal.
+  - Reset IME shift offset smoothly on manual top-bar drag without visual jumping.
+  - `FloatingMiniAppBridge.sleepMiniApp` persists `w.normalFloatingBounds`, guaranteeing durable recovery records never capture temporary keyboard coordinates.
+  - `toggleMaximize()` captures `normalFloatingBounds` into `maximizeRestoreBounds`, preventing keyboard offsets from corrupting maximize/restore bounds.
+- [x] **Unit & Regression Test Coverage (`FloatingMiniAppFrameworkTest.kt`)**:
+  - Validated cached display bounds across rapid inquiries.
+  - Validated clean resize settlement with 0 continuing relayouts post `RESIZE_END`.
+  - Validated keyboard open applies temporary shift without overwriting `normalFloatingBounds`.
+  - Validated fold while keyboard is open persists unshifted `normalFloatingBounds`.
+  - Validated maximize while keyboard is open preserves unshifted restore bounds.
+  - All 27 tests in `FloatingMiniAppFrameworkTest` passing.
 
+---
 
 ## Phase 14: PWA Engine & External AI App Integration (Tier 5 - Highest Complexity)
 - [ ] **14.1 Local PWA Runner Core**: Embedded lightweight local HTTP/asset server (`PwaServer`), `PwaWindowManager`, `PwaDatabase`, and ZIP manifest importer (`PwaImportActivity`).

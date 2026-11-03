@@ -274,5 +274,35 @@ Capped at 500 lines per file.
 * Any deviation from what was requested, and why: None. No new mini-apps added, `test_notes` preserved as validation harness, architecture strictly preserved.
 * Any known issue or follow-up needed: Ready for physical device testing per On-Device Verification Guide below.
 
+---
 
-
+### Entry 115
+* Timestamp: 2026-11-03T06:00:00Z
+* One-line summary: Implemented genuinely editable multiline EditText (`EmbeddedNoteEditText`) in Test Notes with windowless-surface focus/cursor support, Main↔Heavy IME input bridging, and snapshot/recovery persistence
+* Exact files touched:
+  - app/src/main/java/com/example/feature/floating/TestNotesMiniApp.kt
+  - app/src/main/java/com/example/feature/floating/FloatingMiniAppWindow.kt
+  - app/src/main/java/com/example/feature/floating/HeavyFloatingHost.kt
+  - app/src/main/java/com/example/feature/floating/HeavyFloatingHostService.kt
+  - app/src/main/java/com/example/feature/floating/FloatingMiniAppBridge.kt
+  - app/src/main/java/com/example/feature/heavy/page/HeavyPageHostManager.kt
+  - app/src/test/java/com/example/feature/floating/FloatingMiniAppFrameworkTest.kt
+  - receipts/RECEIPTS_099.md
+* What was actually done:
+  - Diagnosed and fixed why the Test Notes `EditText` inside `:heavy`'s `SurfaceControlViewHost` behaved as read-only:
+    1. `SurfaceControlViewHost` (`WindowlessWindowManager`) does not hold a top-level `WindowManagerService` focus token, so `ViewRootImpl.hasWindowFocus()` returns `false`. In Android's `TextView`/`Editor`, `hasWindowFocus() == false` disables cursor blinking (`Editor.shouldBlink()`), suppresses touch-driven `InputMethodManager.showSoftInput()`, and blocks text selection handles.
+    2. `InputMethodManagerService` binds the soft keyboard (`InputConnection`) exclusively to the focused top-level window in `Main` (`FloatingMiniAppWindow`), which previously had only a `SurfaceView` (`onCheckIsTextEditor() == false`) when `isSurfaceAttached == true`, and rejected direct `showSoftInput` requests from `:heavy` due to UID/window-focus checks.
+    3. `HeavyFloatingHost.getSnapshot` called `restoreFromSnapshot(additionalPayload)` before `instance.onPause()` / `instance.onSaveState()`, which could overwrite live `EditText` edits in `:heavy`, and `syncUi()` accessed the `EditText` from Binder threads without checking `Looper.getMainLooper()`.
+  - Implemented `EmbeddedNoteEditText` in `TestNotesMiniApp.kt`:
+    * Subclasses `EditText` with `hasWindowFocus(): Boolean = true` and `onCheckIsTextEditor(): Boolean = true` (and root `LinearLayout` overriding `hasWindowFocus(): Boolean = true`).
+    * Explicitly configured multiline editing (`InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES`, `ArrowKeyMovementMethod.getInstance()`, `TextKeyListener.getInstance(...)`, `isFocusable = true`, `isFocusableInTouchMode = true`, `isCursorVisible = true`, `maxLines = Int.MAX_VALUE`, `setHorizontallyScrolling(false)`).
+    * Handles `ACTION_DOWN` / `ACTION_UP` touch to request focus, place the cursor at the touched character offset, invoke `InputMethodManager.showSoftInput`, and emit `ACTION_MINIAPP_EDITOR_FOCUS` / `ACTION_MINIAPP_SELECTION_CHANGED` / `ACTION_MINIAPP_TEXT_CHANGED` events to `Main`.
+    * Made `syncUi()` UI-thread safe and added `applyLiveTextFromHost(newText, selStart, selEnd)`.
+  - Implemented Main↔Heavy IME InputConnection bridge in `FloatingMiniAppWindow.kt`, `HeavyFloatingHost.kt`, and `HeavyFloatingHostService.kt`:
+    * Added `imeBridgeEditText` in `FloatingMiniAppWindow` (`Main`) so when the user taps the embedded `EmbeddedNoteEditText` in `:heavy`, `Main` claims focus (`removeFlag(FLAG_NOT_FOCUSABLE)`), focuses `imeBridgeEditText` synced to `:heavy`'s current text and cursor selection, opens the soft keyboard on `Main`'s top-level window token, and streams real-time text edits and cursor selection back to `:heavy` via `sync_live_text`.
+  - Added immediate `pageView.layout(0, 0, width, height)` after `measure` in `HeavyPageHostManager.createSurfacePackageApi30` so child views (`EmbeddedNoteEditText`) have non-zero hit bounds immediately on creation.
+  - Preserved fold/wake snapshot persistence and close/discard semantics in `HeavyFloatingHost.kt` and `FloatingMiniAppBridge.kt`.
+  - Added 2 focused unit tests in `FloatingMiniAppFrameworkTest.kt` (`testTestNotesViewContainsEditableMultilineEditTextWithFocusAndSelection` and `testTestNotesEditedTextSurvivesSnapshotFoldAndWakeAndDiscardsOnClose`).
+* How it was verified: local build (`compile_applet`) and unit tests (`gradle :app:testDebugUnitTest`) only — not tested on physical device.
+* Any deviation from what was requested, and why: None.
+* Any known issue or follow-up needed: Physical on-device verification of cross-process `SurfaceControlViewHost` touch and soft-keyboard input.

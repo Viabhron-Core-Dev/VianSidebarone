@@ -816,6 +816,7 @@ class HeavyPageHostManager private constructor(private val context: Context) {
                         View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
                         View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY)
                     )
+                    pageView.layout(0, 0, width, height)
                     height
                 } else {
                     pageView.measure(

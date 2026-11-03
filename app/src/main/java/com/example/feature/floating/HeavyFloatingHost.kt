@@ -120,6 +120,36 @@ class HeavyFloatingHost private constructor(private val context: Context) {
     }
 
     /**
+     * Synchronizes live text and cursor selection into an active mini-app instance in :heavy.
+     */
+    fun updateLiveInstanceText(
+        instanceId: String,
+        text: String,
+        selStart: Int = -1,
+        selEnd: Int = -1
+    ): Boolean {
+        synchronized(lock) {
+            val instance = activeInstances[instanceId] ?: return false
+            if (instance is TestNotesMiniAppInstance) {
+                instance.applyLiveTextFromHost(text, selStart, selEnd)
+                return true
+            }
+            instance.restoreFromSnapshot(
+                MiniAppRecoverySnapshot(
+                    instanceId = instanceId,
+                    appType = instance.appType,
+                    payload = mutableMapOf(
+                        TestNotesMiniAppInstance.KEY_TEXT to text,
+                        "text" to text,
+                        "note_content" to text
+                    )
+                )
+            )
+            return true
+        }
+    }
+
+    /**
      * Non-destructive snapshot retrieval: gathers state from the active instance WITHOUT releasing it.
      * Keeps instance in activeInstances and leaves runtime intact until Main confirms durable save.
      */
@@ -131,7 +161,15 @@ class HeavyFloatingHost private constructor(private val context: Context) {
                 return emptyMap()
             }
             return try {
-                if (additionalPayload.isNotEmpty()) {
+                val hasExplicitText = additionalPayload.containsKey(TestNotesMiniAppInstance.KEY_TEXT) ||
+                    additionalPayload.containsKey("text") ||
+                    additionalPayload.containsKey("note_content")
+                val shouldApplyAdditional = if (instance is TestNotesMiniAppInstance) {
+                    hasExplicitText && (instance.getEditTextForTesting() == null || additionalPayload["source"] == "ime_bridge")
+                } else {
+                    additionalPayload.isNotEmpty()
+                }
+                if (shouldApplyAdditional) {
                     instance.restoreFromSnapshot(
                         MiniAppRecoverySnapshot(
                             instanceId = instanceId,
@@ -144,7 +182,7 @@ class HeavyFloatingHost private constructor(private val context: Context) {
                     instance.onPause()
                 }
                 val payload = instance.onSaveState()
-                val textLen = payload["text"]?.length ?: 0
+                val textLen = (payload[TestNotesMiniAppInstance.KEY_TEXT] ?: payload["text"])?.length ?: 0
                 log("STATE_SAVED id=$instanceId reason=snapshot keys=${payload.keys} textLength=$textLen liveRetained=true")
                 payload
             } catch (e: Throwable) {
@@ -195,7 +233,15 @@ class HeavyFloatingHost private constructor(private val context: Context) {
                 return emptyMap()
             }
             return try {
-                if (additionalPayload.isNotEmpty()) {
+                val hasExplicitText = additionalPayload.containsKey(TestNotesMiniAppInstance.KEY_TEXT) ||
+                    additionalPayload.containsKey("text") ||
+                    additionalPayload.containsKey("note_content")
+                val shouldApplyAdditional = if (instance is TestNotesMiniAppInstance) {
+                    hasExplicitText && (instance.getEditTextForTesting() == null || additionalPayload["source"] == "ime_bridge")
+                } else {
+                    additionalPayload.isNotEmpty()
+                }
+                if (shouldApplyAdditional) {
                     instance.restoreFromSnapshot(
                         MiniAppRecoverySnapshot(
                             instanceId = instanceId,
@@ -211,7 +257,7 @@ class HeavyFloatingHost private constructor(private val context: Context) {
                     instance.onStop()
                 }
                 val payload = instance.prepareForSleep()
-                val textLen = payload["text"]?.length ?: 0
+                val textLen = (payload[TestNotesMiniAppInstance.KEY_TEXT] ?: payload["text"])?.length ?: 0
                 log("STATE_SAVED id=$instanceId reason=sleep keys=${payload.keys} textLength=$textLen")
                 instance.releaseRuntime()
                 instance.onDestroy()
