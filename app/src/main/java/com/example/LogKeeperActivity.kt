@@ -27,9 +27,11 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Share
@@ -38,6 +40,8 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -68,6 +72,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.core.FloatingMiniAppLogFilter
 import com.example.core.LogKeeper
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -164,6 +169,7 @@ fun LogKeeperScreen(onBack: () -> Unit) {
     var crashLogText by remember { mutableStateOf("Loading crash logs...") }
     var runningState by remember { mutableStateOf(RunningRuntimeState()) }
     var showClearDialog by remember { mutableStateOf(false) }
+    var isMiniAppFilterActive by remember { mutableStateOf(false) }
 
     fun loadLogs() {
         scope.launch {
@@ -180,10 +186,16 @@ fun LogKeeperScreen(onBack: () -> Unit) {
         loadLogs()
     }
 
-    val currentLogContent = when (selectedTab) {
+    val rawLogContent = when (selectedTab) {
         0 -> diagnosticLogText
         1 -> crashLogText
         else -> formatRunningSummary(runningState)
+    }
+
+    val currentLogContent = if (selectedTab == 2) {
+        rawLogContent
+    } else {
+        FloatingMiniAppLogFilter.filter(rawLogContent, isMiniAppFilterActive)
     }
 
     val currentSubTitle = when (selectedTab) {
@@ -285,18 +297,28 @@ fun LogKeeperScreen(onBack: () -> Unit) {
                     }
                 )
             } else {
-                // Diagnostic & Crash Log Text View
+                // Diagnostic & Crash Log Toolbar & Filter
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                        .padding(horizontal = 16.dp, vertical = 6.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = "Zero-PII Local Logging",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.outline
+                    FilterChip(
+                        selected = isMiniAppFilterActive,
+                        onClick = { isMiniAppFilterActive = !isMiniAppFilterActive },
+                        label = { Text("Floating Mini-apps", fontSize = 12.sp) },
+                        leadingIcon = if (isMiniAppFilterActive) {
+                            {
+                                Icon(
+                                    imageVector = Icons.Default.Check,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(FilterChipDefaults.IconSize)
+                                )
+                            }
+                        } else null,
+                        modifier = Modifier.testTag("filter_floating_mini_apps")
                     )
                     OutlinedButton(
                         onClick = {

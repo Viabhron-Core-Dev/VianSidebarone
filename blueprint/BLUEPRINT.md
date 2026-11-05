@@ -378,6 +378,12 @@
   - Implemented real system window focus gate (`hasWindowFocus() == true`) before requesting soft input.
   - Added precision diagnostic checkpoints without logging note content.
   - Added regression test `testCreateImeBridgeEditTextAndContentViewNoCrash()`; all 33 tests in `FloatingMiniAppFrameworkTest` passing.
+- [x] **Log Keeper Floating Mini-apps Filter Pill (`FloatingMiniAppLogFilter.kt`, `LogKeeperActivity.kt`)**:
+  - Implemented pure unit-testable log filter `FloatingMiniAppLogFilter` matching dedicated tags (`FloatingMiniAppBridge`, `FloatingMiniAppWindow`, `FloatingMiniAppLauncherBubble`, `HeavyFloatingHost`, `HeavyFloatingHostService`, `TestNotesImeDebug`), contextual shared component tags (`miniapp_`, `test_notes`, `speed_monitor`, `ebook_reader`), and uncaught crash report blocks.
+  - Added Material 3 `FilterChip` labelled "Floating Mini-apps" with test tag `filter_floating_mini_apps` on Diagnostic and Crash Reports tabs.
+  - Preserved filter state across tab switching and log refreshes; hidden on Running tab.
+  - Integrated filtered export into "Copy Logs" and TopAppBar "Share Logs" actions.
+  - Added `FloatingMiniAppLogFilterTest` unit tests covering all matching, exclusion, multiline exception, and empty state cases.
 
 ---
 

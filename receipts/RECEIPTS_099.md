@@ -362,3 +362,30 @@ Capped at 500 lines per file.
 * How it was verified: Local build and unit tests only (`compile_applet` passed, 33 unit tests passed in `FloatingMiniAppFrameworkTest`) — not physically tested on device.
 * Any deviation from what was requested, and why: None.
 * Any known issue or follow-up needed: Verify Test Notes opens cleanly without crash on physical hardware and inspect LogKeeper for attachment diagnostics.
+
+## [2026-11-05T21:26:00Z] Add Floating Mini-apps Filter Pill to Log Keeper
+* Summary: Added Material 3 FilterChip pill labelled "Floating Mini-apps" (testTag: "filter_floating_mini_apps") to Log Keeper Diagnostic and Crash Reports tabs, backed by a pure log-filtering helper `FloatingMiniAppLogFilter` with full multiline exception and crash report support.
+* Exact files touched:
+  - app/src/main/java/com/example/core/FloatingMiniAppLogFilter.kt
+  - app/src/main/java/com/example/LogKeeperActivity.kt
+  - app/src/test/java/com/example/core/FloatingMiniAppLogFilterTest.kt
+  - receipts/RECEIPTS_099.md
+* What was actually done:
+  - Created `FloatingMiniAppLogFilter.kt` in `com.example.core`:
+    - Pure unit-testable filtering engine.
+    - Explicit matching for 6 dedicated component tags: `FloatingMiniAppBridge`, `FloatingMiniAppWindow`, `FloatingMiniAppLauncherBubble`, `HeavyFloatingHost`, `HeavyFloatingHostService`, `TestNotesImeDebug` (including `ERROR:`/`CRASH:` prefixed forms).
+    - Contextual matching for shared components (`FloatingWindowManager`, `HeavyPageHostManager`, `HeavyProcessConnectionManager`) via instance IDs (`miniapp_`), consumer tags, and mini-app types (`test_notes`, `speed_monitor`, `ebook_reader`).
+    - Uncaught crash report block parser with stack trace inspection for mini-app classes (`com.example.feature.floating.`, `FloatingMiniAppWindow`, etc.).
+    - Complete multiline exception preservation across all matching blocks.
+    - Negative filtering to exclude ordinary floating windows, sidebar pages, PWAs, or other Heavy-hosted pages.
+    - Clear empty state fallback: "No floating mini-app logs found."
+  - In `LogKeeperActivity.kt`:
+    - Added `isMiniAppFilterActive` state in `LogKeeperScreen`.
+    - Wrapped raw log content with `FloatingMiniAppLogFilter.filter(rawLogContent, isMiniAppFilterActive)` for tabs 0 and 1, preserving filter state across tabs and refreshes.
+    - Bound `currentLogContent` to both "Copy Logs" action and TopAppBar "Share Logs" intent, ensuring exported logs match the filtered view.
+    - Added Material 3 `FilterChip` labelled "Floating Mini-apps" with `filter_floating_mini_apps` testTag, checkmark leading icon when active, and hidden on Running tab.
+  - In `FloatingMiniAppLogFilterTest.kt`:
+    - Added unit test suite covering disabled passthrough, empty log states, known component tags, contextual shared component entries, unrelated entry exclusion, multiline exception preservation, and uncaught crash report block filtering.
+* How it was verified: Local JVM compilation and unit tests (`compile_applet` succeeded, `FloatingMiniAppLogFilterTest` and `FloatingMiniAppFrameworkTest` passed 100%) — not physically tested on device.
+* Any deviation from what was requested, and why: None.
+* Any known issue or follow-up needed: Manual verification of FilterChip toggle, copy, and share actions in the Log Keeper UI on device.
