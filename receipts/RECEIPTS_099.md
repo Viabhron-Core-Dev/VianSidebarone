@@ -341,3 +341,24 @@ Capped at 500 lines per file.
 * How it was verified: local JVM build and test execution only (`compile_applet` succeeded, 32 unit tests passed in `FloatingMiniAppFrameworkTest`) — not tested on physical device.
 * Any deviation from what was requested, and why: None.
 * Any known issue or follow-up needed: Manual on-device verification of real soft-keyboard appearance, character typing, deletion, note clearing, and fold/wake recovery.
+
+## [2026-11-05T15:50:00Z] Critical Fix: Test Notes Window Attachment Crash
+* Summary: Repaired constructor-unsafe `setText()` override in `FloatingMiniAppWindow.createImeBridgeEditText()`, eliminating the NullPointerException during window attachment. Replaced manual `stubWatchers` dispatch with native Android `TextWatcher` attached post-construction.
+* Exact files touched:
+  - app/src/main/java/com/example/feature/floating/FloatingMiniAppWindow.kt
+  - app/src/test/java/com/example/feature/floating/FloatingMiniAppFrameworkTest.kt
+  - receipts/RECEIPTS_099.md
+* What was actually done:
+  - In `FloatingMiniAppWindow.kt`:
+    - Removed constructor-unsafe `setText()` override, `stubWatchers`, and `stubText` from `createImeBridgeEditText()` anonymous subclass. Android's `TextView` constructor invokes `setText()` prior to subclass field initialization; eliminating this override ensures standard native `TextView` initialization without accessing uninitialized references.
+    - Attached native Android `TextWatcher` inside `.apply { ... }` after the `EditText` instance completes construction. Protected against echo loops with `if (isSyncingImeBridge) return`.
+    - Handled programmatic text synchronization via explicit helper `updateImeBridgeTextAndSelection()`.
+    - Preserved `isSyncingImeBridge`, `TextAuthority`, empty-note preservation, and selection handling.
+    - Kept JVM-only stub fallbacks strictly isolated to headless mock environments (`super.getText() == null`).
+    - Added `simulateBridgeTextInputForTesting()` on `FloatingMiniAppWindow` for deterministic test simulation without mocking internal `TextWatcher` lists.
+  - In `FloatingMiniAppFrameworkTest.kt`:
+    - Updated `testTestNotesImeBridgeActivationAndDiagnostics` and `testClearOperationAndAuthoritativeTextSelection` to use explicit helper `simulateBridgeTextInputForTesting()`.
+    - Added regression test `testCreateImeBridgeEditTextAndContentViewNoCrash()` verifying `window.createContentView(testContext)` and `window.getImeBridgeEditTextForTesting()` complete cleanly without exceptions.
+* How it was verified: Local build and unit tests only (`compile_applet` passed, 33 unit tests passed in `FloatingMiniAppFrameworkTest`) — not physically tested on device.
+* Any deviation from what was requested, and why: None.
+* Any known issue or follow-up needed: Verify Test Notes opens cleanly without crash on physical hardware and inspect LogKeeper for attachment diagnostics.

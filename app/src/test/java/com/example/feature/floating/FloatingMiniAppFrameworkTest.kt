@@ -1175,7 +1175,7 @@ class FloatingMiniAppFrameworkTest {
 
         // 4. Verify text sync from Main bridge to Heavy instance
         val typedAddition = "$testNote\nTyped text from keyboard"
-        bridgeEdit.setText(typedAddition, android.widget.TextView.BufferType.EDITABLE)
+        window.simulateBridgeTextInputForTesting(typedAddition)
         assertEquals(typedAddition, window.getCurrentPayload()[TestNotesMiniAppInstance.KEY_TEXT])
 
         // Verify applyLiveTextFromHost updates Heavy editor
@@ -1258,7 +1258,7 @@ class FloatingMiniAppFrameworkTest {
         assertNotNull(bridgeEdit)
 
         // 1. User clears note on IME bridge
-        bridgeEdit!!.setText("", android.widget.TextView.BufferType.EDITABLE)
+        window.simulateBridgeTextInputForTesting("")
 
         // 2. Authoritative payload must be empty string
         val clearedPayload = window.getCurrentPayload()
@@ -1270,6 +1270,37 @@ class FloatingMiniAppFrameworkTest {
         if (fallbackEdit != null) {
             assertEquals("Authoritative bridge text must be preserved", "", window.getCurrentPayload()[TestNotesMiniAppInstance.KEY_TEXT])
         }
+
+        // Clean up
+        wm.unregisterWindow(window.windowId)
+        host.destroyInstance(instanceId)
+    }
+
+    @Test
+    fun testCreateImeBridgeEditTextAndContentViewNoCrash() {
+        val host = HeavyFloatingHost.getInstance(testContext)
+        val wm = com.example.core.FloatingWindowManager.getInstance(testContext)
+        val instanceId = "no_crash_content_view_test"
+        val initialBounds = WindowBounds(50, 50, 400, 500)
+
+        val instance = host.startInstance(instanceId, "test_notes", initialBounds, emptyMap())
+        assertNotNull(instance)
+
+        val window = FloatingMiniAppWindow(instanceId, testContext, "test_notes")
+        window.setWindowBounds(initialBounds)
+        wm.registerWindow(window)
+
+        // Verify createContentView and bridge EditText initialization complete without throwing
+        val contentView = window.createContentView(testContext)
+        assertNotNull("Content view must be created without throwing", contentView)
+
+        val bridgeEdit = window.getImeBridgeEditTextForTesting()
+        assertNotNull("IME bridge EditText must be instantiated without throwing", bridgeEdit)
+        assertTrue("Bridge EditText must report onCheckIsTextEditor() == true", bridgeEdit!!.onCheckIsTextEditor())
+
+        // Verify window focus callback on freshly constructed bridge does not throw
+        contentView.onWindowFocusChanged(true)
+        assertTrue(bridgeEdit.hasWindowFocus())
 
         // Clean up
         wm.unregisterWindow(window.windowId)

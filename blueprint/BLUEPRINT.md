@@ -370,8 +370,17 @@
   - Validated fold while keyboard is open persists unshifted `normalFloatingBounds`.
   - Validated maximize while keyboard is open preserves unshifted restore bounds.
   - All 27 tests in `FloatingMiniAppFrameworkTest` passing.
+- [x] **Test Notes IME Bridge Repair & Window Attachment Crash Fix (`FloatingMiniAppWindow.kt`, `TestNotesMiniApp.kt`)**:
+  - Eliminated `NullPointerException at FloatingMiniAppWindow$createImeBridgeEditText$1.setText` by removing constructor-unsafe `setText()` override and manual `stubWatchers` dispatch from anonymous `EditText` subclass.
+  - Attached native Android `TextWatcher` post-construction with echo loop protection (`isSyncingImeBridge`).
+  - Enforced real Android `Editable` in production runtime, isolating stub fallbacks to headless JVM mock environments (`super.getText() == null`).
+  - Enforced explicit `TextAuthority` tracking (distinguishing Snapshot, Heavy, and IME Bridge) and empty-note preservation across fold/sleep/wake cycles.
+  - Implemented real system window focus gate (`hasWindowFocus() == true`) before requesting soft input.
+  - Added precision diagnostic checkpoints without logging note content.
+  - Added regression test `testCreateImeBridgeEditTextAndContentViewNoCrash()`; all 33 tests in `FloatingMiniAppFrameworkTest` passing.
 
 ---
+
 
 ## Phase 14: PWA Engine & External AI App Integration (Tier 5 - Highest Complexity)
 - [ ] **14.1 Local PWA Runner Core**: Embedded lightweight local HTTP/asset server (`PwaServer`), `PwaWindowManager`, `PwaDatabase`, and ZIP manifest importer (`PwaImportActivity`).

@@ -330,7 +330,10 @@ class FloatingMiniAppWindow(
     }
 
     private fun createImeBridgeEditText(context: Context): EditText {
-        return object : EditText(context) {
+        val bridge = object : EditText(context) {
+            private var stubSelStart: Int = 0
+            private var stubSelEnd: Int = 0
+
             override fun hasWindowFocus(): Boolean {
                 return hasRealWindowFocus || super.hasWindowFocus()
             }
@@ -349,65 +352,23 @@ class FloatingMiniAppWindow(
                 )
                 return ic
             }
-            private var stubText: String = ""
-            private val stubWatchers = mutableListOf<TextWatcher>()
-            override fun addTextChangedListener(watcher: TextWatcher?) {
-                if (watcher != null && !stubWatchers.contains(watcher)) {
-                    stubWatchers.add(watcher)
-                }
-                super.addTextChangedListener(watcher)
-            }
-            override fun removeTextChangedListener(watcher: TextWatcher?) {
-                if (watcher != null) {
-                    stubWatchers.remove(watcher)
-                }
-                super.removeTextChangedListener(watcher)
-            }
-            override fun setText(text: CharSequence?, type: BufferType?) {
-                val updated = text?.toString() ?: ""
-                val previous = stubText
-                stubText = updated
-                if (!isSyncingImeBridge) {
-                    currentNoteText = updated
-                    activeTextAuthority = TextAuthority.IME_BRIDGE
-                    hasUserEditedText = true
-                }
-                super.setText(text, type)
-                val editable = getText()
-                for (watcher in ArrayList(stubWatchers)) {
-                    watcher.beforeTextChanged(previous, 0, previous.length, updated.length)
-                    watcher.onTextChanged(updated, 0, previous.length, updated.length)
-                    watcher.afterTextChanged(editable)
-                }
-            }
-            private var stubSelStart: Int = 0
-            private var stubSelEnd: Int = 0
-            override fun setSelection(start: Int, stop: Int) {
-                val len = (super.getText()?.length ?: stubText.length).coerceAtLeast(0)
-                stubSelStart = start.coerceIn(0, len)
-                stubSelEnd = stop.coerceIn(0, len)
-                super.setSelection(start, stop)
-                if (super.getText() == null) {
-                    onSelectionChanged(stubSelStart, stubSelEnd)
-                }
-            }
-            override fun setSelection(index: Int) {
-                val len = (super.getText()?.length ?: stubText.length).coerceAtLeast(0)
-                stubSelStart = index.coerceIn(0, len)
-                stubSelEnd = stubSelStart
-                super.setSelection(index)
-                if (super.getText() == null) {
-                    onSelectionChanged(stubSelStart, stubSelEnd)
-                }
-            }
-            override fun getSelectionStart(): Int = if (super.getText() != null) super.getSelectionStart() else stubSelStart
-            override fun getSelectionEnd(): Int = if (super.getText() != null) super.getSelectionEnd() else stubSelEnd
             override fun getText(): Editable {
                 val real = try { super.getText() } catch (_: Throwable) { null }
                 if (real != null) {
                     return real
                 }
-                return JvmStubEditable(stubText)
+                return JvmStubEditable(currentNoteText)
+            }
+            override fun setSelection(start: Int, stop: Int) {
+                stubSelStart = start
+                stubSelEnd = stop
+                try { super.setSelection(start, stop) } catch (_: Throwable) {}
+            }
+            override fun getSelectionStart(): Int {
+                return if (super.getText() != null) super.getSelectionStart() else stubSelStart
+            }
+            override fun getSelectionEnd(): Int {
+                return if (super.getText() != null) super.getSelectionEnd() else stubSelEnd
             }
             override fun onSelectionChanged(selStart: Int, selEnd: Int) {
                 super.onSelectionChanged(selStart, selEnd)
@@ -438,16 +399,7 @@ class FloatingMiniAppWindow(
                 FrameLayout.LayoutParams.MATCH_PARENT
             )
 
-            isSyncingImeBridge = true
-            val initialText = if (hasUserEditedText || activeTextAuthority != TextAuthority.NONE) {
-                currentNoteText
-            } else {
-                currentNoteText.ifEmpty { TestNotesMiniAppInstance.DEFAULT_INSTRUCTIONAL_TEXT }
-            }
-            setText(initialText, TextView.BufferType.EDITABLE)
-            setSelection(initialText.length)
-            isSyncingImeBridge = false
-
+            // Attach native TextWatcher only after EditText has finished construction
             addTextChangedListener(object : TextWatcher {
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
                 override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
@@ -463,6 +415,16 @@ class FloatingMiniAppWindow(
                 override fun afterTextChanged(s: Editable?) {}
             })
         }
+
+        // Programmatic initialization via helper
+        val initialText = if (hasUserEditedText || activeTextAuthority != TextAuthority.NONE) {
+            currentNoteText
+        } else {
+            currentNoteText.ifEmpty { TestNotesMiniAppInstance.DEFAULT_INSTRUCTIONAL_TEXT }
+        }
+        updateImeBridgeTextAndSelection(initialText, initialText.length, initialText.length)
+
+        return bridge
     }
 
     /**
@@ -548,14 +510,15 @@ class FloatingMiniAppWindow(
         )
     }
 
-    private fun updateImeBridgeTextAndSelection(text: String, selStart: Int, selEnd: Int) {
+    fun updateImeBridgeTextAndSelection(text: String, selStart: Int, selEnd: Int) {
         val bridge = imeBridgeEditText ?: return
         isSyncingImeBridge = true
         try {
+            currentNoteText = text
             if (bridge.text?.toString() != text) {
                 bridge.setText(text, TextView.BufferType.EDITABLE)
             }
-            val len = bridge.text?.length ?: 0
+            val len = text.length
             val sStart = selStart.coerceIn(0, len)
             val sEnd = selEnd.coerceIn(sStart, len)
             bridge.setSelection(sStart, sEnd)
@@ -566,6 +529,19 @@ class FloatingMiniAppWindow(
         } finally {
             isSyncingImeBridge = false
         }
+    }
+
+    /**
+     * Programmatic / test helper to simulate user typing or clearing text on the IME bridge.
+     * In real Android runtime, physical typing triggers the attached native TextWatcher.
+     * In headless JVM tests with mockable android.jar, this helper updates the bridge text and dispatches live sync.
+     */
+    fun simulateBridgeTextInputForTesting(text: String, selStart: Int = text.length, selEnd: Int = selStart) {
+        currentNoteText = text
+        activeTextAuthority = TextAuthority.IME_BRIDGE
+        hasUserEditedText = true
+        updateImeBridgeTextAndSelection(text, selStart, selEnd)
+        syncLiveTextToHeavy(text, selStart, selEnd)
     }
 
     private fun updateImeBridgeSelection(selStart: Int, selEnd: Int) {
