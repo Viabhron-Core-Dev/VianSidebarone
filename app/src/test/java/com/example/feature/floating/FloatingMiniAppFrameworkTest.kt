@@ -3,7 +3,9 @@ package com.example.feature.floating
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.SharedPreferences
+import android.view.MotionEvent
 import android.view.WindowManager
+import android.widget.FrameLayout
 import com.example.core.FakeSharedPreferences
 import com.example.core.WindowBounds
 import com.example.feature.miniapps.MiniAppManager
@@ -61,11 +63,15 @@ class FloatingMiniAppFrameworkTest {
             ) { _, _, _ -> null } as WindowManager
         }
 
-        override fun getSystemService(name: String): Any {
+        override fun getSystemService(name: String): Any? {
             return if (name == Context.WINDOW_SERVICE) {
                 mockWindowManager
             } else {
-                super.getSystemService(name) ?: Any()
+                try {
+                    super.getSystemService(name)
+                } catch (_: Throwable) {
+                    null
+                }
             }
         }
     }
@@ -1100,6 +1106,174 @@ class FloatingMiniAppFrameworkTest {
 
         assertNull("Durable snapshot must be deleted on close with deleteDurable=true", store.loadSnapshot(instanceId))
         assertEquals("Active instance in Heavy must be destroyed on close", 0, host.getActiveInstanceCount())
+    }
+
+    @Test
+    fun testTestNotesImeBridgeActivationAndDiagnostics() {
+        val host = HeavyFloatingHost.getInstance(testContext)
+        val wm = com.example.core.FloatingWindowManager.getInstance(testContext)
+        val instanceId = "ime_diag_test"
+        val initialBounds = WindowBounds(100, 100, 500, 600)
+
+        // 1. Start Test Notes in Heavy and mount EmbeddedNoteEditText
+        val instance = host.startInstance(instanceId, "test_notes", initialBounds, emptyMap()) as? TestNotesMiniAppInstance
+        assertNotNull("TestNotesMiniAppInstance must be created", instance)
+        val rootView = instance!!.createContentView(testContext)
+        val heavyEditText = (rootView.findViewById<android.widget.EditText>(android.R.id.edit) ?: instance.getEditTextForTesting()) as? EmbeddedNoteEditText
+        assertNotNull("EmbeddedNoteEditText must be present", heavyEditText)
+
+        assertTrue("EmbeddedNoteEditText must be enabled", heavyEditText!!.isEnabled)
+        assertTrue("EmbeddedNoteEditText must be focusable", heavyEditText.isConfiguredFocusable())
+        assertTrue("EmbeddedNoteEditText must be focusableInTouchMode", heavyEditText.isConfiguredFocusableInTouchMode())
+        assertTrue("EmbeddedNoteEditText must report hasWindowFocus() == true", heavyEditText.hasWindowFocus())
+        assertTrue("EmbeddedNoteEditText must report onCheckIsTextEditor() == true", heavyEditText.onCheckIsTextEditor())
+
+        // Verify onCreateInputConnection on EmbeddedNoteEditText
+        val outAttrs = android.view.inputmethod.EditorInfo()
+        heavyEditText.onCreateInputConnection(outAttrs)
+
+        // 2. Instantiate FloatingMiniAppWindow in Main and verify initial state
+        val window = FloatingMiniAppWindow(instanceId, testContext, "test_notes")
+        window.setWindowBounds(initialBounds)
+        wm.registerWindow(window)
+        val windowView = window.createContentView(testContext)
+        assertNotNull(windowView)
+
+        val bridgeEdit = window.getImeBridgeEditTextForTesting()
+        assertNotNull("imeBridgeEditText must be created in FloatingMiniAppWindow", bridgeEdit)
+        assertFalse("imeBridgeEditText must not have window focus while overlay is unfocused and idle", bridgeEdit!!.hasWindowFocus())
+        assertTrue("imeBridgeEditText must report onCheckIsTextEditor() == true", bridgeEdit.onCheckIsTextEditor())
+
+        // Verify initial idle flags include FLAG_NOT_FOCUSABLE so overlay does not steal back button
+        val hasNotFocusableInitially = (window.layoutParams.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE) != 0
+        assertTrue("Window must have FLAG_NOT_FOCUSABLE by default while idle", hasNotFocusableInitially)
+
+        // Verify bridge layoutParams has MATCH_PARENT dimensions when set by view hierarchy
+        bridgeEdit.layoutParams?.let { lp ->
+            assertEquals(FrameLayout.LayoutParams.MATCH_PARENT, lp.width)
+            assertEquals(FrameLayout.LayoutParams.MATCH_PARENT, lp.height)
+        }
+
+        // 3. Activate IME Bridge and verify FLAG_NOT_FOCUSABLE is cleared
+        val testNote = "Diagnostic testing of IME bridge\nSecond line"
+        val testSess = "diag_sess_42"
+        window.activateEmbeddedEditorIme(testNote, 10, 10, testSess)
+
+        val hasNotFocusableAfterActivation = (window.layoutParams.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE) != 0
+        assertFalse("FLAG_NOT_FOCUSABLE must be cleared upon activateEmbeddedEditorIme", hasNotFocusableAfterActivation)
+        assertEquals(testNote, bridgeEdit.text.toString())
+        assertEquals(10, bridgeEdit.selectionStart)
+        assertEquals(10, bridgeEdit.selectionEnd)
+
+        // Simulate real window focus callback from WMS
+        windowView.onWindowFocusChanged(true)
+        assertTrue("imeBridgeEditText must report hasWindowFocus() == true after window focus callback", bridgeEdit.hasWindowFocus())
+
+        // Verify bridge onCreateInputConnection
+        val bridgeAttrs = android.view.inputmethod.EditorInfo()
+        bridgeEdit.onCreateInputConnection(bridgeAttrs)
+
+        // 4. Verify text sync from Main bridge to Heavy instance
+        val typedAddition = "$testNote\nTyped text from keyboard"
+        bridgeEdit.setText(typedAddition, android.widget.TextView.BufferType.EDITABLE)
+        assertEquals(typedAddition, window.getCurrentPayload()[TestNotesMiniAppInstance.KEY_TEXT])
+
+        // Verify applyLiveTextFromHost updates Heavy editor
+        instance.applyLiveTextFromHost(typedAddition, typedAddition.length, typedAddition.length, testSess)
+        assertEquals(typedAddition, heavyEditText.text.toString())
+        assertEquals(typedAddition, instance.noteText)
+
+        // Clean up
+        wm.unregisterWindow(window.windowId)
+        host.destroyInstance(instanceId)
+    }
+
+    @Test
+    fun testEmptyNotePersistenceThroughSnapshotAndWake() {
+        val host = HeavyFloatingHost.getInstance(testContext)
+        val wm = com.example.core.FloatingWindowManager.getInstance(testContext)
+        val store = DurableMiniAppStore.getInstance(testContext)
+        val instanceId = "empty_note_persistence_test"
+        val initialBounds = WindowBounds(100, 100, 500, 600)
+
+        // 1. Save an intentionally empty note in durable store
+        val snapshot = MiniAppRecoverySnapshot(
+            instanceId = instanceId,
+            appType = "test_notes",
+            windowBounds = initialBounds,
+            payload = mutableMapOf(TestNotesMiniAppInstance.KEY_TEXT to "", "text" to "")
+        )
+        store.saveSnapshot(snapshot)
+
+        // 2. Start instance and create window
+        val instance = host.startInstance(instanceId, "test_notes", initialBounds, snapshot.payload) as? TestNotesMiniAppInstance
+        assertNotNull(instance)
+        assertEquals("Empty note text must be preserved on start", "", instance!!.noteText)
+
+        val window = FloatingMiniAppWindow(instanceId, testContext, "test_notes")
+        window.setWindowBounds(initialBounds)
+        wm.registerWindow(window)
+        val windowView = window.createContentView(testContext)
+        assertNotNull(windowView)
+
+        // 3. Verify getCurrentPayload returns empty note text, not default instructional text
+        val payload = window.getCurrentPayload()
+        assertEquals("", payload[TestNotesMiniAppInstance.KEY_TEXT])
+
+        // 4. Reload from store (simulating fold/sleep/wake)
+        val reloadedSnapshot = store.loadSnapshot(instanceId)
+        assertNotNull(reloadedSnapshot)
+        assertEquals("", reloadedSnapshot!!.payload[TestNotesMiniAppInstance.KEY_TEXT])
+
+        // 5. New window instance waking from snapshot
+        val wakingWindow = FloatingMiniAppWindow(instanceId, testContext, "test_notes")
+        val wakingView = wakingWindow.createContentView(testContext)
+        assertNotNull(wakingView)
+        val wakingPayload = wakingWindow.getCurrentPayload()
+        assertEquals("Intentionally empty note must remain empty after wake from snapshot", "", wakingPayload[TestNotesMiniAppInstance.KEY_TEXT])
+
+        // Clean up
+        wm.unregisterWindow(window.windowId)
+        host.destroyInstance(instanceId)
+        store.deleteSnapshot(instanceId)
+    }
+
+    @Test
+    fun testClearOperationAndAuthoritativeTextSelection() {
+        val host = HeavyFloatingHost.getInstance(testContext)
+        val wm = com.example.core.FloatingWindowManager.getInstance(testContext)
+        val instanceId = "clear_op_authority_test"
+        val initialBounds = WindowBounds(100, 100, 500, 600)
+
+        val instance = host.startInstance(instanceId, "test_notes", initialBounds, mapOf(TestNotesMiniAppInstance.KEY_TEXT to "Initial text")) as? TestNotesMiniAppInstance
+        assertNotNull(instance)
+        assertEquals("Initial text", instance!!.noteText)
+
+        val window = FloatingMiniAppWindow(instanceId, testContext, "test_notes")
+        window.setWindowBounds(initialBounds)
+        wm.registerWindow(window)
+        window.createContentView(testContext)
+
+        val bridgeEdit = window.getImeBridgeEditTextForTesting()
+        assertNotNull(bridgeEdit)
+
+        // 1. User clears note on IME bridge
+        bridgeEdit!!.setText("", android.widget.TextView.BufferType.EDITABLE)
+
+        // 2. Authoritative payload must be empty string
+        val clearedPayload = window.getCurrentPayload()
+        assertEquals("", clearedPayload[TestNotesMiniAppInstance.KEY_TEXT])
+        assertEquals("ime_bridge", clearedPayload["source"])
+
+        // 3. Verify fallback editor (if attached on SDK < 30) does not overwrite authoritative cleared note
+        val fallbackEdit = window.getFallbackEditTextForTesting()
+        if (fallbackEdit != null) {
+            assertEquals("Authoritative bridge text must be preserved", "", window.getCurrentPayload()[TestNotesMiniAppInstance.KEY_TEXT])
+        }
+
+        // Clean up
+        wm.unregisterWindow(window.windowId)
+        host.destroyInstance(instanceId)
     }
 }
 

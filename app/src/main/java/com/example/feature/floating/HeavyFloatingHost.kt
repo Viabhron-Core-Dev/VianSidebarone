@@ -126,12 +126,13 @@ class HeavyFloatingHost private constructor(private val context: Context) {
         instanceId: String,
         text: String,
         selStart: Int = -1,
-        selEnd: Int = -1
+        selEnd: Int = -1,
+        sessionId: String? = null
     ): Boolean {
         synchronized(lock) {
             val instance = activeInstances[instanceId] ?: return false
             if (instance is TestNotesMiniAppInstance) {
-                instance.applyLiveTextFromHost(text, selStart, selEnd)
+                instance.applyLiveTextFromHost(text, selStart, selEnd, sessionId)
                 return true
             }
             instance.restoreFromSnapshot(

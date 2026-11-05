@@ -104,7 +104,8 @@ class HeavyFloatingHostService : Service() {
                     val liveText = cmd.payload[TestNotesMiniAppInstance.KEY_TEXT] ?: cmd.payload["text"] ?: ""
                     val selStart = cmd.payload["sel_start"]?.toIntOrNull() ?: -1
                     val selEnd = cmd.payload["sel_end"]?.toIntOrNull() ?: -1
-                    host.updateLiveInstanceText(instanceId, liveText, selStart, selEnd)
+                    val sess = cmd.payload["sessionId"]
+                    host.updateLiveInstanceText(instanceId, liveText, selStart, selEnd, sess)
                     return@HeavyCommandHandler IpcResult.success("Synced live text for $instanceId")
                 }
                 val isSleep = cmd.payload["sleep"] == "true" || action == "sleep"

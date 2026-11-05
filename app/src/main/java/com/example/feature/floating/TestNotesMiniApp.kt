@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.text.Editable
@@ -18,6 +19,7 @@ import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputConnection
 import android.view.inputmethod.InputMethodManager
 import android.widget.EditText
 import android.widget.LinearLayout
@@ -32,7 +34,7 @@ import com.example.core.ipc.HeavyProcessHost
  * (`unitTests.isReturnDefaultValues = true`) where `super.getText()` on Android stub classes returns null.
  * On a real Android device, `super.getText()` is always non-null and this class is never used.
  */
-private class JvmStubEditable(private var current: String) : Editable {
+internal class JvmStubEditable(private var current: String) : Editable {
     override val length: Int get() = current.length
     override fun get(index: Int): Char = current[index]
     override fun subSequence(startIndex: Int, endIndex: Int): CharSequence = current.subSequence(startIndex, endIndex)
@@ -94,11 +96,13 @@ private class JvmStubEditable(private var current: String) : Editable {
  */
 class EmbeddedNoteEditText(
     context: Context,
-    private val onEditorFocusedOrTouched: (text: String, selStart: Int, selEnd: Int) -> Unit,
+    private val onEditorFocusedOrTouched: (text: String, selStart: Int, selEnd: Int, sessionId: String) -> Unit,
     private val onEditorSelectionChanged: (selStart: Int, selEnd: Int) -> Unit
 ) : EditText(context) {
 
+    private val viewContext: Context = context
     var isApplyingHostUpdate: Boolean = false
+    private var activeTouchSessionId: String? = null
 
     private var mirroredText: String = ""
     private var mirroredSelStart: Int = 0
@@ -249,7 +253,9 @@ class EmbeddedNoteEditText(
     }
 
     override fun getText(): Editable {
-        return super.getText() ?: JvmStubEditable(mirroredText)
+        val real = try { super.getText() } catch (_: Throwable) { null }
+        if (real != null) return real
+        return JvmStubEditable(mirroredText)
     }
 
     override fun setSelection(start: Int, stop: Int) {
@@ -283,19 +289,36 @@ class EmbeddedNoteEditText(
     override fun onTouchEvent(event: MotionEvent): Boolean {
         val action = event.actionMasked
         if (action == MotionEvent.ACTION_DOWN) {
+            val sess = "ime_${System.currentTimeMillis() % 100000}"
+            activeTouchSessionId = sess
+            LogKeeper.log(
+                viewContext,
+                "TestNotesImeDebug",
+                "STAGE_1_HEAVY_DOWN sess=$sess hasFocus=${hasFocus()} winFocus=${hasWindowFocus()}"
+            )
             if (!hasFocus()) {
                 requestFocus()
             }
             isCursorVisible = true
         }
-        val handled = super.onTouchEvent(event)
+        val handled = try {
+            super.onTouchEvent(event)
+        } catch (_: Throwable) {
+            false
+        }
         if (action == MotionEvent.ACTION_UP) {
+            val sess = activeTouchSessionId ?: "ime_${System.currentTimeMillis() % 100000}"
             if (!hasFocus()) {
                 requestFocus()
             }
             isCursorVisible = true
             try {
-                val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    windowInsetsController?.show(android.view.WindowInsets.Type.ime())
+                }
+            } catch (_: Throwable) {}
+            try {
+                val imm = viewContext.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
                 imm?.viewClicked(this)
                 imm?.showSoftInput(this, InputMethodManager.SHOW_IMPLICIT)
             } catch (_: Throwable) {}
@@ -303,9 +326,28 @@ class EmbeddedNoteEditText(
             val currentText = text?.toString() ?: ""
             val sStart = selectionStart.coerceIn(0, currentText.length)
             val sEnd = selectionEnd.coerceIn(0, currentText.length)
-            onEditorFocusedOrTouched(currentText, sStart, sEnd)
+            LogKeeper.log(
+                viewContext,
+                "TestNotesImeDebug",
+                "HEAVY_EDITOR_FOCUS_REQUEST sess=$sess hasFocus=${hasFocus()} winFocus=${hasWindowFocus()} textLen=${currentText.length} sel=($sStart,$sEnd)"
+            )
+            onEditorFocusedOrTouched(currentText, sStart, sEnd, sess)
         }
         return handled || true
+    }
+
+    override fun onCreateInputConnection(outAttrs: EditorInfo?): InputConnection? {
+        val ic = try {
+            super.onCreateInputConnection(outAttrs)
+        } catch (_: Throwable) {
+            null
+        }
+        LogKeeper.log(
+            viewContext,
+            "TestNotesImeDebug",
+            "INPUT_CONNECTION_CREATED target=heavy_embedded icNull=${ic == null} outAttrsType=${outAttrs?.inputType} imeOptions=${outAttrs?.imeOptions}"
+        )
+        return ic
     }
 
     override fun onSelectionChanged(selStart: Int, selEnd: Int) {
@@ -418,9 +460,17 @@ class TestNotesMiniAppInstance(
      * Updates the live note text and selection from Main's soft-keyboard InputConnection bridge
      * or direct programmatic edits.
      */
-    fun applyLiveTextFromHost(newText: String, selStart: Int = -1, selEnd: Int = -1) {
+    fun applyLiveTextFromHost(newText: String, selStart: Int = -1, selEnd: Int = -1, sessionId: String? = null) {
         noteText = newText
         hasUserEditedText = true
+        val ctx = appContext ?: noteEditText?.context
+        if (ctx != null) {
+            LogKeeper.log(
+                ctx,
+                "TestNotesImeDebug",
+                "STAGE_10_HEAVY_APPLY_TEXT sess=${sessionId ?: "none"} id=$instanceId textLen=${newText.length} sel=($selStart,$selEnd)"
+            )
+        }
         val applyBlock = {
             val edit = noteEditText
             if (edit != null) {
@@ -482,9 +532,13 @@ class TestNotesMiniAppInstance(
         }
     }
 
-    private fun reportEditorFocusToMain(currentText: String, selStart: Int, selEnd: Int) {
+    private fun reportEditorFocusToMain(currentText: String, selStart: Int, selEnd: Int, sessionId: String) {
         val ctx = appContext ?: return
-        LogKeeper.log(ctx, "TestNotesMiniApp", "EDITOR_TOUCH_FOCUS id=$instanceId sel=($selStart,$selEnd) textLength=${currentText.length}")
+        LogKeeper.log(
+            ctx,
+            "TestNotesImeDebug",
+            "STAGE_3_HEAVY_DISPATCH_FOCUS sess=$sessionId id=$instanceId sel=($selStart,$selEnd) textLen=${currentText.length}"
+        )
         val event = HeavyEvent(
             eventId = "ime_focus_${instanceId}_${System.currentTimeMillis()}",
             type = HeavyEventType.STATE_UPDATED,
@@ -492,6 +546,7 @@ class TestNotesMiniAppInstance(
             payload = mapOf(
                 "action" to ACTION_MINIAPP_EDITOR_FOCUS,
                 "instanceId" to instanceId,
+                "sessionId" to sessionId,
                 KEY_TEXT to currentText,
                 "selStart" to selStart.toString(),
                 "selEnd" to selEnd.toString()
@@ -581,8 +636,8 @@ class TestNotesMiniAppInstance(
         // Editable Multiline Note Content
         val editor = EmbeddedNoteEditText(
             context = context,
-            onEditorFocusedOrTouched = { text, selStart, selEnd ->
-                reportEditorFocusToMain(text, selStart, selEnd)
+            onEditorFocusedOrTouched = { text, selStart, selEnd, sess ->
+                reportEditorFocusToMain(text, selStart, selEnd, sess)
             },
             onEditorSelectionChanged = { selStart, selEnd ->
                 reportSelectionChangedToMain(selStart, selEnd)
