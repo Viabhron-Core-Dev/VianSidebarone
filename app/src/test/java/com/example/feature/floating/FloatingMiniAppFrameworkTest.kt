@@ -1457,5 +1457,48 @@ class FloatingMiniAppFrameworkTest {
         host.destroyInstance(instanceId)
         store.deleteSnapshot(instanceId)
     }
+
+    @Test
+    fun testIsolatedMainProcessImeDiagnosticModeTestA() {
+        val window = FloatingMiniAppWindow("diag_window_1", testContext, "note")
+        val root = window.createContentView(testContext)
+        assertNotNull(root)
+
+        // Initially diagnostic mode is OFF and overlay has FLAG_NOT_FOCUSABLE
+        assertFalse(window.isDiagnosticModeForTesting())
+        assertTrue(
+            "Window initially has FLAG_NOT_FOCUSABLE",
+            (window.layoutParams.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE) != 0
+        )
+
+        // Enter Diagnostic Mode (Test A)
+        window.enterDiagnosticMode()
+        assertTrue("Diagnostic mode should be active", window.isDiagnosticModeForTesting())
+        val diagEdit = window.getDiagnosticEditTextForTesting()
+        assertNotNull("Diagnostic EditText should be created and accessible", diagEdit)
+
+        // Simulate touch on diagnostic EditText
+        window.simulateDiagnosticTouchForTesting()
+
+        // Verify FLAG_NOT_FOCUSABLE and FLAG_ALT_FOCUSABLE_IM are cleared via legitimate layout update
+        assertEquals(
+            "FLAG_NOT_FOCUSABLE should be cleared on diagnostic touch",
+            0,
+            window.layoutParams.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+        )
+        assertEquals(
+            "FLAG_ALT_FOCUSABLE_IM should be cleared on diagnostic touch",
+            0,
+            window.layoutParams.flags and WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM
+        )
+
+        // Exit Diagnostic Mode
+        window.exitDiagnosticMode()
+        assertFalse("Diagnostic mode should be inactive after exit", window.isDiagnosticModeForTesting())
+        assertTrue(
+            "FLAG_NOT_FOCUSABLE should be restored upon exiting diagnostic mode",
+            (window.layoutParams.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE) != 0
+        )
+    }
 }
 

@@ -425,3 +425,25 @@ Capped at 500 lines per file.
 * How it was verified: Local JVM compilation and unit tests only (`compile_applet` passed, 36/36 tests passed in `FloatingMiniAppFrameworkTest`, `FloatingMiniAppLogFilterTest` passed) — not tested on physical hardware. Physical keyboard input, hardware surface clipping, and on-device window focus transitions have NOT been verified on a physical device.
 * Any deviation from what was requested, and why: None.
 * Any known issue or follow-up needed: Physical-device verification required for soft keyboard popup, text typing, and SurfaceView corner clipping on actual Android hardware.
+
+## [2026-11-06T12:50:00Z] Build Isolated Main-Process IME Test A
+* Summary: Built isolated Main-process IME diagnostic test mode directly inside FloatingMiniAppWindow to isolate whether the Main overlay window independently receives Android keyboard input without relying on Heavy.
+* Exact files touched:
+  - app/src/main/java/com/example/feature/floating/FloatingMiniAppWindow.kt
+  - app/src/test/java/com/example/feature/floating/FloatingMiniAppFrameworkTest.kt
+  - blueprint/BLUEPRINT.md
+  - receipts/RECEIPTS_099.md
+* What was actually done:
+  - In `FloatingMiniAppWindow.kt`:
+    - Added temporary isolated diagnostic mode (`isDiagnosticMode`, `diagnosticContainer`, `diagnosticEditText`, `diagnosticModeButton`).
+    - Added `[Test A]` / `[Exit Diag]` toggle pill in the top bar for Note mini-app.
+    - Temporarily hidden and disabled embedded `SurfaceView` / fallback content in diagnostic mode so it cannot cover the test field or intercept touches.
+    - Added visible, multiline Android `EditText` owned by Main (`diagnosticEditText`) with native `InputConnection` target, completely disconnected from Heavy and IPC.
+    - When touched: records `ACTION_DOWN`/`ACTION_UP`, clears `FLAG_NOT_FOCUSABLE` and `FLAG_ALT_FOCUSABLE_IM` via `applyLayoutUpdate()`, waits for genuine WMS `onWindowFocusChanged(true)`, verifies view attachment & token, logs `onCreateInputConnection()`, and invokes `InputMethodManager.showSoftInput()`.
+    - Protected IME insets listener (`setOnApplyWindowInsetsListener`) from immediately restoring `FLAG_NOT_FOCUSABLE` when insets are applied while awaiting soft keyboard animation.
+    - Added zero-PII diagnostic logging using `TestNotesImeDebug` for touch actions, window flags, focus transitions, connection nullability, showSoftInput results, and text lengths/selections.
+  - In `FloatingMiniAppFrameworkTest.kt`:
+    - Added unit test `testIsolatedMainProcessImeDiagnosticModeTestA()` verifying mode toggle, touch layout update, focus flag clearing, and clean restoration on exit.
+* How it was verified: Local JVM compilation and unit tests (`compile_applet` passed, 37/37 tests in `FloatingMiniAppFrameworkTest` passed, `FloatingMiniAppLogFilterTest` passed) — not tested on physical hardware. Physical keyboard opening and touch input on device are NOT verified until the user performs the manual physical-device test.
+* Any deviation from what was requested, and why: None.
+* Any known issue or follow-up needed: Physical device execution required to determine which outcome (A, B, C, D, or E) occurs.

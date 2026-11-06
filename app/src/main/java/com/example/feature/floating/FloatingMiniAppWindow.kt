@@ -141,6 +141,19 @@ class FloatingMiniAppWindow(
     var isCardClippedToOutline: Boolean = true
         private set
 
+    // Diagnostic Mode (Test A: Isolated Main-Process IME Test)
+    var isDiagnosticMode: Boolean = false
+        private set
+    private var diagnosticContainer: LinearLayout? = null
+    private var diagnosticEditText: EditText? = null
+    private var diagnosticModeButton: TextView? = null
+    private var isDiagnosticAwaitingWindowFocus: Boolean = false
+    private var diagnosticSessionId: String = "none"
+
+    fun isDiagnosticModeForTesting(): Boolean = isDiagnosticMode
+    fun getDiagnosticEditTextForTesting(): EditText? = diagnosticEditText
+    fun getDiagnosticModeButtonForTesting(): TextView? = diagnosticModeButton
+
     fun getImeBridgeEditTextForTesting(): EditText? = imeBridgeEditText
     fun getFallbackEditTextForTesting(): EditText? = noteEditText
     fun getAuthoritativeNoteText(): String = currentNoteText
@@ -253,12 +266,16 @@ class FloatingMiniAppWindow(
             override fun onWindowFocusChanged(hasWindowFocus: Boolean) {
                 super.onWindowFocusChanged(hasWindowFocus)
                 hasRealWindowFocus = hasWindowFocus
+                val sess = if (isDiagnosticMode) diagnosticSessionId else activeImeSessionId
                 LogKeeper.log(
                     context,
                     "TestNotesImeDebug",
-                    "ACTUAL_MAIN_WINDOW_FOCUS_CALLBACK sess=$activeImeSessionId hasFocus=$hasWindowFocus winFocus=${hasWindowFocus()}"
+                    "ACTUAL_MAIN_WINDOW_FOCUS_CALLBACK sess=$sess hasFocus=$hasWindowFocus winFocus=${hasWindowFocus()}"
                 )
-                if (hasWindowFocus && isAwaitingWindowFocusForIme) {
+                if (hasWindowFocus && isDiagnosticMode && isDiagnosticAwaitingWindowFocus) {
+                    isDiagnosticAwaitingWindowFocus = false
+                    triggerDiagnosticImeActivation(diagnosticSessionId)
+                } else if (hasWindowFocus && isAwaitingWindowFocusForIme) {
                     isAwaitingWindowFocusForIme = false
                     triggerImeFocusOnBridge()
                 }
@@ -284,12 +301,16 @@ class FloatingMiniAppWindow(
         }
         root.viewTreeObserver?.addOnWindowFocusChangeListener { hasFocus ->
             hasRealWindowFocus = hasFocus
+            val sess = if (isDiagnosticMode) diagnosticSessionId else activeImeSessionId
             LogKeeper.log(
                 context,
                 "TestNotesImeDebug",
-                "ACTUAL_MAIN_WINDOW_FOCUS_CALLBACK sess=$activeImeSessionId hasFocus=$hasFocus winFocus=${root.hasWindowFocus()}"
+                "ACTUAL_MAIN_WINDOW_FOCUS_CALLBACK sess=$sess hasFocus=$hasFocus winFocus=${root.hasWindowFocus()}"
             )
-            if (hasFocus && isAwaitingWindowFocusForIme) {
+            if (hasFocus && isDiagnosticMode && isDiagnosticAwaitingWindowFocus) {
+                isDiagnosticAwaitingWindowFocus = false
+                triggerDiagnosticImeActivation(diagnosticSessionId)
+            } else if (hasFocus && isAwaitingWindowFocusForIme) {
                 isAwaitingWindowFocusForIme = false
                 triggerImeFocusOnBridge()
             }
@@ -341,6 +362,10 @@ class FloatingMiniAppWindow(
         // 3. Embedded Heavy Content Setup
         setupEmbeddedContent(context, container)
 
+        // 3b. Diagnostic Main-Process IME Container (Test A: Isolated Main-process IME)
+        val diagContainer = createDiagnosticContainer(context)
+        container.addView(diagContainer)
+
         // 4. Compact in-window Edit Popover
         val popover = createEditPopover(context)
         editPopoverView = popover
@@ -359,7 +384,8 @@ class FloatingMiniAppWindow(
                 "TestNotesImeDebug",
                 "IME_VISIBILITY_INSETS visible=$imeVisible height=$imeHeight"
             )
-            if (!imeVisible && (layoutParams.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE) == 0 && !isResizing) {
+            val isWaitingForIme = isAwaitingWindowFocusForIme || isDiagnosticAwaitingWindowFocus || (isDiagnosticMode && diagnosticEditText?.hasFocus() == true)
+            if (!imeVisible && (layoutParams.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE) == 0 && !isResizing && !isWaitingForIme) {
                 layoutParams.flags = layoutParams.flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
                 applyLayoutUpdate()
             }
@@ -886,6 +912,365 @@ class FloatingMiniAppWindow(
         container.addView(clientView)
     }
 
+    fun toggleDiagnosticMode() {
+        if (isDiagnosticMode) {
+            exitDiagnosticMode()
+        } else {
+            enterDiagnosticMode()
+        }
+    }
+
+    fun enterDiagnosticMode() {
+        if (isDiagnosticMode) return
+        isDiagnosticMode = true
+        LogKeeper.log(context, "TestNotesImeDebug", "DIAGNOSTIC_MODE_ENTERED id=$instanceId")
+        titleView?.text = "$windowTitle [Diag Test A]"
+        val density = context.resources.displayMetrics.density
+        diagnosticModeButton?.apply {
+            text = "Exit Diag"
+            val activeBg = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = 4 * density
+                setColor(Color.parseColor("#A6E3A1"))
+            }
+            background = activeBg
+            setTextColor(Color.parseColor("#181825"))
+        }
+
+        // Disable and hide embedded SurfaceView / fallback editor so they cannot cover or receive touches
+        embeddedSurfaceView?.visibility = View.GONE
+        embeddedSurfaceView?.isEnabled = false
+        noteEditText?.visibility = View.GONE
+
+        // Show diagnostic container & diagnostic EditText
+        diagnosticContainer?.visibility = View.VISIBLE
+        diagnosticEditText?.visibility = View.VISIBLE
+        diagnosticEditText?.isEnabled = true
+    }
+
+    fun exitDiagnosticMode() {
+        if (!isDiagnosticMode) return
+        isDiagnosticMode = false
+        isDiagnosticAwaitingWindowFocus = false
+        LogKeeper.log(context, "TestNotesImeDebug", "DIAGNOSTIC_MODE_EXITED id=$instanceId")
+        titleView?.text = windowTitle
+        val density = context.resources.displayMetrics.density
+        diagnosticModeButton?.apply {
+            text = "Test A"
+            val idleBg = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = 4 * density
+                setColor(Color.parseColor("#313244"))
+                setStroke((1 * density).toInt(), Color.parseColor("#F9E2AF"))
+            }
+            background = idleBg
+            setTextColor(Color.parseColor("#F9E2AF"))
+        }
+
+        // Hide diagnostic container
+        diagnosticContainer?.visibility = View.GONE
+        diagnosticEditText?.visibility = View.GONE
+        diagnosticEditText?.clearFocus()
+
+        // Hide soft keyboard if open
+        try {
+            val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+            diagnosticEditText?.let { imm?.hideSoftInputFromWindow(it.windowToken, 0) }
+        } catch (_: Throwable) {}
+
+        // Restore embedded surface or fallback
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && embeddedSurfaceView != null) {
+            embeddedSurfaceView?.visibility = View.VISIBLE
+            embeddedSurfaceView?.isEnabled = true
+        } else {
+            noteEditText?.visibility = View.VISIBLE
+        }
+
+        // Re-apply FLAG_NOT_FOCUSABLE if no other IME is active
+        if ((layoutParams.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE) == 0 && !isAwaitingWindowFocusForIme) {
+            layoutParams.flags = layoutParams.flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+            applyLayoutUpdate()
+        }
+    }
+
+    private fun createDiagnosticContainer(context: Context): LinearLayout {
+        val density = context.resources.displayMetrics.density
+        val container = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(Color.parseColor("#181825"))
+            setPadding(
+                (14 * density).toInt(),
+                (12 * density).toInt(),
+                (14 * density).toInt(),
+                (48 * density).toInt() // 48dp bottom clearance to clear [ ×  —  ↘ ]
+            )
+            layoutParams = FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
+            )
+            visibility = View.GONE
+        }
+
+        // Header Banner
+        val banner = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            val bannerBg = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = 8 * density
+                setColor(Color.parseColor("#313244"))
+                setStroke((1 * density).toInt(), Color.parseColor("#89B4FA"))
+            }
+            background = bannerBg
+            setPadding((12 * density).toInt(), (8 * density).toInt(), (12 * density).toInt(), (8 * density).toInt())
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+        }
+        val bannerTitle = TextView(context).apply {
+            text = "Main-Process IME Test A"
+            setTextColor(Color.parseColor("#89B4FA"))
+            textSize = 13f
+            typeface = Typeface.DEFAULT_BOLD
+        }
+        val bannerDesc = TextView(context).apply {
+            text = "Visible Main-owned EditText • Direct InputConnection\nTap the editor below to test genuine WindowManager focus & soft keyboard."
+            setTextColor(Color.parseColor("#CDD6F4"))
+            textSize = 11f
+            setPadding(0, (2 * density).toInt(), 0, 0)
+        }
+        banner.addView(bannerTitle)
+        banner.addView(bannerDesc)
+        container.addView(banner)
+
+        // Diagnostic EditText
+        val diagEdit = object : EditText(context) {
+            override fun onTouchEvent(event: MotionEvent?): Boolean {
+                if (event != null) {
+                    val actionName = when (event.actionMasked) {
+                        MotionEvent.ACTION_DOWN -> "ACTION_DOWN"
+                        MotionEvent.ACTION_UP -> "ACTION_UP"
+                        MotionEvent.ACTION_MOVE -> "ACTION_MOVE"
+                        else -> "ACTION_${event.actionMasked}"
+                    }
+                    if (event.actionMasked == MotionEvent.ACTION_DOWN || event.actionMasked == MotionEvent.ACTION_UP) {
+                        LogKeeper.log(
+                            context,
+                            "TestNotesImeDebug",
+                            "DIAG_TOUCH_EVENT action=$actionName x=${event.x} y=${event.y} hasWinFocus=${hasWindowFocus()} rootWinFocus=${rootCardView?.hasWindowFocus()}"
+                        )
+                    }
+                    if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+                        handleDiagnosticTouchFocus()
+                    }
+                }
+                return super.onTouchEvent(event)
+            }
+
+            override fun onCreateInputConnection(outAttrs: EditorInfo?): InputConnection? {
+                val ic = try {
+                    super.onCreateInputConnection(outAttrs)
+                } catch (t: Throwable) {
+                    LogKeeper.log(context, "TestNotesImeDebug", "DIAG_INPUT_CONNECTION_EXCEPTION err=${t.message}")
+                    null
+                }
+                LogKeeper.log(
+                    context,
+                    "TestNotesImeDebug",
+                    "DIAG_INPUT_CONNECTION_CREATED target=main_diagnostic icNull=${ic == null} outAttrsType=${outAttrs?.inputType} imeOptions=${outAttrs?.imeOptions} hasWinFocus=${hasWindowFocus()}"
+                )
+                return ic
+            }
+
+            override fun onWindowFocusChanged(hasWindowFocus: Boolean) {
+                super.onWindowFocusChanged(hasWindowFocus)
+                LogKeeper.log(
+                    context,
+                    "TestNotesImeDebug",
+                    "DIAG_EDIT_TEXT_ON_WINDOW_FOCUS_CHANGED hasFocus=$hasWindowFocus editWinFocus=${hasWindowFocus()} rootWinFocus=${rootCardView?.hasWindowFocus()}"
+                )
+            }
+
+            override fun onFocusChanged(gainFocus: Boolean, direction: Int, previouslyFocusedRect: Rect?) {
+                super.onFocusChanged(gainFocus, direction, previouslyFocusedRect)
+                LogKeeper.log(
+                    context,
+                    "TestNotesImeDebug",
+                    "DIAG_EDIT_TEXT_VIEW_FOCUS_CHANGED gainFocus=$gainFocus isFocused=$isFocused"
+                )
+            }
+        }.apply {
+            hint = "Tap here to test typing (e.g. IME-BASELINE-123)..."
+            setHintTextColor(Color.parseColor("#6C7086"))
+            setTextColor(Color.WHITE)
+            textSize = 15f
+            gravity = Gravity.TOP or Gravity.START
+            val editBg = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = 8 * density
+                setColor(Color.parseColor("#11111B"))
+                setStroke((1.5f * density).toInt(), Color.parseColor("#45475A"))
+            }
+            background = editBg
+            setPadding((12 * density).toInt(), (12 * density).toInt(), (12 * density).toInt(), (12 * density).toInt())
+            isEnabled = true
+            isFocusable = true
+            isFocusableInTouchMode = true
+            isClickable = true
+            isLongClickable = true
+            isCursorVisible = true
+            isSingleLine = false
+            maxLines = Int.MAX_VALUE
+            setHorizontallyScrolling(false)
+            inputType = InputType.TYPE_CLASS_TEXT or
+                InputType.TYPE_TEXT_FLAG_MULTI_LINE or
+                InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+            imeOptions = EditorInfo.IME_FLAG_NO_EXTRACT_UI
+            movementMethod = ArrowKeyMovementMethod.getInstance()
+            keyListener = TextKeyListener.getInstance(true, TextKeyListener.Capitalize.SENTENCES)
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                0,
+                1f
+            ).apply {
+                topMargin = (10 * density).toInt()
+            }
+
+            // Zero-PII TextWatcher: Logs only length and selection, NEVER typed characters
+            addTextChangedListener(object : TextWatcher {
+                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                    val len = s?.length ?: 0
+                    val selStart = selectionStart
+                    val selEnd = selectionEnd
+                    LogKeeper.log(
+                        context,
+                        "TestNotesImeDebug",
+                        "DIAG_TEXT_CHANGE len=$len before=$before count=$count selStart=$selStart selEnd=$selEnd"
+                    )
+                }
+                override fun afterTextChanged(s: Editable?) {}
+            })
+        }
+        diagnosticEditText = diagEdit
+        container.addView(diagEdit)
+
+        // Actions row (Clear / Exit)
+        val actionsRow = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL or Gravity.END
+            setPadding(0, (8 * density).toInt(), 0, 0)
+        }
+        val clearBtn = TextView(context).apply {
+            text = "Clear"
+            setTextColor(Color.parseColor("#F38BA8"))
+            textSize = 12f
+            typeface = Typeface.DEFAULT_BOLD
+            isClickable = true
+            isFocusable = false
+            setPadding((8 * density).toInt(), (4 * density).toInt(), (8 * density).toInt(), (4 * density).toInt())
+            setOnClickListener {
+                diagEdit.setText("")
+            }
+        }
+        actionsRow.addView(clearBtn)
+        container.addView(actionsRow)
+
+        diagnosticContainer = container
+        return container
+    }
+
+    private fun handleDiagnosticTouchFocus() {
+        val sess = "diag_${System.currentTimeMillis() % 100000}"
+        diagnosticSessionId = sess
+        val flagsBefore = layoutParams.flags
+        val focusClearedFlags = (layoutParams.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE.inv()) and
+            WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM.inv()
+        LogKeeper.log(
+            context,
+            "TestNotesImeDebug",
+            "DIAG_OVERLAY_FOCUS_FLAGS sess=$sess flagsBefore=0x${Integer.toHexString(flagsBefore)} flagsAfter=0x${Integer.toHexString(focusClearedFlags)} changed=${flagsBefore != focusClearedFlags}"
+        )
+        if (layoutParams.flags != focusClearedFlags) {
+            layoutParams.flags = focusClearedFlags
+            applyLayoutUpdate()
+        }
+
+        val root = rootCardView
+        val diagEdit = diagnosticEditText
+        val rootHasFocus = root?.hasWindowFocus() == true
+        val editHasFocus = diagEdit?.hasWindowFocus() == true
+        LogKeeper.log(
+            context,
+            "TestNotesImeDebug",
+            "DIAG_TOUCH_WINDOW_FOCUS_CHECK sess=$sess rootHasFocus=$rootHasFocus editHasFocus=$editHasFocus"
+        )
+
+        if (rootHasFocus || editHasFocus) {
+            isDiagnosticAwaitingWindowFocus = false
+            triggerDiagnosticImeActivation(sess)
+        } else {
+            isDiagnosticAwaitingWindowFocus = true
+            root?.postDelayed({
+                if (isDiagnosticAwaitingWindowFocus) {
+                    val rFocus = root.hasWindowFocus()
+                    val eFocus = diagEdit?.hasWindowFocus() == true
+                    val token = diagEdit?.windowToken != null
+                    LogKeeper.log(
+                        context,
+                        "TestNotesImeDebug",
+                        "DIAG_AWAITING_WINDOW_FOCUS_POLL sess=$sess rootWinFocus=$rFocus editWinFocus=$eFocus hasToken=$token"
+                    )
+                    if (rFocus || eFocus || token) {
+                        isDiagnosticAwaitingWindowFocus = false
+                        triggerDiagnosticImeActivation(sess)
+                    }
+                }
+            }, 150)
+        }
+    }
+
+    private fun triggerDiagnosticImeActivation(sess: String = diagnosticSessionId) {
+        val diagEdit = diagnosticEditText ?: return
+        val root = rootCardView
+        val isViewFocused = diagEdit.requestFocus()
+        val rootWinFocus = root?.hasWindowFocus() == true
+        val editWinFocus = diagEdit.hasWindowFocus()
+        val isAttached = diagEdit.isAttachedToWindow
+        val hasToken = diagEdit.windowToken != null
+        LogKeeper.log(
+            context,
+            "TestNotesImeDebug",
+            "DIAG_MAIN_EDIT_TEXT_STATE sess=$sess isViewFocused=$isViewFocused rootWinFocus=$rootWinFocus editWinFocus=$editWinFocus isAttached=$isAttached hasToken=$hasToken"
+        )
+
+        val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+        val showResult = imm?.showSoftInput(diagEdit, InputMethodManager.SHOW_IMPLICIT) ?: false
+        var insetsResult = false
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            try {
+                diagEdit.windowInsetsController?.show(WindowInsets.Type.ime())
+                insetsResult = true
+            } catch (t: Throwable) {
+                LogKeeper.log(context, "TestNotesImeDebug", "DIAG_INSETS_CONTROLLER_FAIL sess=$sess err=${t.message}")
+            }
+        }
+        LogKeeper.log(
+            context,
+            "TestNotesImeDebug",
+            "DIAG_SHOW_SOFT_INPUT_RESULT sess=$sess result=$showResult insetsControllerResult=$insetsResult"
+        )
+    }
+
+    fun simulateDiagnosticTouchForTesting() {
+        val diagEdit = diagnosticEditText ?: return
+        handleDiagnosticTouchFocus()
+        try {
+            diagEdit.dispatchTouchEvent(MotionEvent.obtain(0, 0, MotionEvent.ACTION_DOWN, 10f, 10f, 0))
+            diagEdit.dispatchTouchEvent(MotionEvent.obtain(0, 50, MotionEvent.ACTION_UP, 10f, 10f, 0))
+        } catch (_: Throwable) {}
+    }
+
     private fun createTopBar(context: Context): LinearLayout {
         val density = context.resources.displayMetrics.density
         val topBarHeight = (38 * density).toInt()
@@ -924,8 +1309,36 @@ class FloatingMiniAppWindow(
         }
         bar.addView(titleView)
 
-        // Edit button for Note mini-app
+        // Test A and Edit buttons for Note mini-app
         if (appType == "note" || appType == "test_notes") {
+            val diagBtn = TextView(context).apply {
+                text = "Test A"
+                setTextColor(Color.parseColor("#F9E2AF"))
+                textSize = 12f
+                typeface = Typeface.DEFAULT_BOLD
+                isClickable = true
+                isFocusable = false
+                val diagBg = GradientDrawable().apply {
+                    shape = GradientDrawable.RECTANGLE
+                    cornerRadius = 4 * density
+                    setColor(Color.parseColor("#313244"))
+                    setStroke((1 * density).toInt(), Color.parseColor("#F9E2AF"))
+                }
+                background = diagBg
+                setPadding((8 * density).toInt(), (3 * density).toInt(), (8 * density).toInt(), (3 * density).toInt())
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply {
+                    marginEnd = (6 * density).toInt()
+                }
+                setOnClickListener {
+                    toggleDiagnosticMode()
+                }
+            }
+            diagnosticModeButton = diagBtn
+            bar.addView(diagBtn)
+
             val editBtn = TextView(context).apply {
                 text = "Edit"
                 setTextColor(Color.parseColor("#89B4FA"))

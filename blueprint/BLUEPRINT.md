@@ -405,6 +405,15 @@
   - **Stage E — Test Validation (`FloatingMiniAppFrameworkTest.kt`)**:
     - Added unit tests for 16dp rounded clipping, Note formatting controls, undo/redo state stack, and snapshot serialization across sleep/wake.
     - All 36 tests in `FloatingMiniAppFrameworkTest` and all tests in `FloatingMiniAppLogFilterTest` passing 100%. Compile succeeded.
+- [x] **Phase 13.5: Main-Process Isolated Keyboard Diagnostic (Test A)**:
+  - Added temporary isolated diagnostic mode directly inside `FloatingMiniAppWindow` using the existing WindowManager overlay attachment (no Dialog, no Activity, no second window).
+  - Toggled via dedicated top-bar `[Test A]` / `[Exit Diag]` pill button.
+  - Temporarily detaches and disables embedded `SurfaceView` / fallback view so it cannot intercept touches or obscure the test view.
+  - Visible Main-owned multiline `EditText` with native `InputConnection` target, disconnected from Heavy and IPC.
+  - Genuine WindowManager overlay focus sequence upon touch: records `ACTION_DOWN`/`ACTION_UP`, clears `FLAG_NOT_FOCUSABLE` and `FLAG_ALT_FOCUSABLE_IM` via `applyLayoutUpdate()`, waits for actual WMS `onWindowFocusChanged(true)`, verifies view attachment & token, logs `onCreateInputConnection()`, and invokes `showSoftInput()`.
+  - Updated IME insets listener to prevent premature restoration of `FLAG_NOT_FOCUSABLE` while awaiting keyboard animation.
+  - Zero-PII diagnostics logging touch events, focus transitions, window flags, connection nullability, and text length/selection.
+  - Unit test `testIsolatedMainProcessImeDiagnosticModeTestA()` added; 37/37 framework tests passing 100%.
 
 ---
 
