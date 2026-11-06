@@ -128,8 +128,23 @@ class FloatingMiniAppWindow(
     private var lastRelayoutWidth: Int = -1
     private var lastRelayoutHeight: Int = -1
 
+    private var editPopoverView: View? = null
+    var currentFontSizeSp: Float = 15f
+        private set
+    var currentFontStyle: String = "regular"
+        private set
+    var currentWordWrap: Boolean = true
+        private set
+    var currentLineSpacingMult: Float = 1.2f
+        private set
+
+    var isCardClippedToOutline: Boolean = true
+        private set
+
     fun getImeBridgeEditTextForTesting(): EditText? = imeBridgeEditText
     fun getFallbackEditTextForTesting(): EditText? = noteEditText
+    fun getAuthoritativeNoteText(): String = currentNoteText
+    fun getEditPopoverForTesting(): View? = editPopoverView
 
     fun getContentViewportHeight(windowHeight: Int): Int {
         val density = context.resources.displayMetrics.density
@@ -219,15 +234,20 @@ class FloatingMiniAppWindow(
             activeTextAuthority = TextAuthority.SNAPSHOT
             hasUserEditedText = true
         }
+        saved?.payload?.get("font_size")?.toFloatOrNull()?.let { currentFontSizeSp = it }
+        saved?.payload?.get("font_style")?.let { currentFontStyle = it }
+        saved?.payload?.get("word_wrap")?.toBooleanStrictOrNull()?.let { currentWordWrap = it }
+        saved?.payload?.get("line_spacing")?.toFloatOrNull()?.let { currentLineSpacingMult = it }
         if (windowTitle.isEmpty()) {
             windowTitle = saved?.title?.takeIf { it.isNotEmpty() }
-                ?: if (appType == "test_notes") "Test Notes" else appType.replace('_', ' ').replaceFirstChar { it.uppercase() }
+                ?: if (appType == "test_notes" || appType == "note") "Note" else appType.replace('_', ' ').replaceFirstChar { it.uppercase() }
         }
     }
 
     override fun createContentView(context: Context): View {
         val density = context.resources.displayMetrics.density
         val cardCornerRadius = 16 * density
+        isCardClippedToOutline = true
 
         val root = object : FrameLayout(context) {
             override fun onWindowFocusChanged(hasWindowFocus: Boolean) {
@@ -252,7 +272,13 @@ class FloatingMiniAppWindow(
             }
             rootCardBackground = bg
             background = bg
-            // Clip all children (including top bar and content) to the card's rounded outer shape
+            outlineProvider = object : android.view.ViewOutlineProvider() {
+                override fun getOutline(view: View, outline: android.graphics.Outline) {
+                    val r = if (isMaximized) 0f else cardCornerRadius
+                    outline.setRoundRect(0, 0, view.width, view.height, r)
+                }
+            }
+            // Clip all children (including top bar, content, and surface) to the card's 16dp rounded outer shape
             clipToOutline = true
             elevation = 16 * density
         }
@@ -287,14 +313,26 @@ class FloatingMiniAppWindow(
         val topBar = createTopBar(context)
         mainLayout.addView(topBar)
 
-        // 2. Content Container
+        // 2. Content Container with matching 16dp bottom rounded corners
         val container = FrameLayout(context).apply {
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 0,
                 1f
             )
-            setBackgroundColor(Color.parseColor("#1E1E2E"))
+            val containerBg = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadii = floatArrayOf(0f, 0f, 0f, 0f, cardCornerRadius, cardCornerRadius, cardCornerRadius, cardCornerRadius)
+                setColor(Color.parseColor("#1E1E2E"))
+            }
+            background = containerBg
+            outlineProvider = object : android.view.ViewOutlineProvider() {
+                override fun getOutline(view: View, outline: android.graphics.Outline) {
+                    val r = if (isMaximized) 0f else cardCornerRadius
+                    outline.setRoundRect(0, 0, view.width, view.height, r)
+                }
+            }
+            clipToOutline = true
         }
         contentContainer = container
         mainLayout.addView(container)
@@ -303,7 +341,12 @@ class FloatingMiniAppWindow(
         // 3. Embedded Heavy Content Setup
         setupEmbeddedContent(context, container)
 
-        // 4. Three-Control Sticker [ ×  —  ↘ ]
+        // 4. Compact in-window Edit Popover
+        val popover = createEditPopover(context)
+        editPopoverView = popover
+        root.addView(popover)
+
+        // 5. Three-Control Sticker [ ×  —  ↘ ]
         val sticker = createBottomRightSticker(context)
         root.addView(sticker)
 
@@ -352,12 +395,8 @@ class FloatingMiniAppWindow(
                 )
                 return ic
             }
-            override fun getText(): Editable {
-                val real = try { super.getText() } catch (_: Throwable) { null }
-                if (real != null) {
-                    return real
-                }
-                return JvmStubEditable(currentNoteText)
+            override fun getText(): Editable? {
+                return super.getText()
             }
             override fun setSelection(start: Int, stop: Int) {
                 stubSelStart = start
@@ -460,6 +499,8 @@ class FloatingMiniAppWindow(
 
         val root = getView()
         val bridge = imeBridgeEditText
+        bridge?.requestFocus()
+
         val alreadyHasFocus = (root?.hasWindowFocus() == true) || hasRealWindowFocus
         if (alreadyHasFocus && bridge != null) {
             isAwaitingWindowFocusForIme = false
@@ -469,6 +510,8 @@ class FloatingMiniAppWindow(
             root?.post {
                 if (((root.hasWindowFocus()) || hasRealWindowFocus) && isAwaitingWindowFocusForIme) {
                     isAwaitingWindowFocusForIme = false
+                    triggerImeFocusOnBridge()
+                } else if (isAwaitingWindowFocusForIme && bridge != null && bridge.windowToken != null) {
                     triggerImeFocusOnBridge()
                 }
             }
@@ -598,14 +641,28 @@ class FloatingMiniAppWindow(
     private fun applyCardCornerRadius(maximized: Boolean) {
         val density = context.resources.displayMetrics.density
         val radius = if (maximized) 0f else 16 * density
+        isCardClippedToOutline = !maximized
         rootCardBackground?.cornerRadius = radius
         rootCardView?.clipToOutline = !maximized
+        rootCardView?.invalidateOutline()
+        contentContainer?.clipToOutline = !maximized
+        contentContainer?.invalidateOutline()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && embeddedSurfaceView != null) {
+            try {
+                val method = SurfaceView::class.java.getMethod("setCornerRadius", Float::class.javaPrimitiveType)
+                method.invoke(embeddedSurfaceView, radius)
+            } catch (_: Throwable) {}
+            embeddedSurfaceView?.clipToOutline = !maximized
+            embeddedSurfaceView?.invalidateOutline()
+        }
     }
 
     private fun setupEmbeddedContent(context: Context, container: FrameLayout) {
         LogKeeper.log(context, "FloatingMiniAppWindow", "CONTENT_REQUEST id=$instanceId type=$appType")
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val density = context.resources.displayMetrics.density
+            val cardCornerRadius = 16 * density
             val sv = SurfaceView(context).apply {
                 layoutParams = FrameLayout.LayoutParams(
                     FrameLayout.LayoutParams.MATCH_PARENT,
@@ -613,7 +670,18 @@ class FloatingMiniAppWindow(
                 )
                 setZOrderMediaOverlay(true)
                 holder.setFormat(android.graphics.PixelFormat.TRANSLUCENT)
+                outlineProvider = object : android.view.ViewOutlineProvider() {
+                    override fun getOutline(view: View, outline: android.graphics.Outline) {
+                        val r = if (isMaximized) 0f else cardCornerRadius
+                        outline.setRoundRect(0, 0, view.width, view.height, r)
+                    }
+                }
+                clipToOutline = true
             }
+            try {
+                val method = SurfaceView::class.java.getMethod("setCornerRadius", Float::class.javaPrimitiveType)
+                method.invoke(sv, cardCornerRadius)
+            } catch (_: Throwable) {}
             embeddedSurfaceView = sv
 
             sv.holder.addCallback(object : SurfaceHolder.Callback {
@@ -856,10 +924,320 @@ class FloatingMiniAppWindow(
         }
         bar.addView(titleView)
 
+        // Edit button for Note mini-app
+        if (appType == "note" || appType == "test_notes") {
+            val editBtn = TextView(context).apply {
+                text = "Edit"
+                setTextColor(Color.parseColor("#89B4FA"))
+                textSize = 12f
+                typeface = Typeface.DEFAULT_BOLD
+                isClickable = true
+                isFocusable = false
+                val editBg = GradientDrawable().apply {
+                    shape = GradientDrawable.RECTANGLE
+                    cornerRadius = 4 * density
+                    setColor(Color.parseColor("#313244"))
+                    setStroke((1 * density).toInt(), Color.parseColor("#45475A"))
+                }
+                background = editBg
+                setPadding((8 * density).toInt(), (3 * density).toInt(), (8 * density).toInt(), (3 * density).toInt())
+                setOnClickListener {
+                    toggleEditPopover()
+                }
+            }
+            bar.addView(editBtn)
+        }
+
         // Setup Top Bar Drag & Double-Tap Gestures
         setupTopBarGestures(bar, context)
 
         return bar
+    }
+
+    private fun createEditPopover(context: Context): View {
+        val density = context.resources.displayMetrics.density
+        val popover = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            val bg = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = 10 * density
+                setColor(Color.parseColor("#252639"))
+                setStroke((1 * density).toInt(), Color.parseColor("#45475A"))
+            }
+            background = bg
+            elevation = 20 * density
+            setPadding((12 * density).toInt(), (10 * density).toInt(), (12 * density).toInt(), (10 * density).toInt())
+            val lp = FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT,
+                Gravity.TOP or Gravity.CENTER_HORIZONTAL
+            ).apply {
+                topMargin = (42 * density).toInt()
+                marginStart = (12 * density).toInt()
+                marginEnd = (12 * density).toInt()
+            }
+            layoutParams = lp
+            visibility = View.GONE
+        }
+
+        // Header with Title and Close
+        val headerRow = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        val title = TextView(context).apply {
+            text = "Editor Options"
+            setTextColor(Color.WHITE)
+            textSize = 13f
+            typeface = Typeface.DEFAULT_BOLD
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        }
+        headerRow.addView(title)
+        val closeBtn = TextView(context).apply {
+            text = "✕"
+            setTextColor(Color.parseColor("#F38BA8"))
+            textSize = 14f
+            isClickable = true
+            setPadding((6 * density).toInt(), 0, (6 * density).toInt(), 0)
+            setOnClickListener { popover.visibility = View.GONE }
+        }
+        headerRow.addView(closeBtn)
+        popover.addView(headerRow)
+
+        // Divider
+        popover.addView(View(context).apply {
+            setBackgroundColor(Color.parseColor("#45475A"))
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, (1 * density).toInt()).apply {
+                topMargin = (6 * density).toInt()
+                bottomMargin = (8 * density).toInt()
+            }
+        })
+
+        // 1. Font Size Row: [-] 15sp [+]
+        val fontSizeRow = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, (2 * density).toInt(), 0, (4 * density).toInt())
+        }
+        val sizeLabel = TextView(context).apply {
+            text = "Size: "
+            setTextColor(Color.parseColor("#CDD6F4"))
+            textSize = 12f
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        }
+        fontSizeRow.addView(sizeLabel)
+
+        val sizeDisplay = TextView(context).apply {
+            text = "${currentFontSizeSp.toInt()}sp"
+            setTextColor(Color.WHITE)
+            textSize = 12f
+            typeface = Typeface.DEFAULT_BOLD
+            setPadding((8 * density).toInt(), 0, (8 * density).toInt(), 0)
+        }
+        val minusBtn = createPopoverButton(context, " - ") {
+            if (currentFontSizeSp > 10f) {
+                currentFontSizeSp -= 2f
+                sizeDisplay.text = "${currentFontSizeSp.toInt()}sp"
+                dispatchFormatCommand()
+            }
+        }
+        val plusBtn = createPopoverButton(context, " + ") {
+            if (currentFontSizeSp < 28f) {
+                currentFontSizeSp += 2f
+                sizeDisplay.text = "${currentFontSizeSp.toInt()}sp"
+                dispatchFormatCommand()
+            }
+        }
+        fontSizeRow.addView(minusBtn)
+        fontSizeRow.addView(sizeDisplay)
+        fontSizeRow.addView(plusBtn)
+        popover.addView(fontSizeRow)
+
+        // 2. Font Style Row: [Regular] [Bold] [Italic] [Mono]
+        val styleRow = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, (2 * density).toInt(), 0, (4 * density).toInt())
+        }
+        val styleLabel = TextView(context).apply {
+            text = "Style: "
+            setTextColor(Color.parseColor("#CDD6F4"))
+            textSize = 12f
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        }
+        styleRow.addView(styleLabel)
+        val regBtn = createPopoverButton(context, "Norm") {
+            currentFontStyle = "regular"
+            dispatchFormatCommand()
+        }
+        val boldBtn = createPopoverButton(context, "Bold") {
+            currentFontStyle = "bold"
+            dispatchFormatCommand()
+        }
+        val italicBtn = createPopoverButton(context, "Ital") {
+            currentFontStyle = "italic"
+            dispatchFormatCommand()
+        }
+        val monoBtn = createPopoverButton(context, "Mono") {
+            currentFontStyle = "monospace"
+            dispatchFormatCommand()
+        }
+        styleRow.addView(regBtn)
+        styleRow.addView(boldBtn)
+        styleRow.addView(italicBtn)
+        styleRow.addView(monoBtn)
+        popover.addView(styleRow)
+
+        // 3. Word Wrap & Line Spacing Row
+        val wrapSpacingRow = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, (2 * density).toInt(), 0, (4 * density).toInt())
+        }
+        val wrapBtn = createPopoverButton(context, if (currentWordWrap) "Wrap: ON" else "Wrap: OFF") {
+            currentWordWrap = !currentWordWrap
+            (it as? TextView)?.text = if (currentWordWrap) "Wrap: ON" else "Wrap: OFF"
+            dispatchFormatCommand()
+        }
+        val spacing1x = createPopoverButton(context, "1.0x") {
+            currentLineSpacingMult = 1.0f
+            dispatchFormatCommand()
+        }
+        val spacing12x = createPopoverButton(context, "1.2x") {
+            currentLineSpacingMult = 1.2f
+            dispatchFormatCommand()
+        }
+        val spacing15x = createPopoverButton(context, "1.5x") {
+            currentLineSpacingMult = 1.5f
+            dispatchFormatCommand()
+        }
+        wrapSpacingRow.addView(wrapBtn)
+        wrapSpacingRow.addView(spacing1x)
+        wrapSpacingRow.addView(spacing12x)
+        wrapSpacingRow.addView(spacing15x)
+        popover.addView(wrapSpacingRow)
+
+        // 4. Action Row: Undo, Redo, Clear
+        val actionRow = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, (4 * density).toInt(), 0, (2 * density).toInt())
+        }
+        val undoBtn = createPopoverButton(context, "↶ Undo") {
+            sendNoteCommand("note_undo")
+        }
+        val redoBtn = createPopoverButton(context, "↷ Redo") {
+            sendNoteCommand("note_redo")
+        }
+        val clearBtn = createPopoverButton(context, "Clear", textColor = Color.parseColor("#F38BA8")) {
+            sendNoteCommand("note_clear")
+        }
+        actionRow.addView(undoBtn)
+        actionRow.addView(redoBtn)
+        actionRow.addView(clearBtn)
+        popover.addView(actionRow)
+
+        return popover
+    }
+
+    private fun createPopoverButton(
+        context: Context,
+        label: String,
+        textColor: Int = Color.parseColor("#CDD6F4"),
+        onClick: (View) -> Unit
+    ): TextView {
+        val density = context.resources.displayMetrics.density
+        return TextView(context).apply {
+            text = label
+            setTextColor(textColor)
+            textSize = 11f
+            typeface = Typeface.DEFAULT_BOLD
+            isClickable = true
+            isFocusable = false
+            val btnBg = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = 4 * density
+                setColor(Color.parseColor("#313244"))
+                setStroke((1 * density).toInt(), Color.parseColor("#45475A"))
+            }
+            background = btnBg
+            setPadding((6 * density).toInt(), (4 * density).toInt(), (6 * density).toInt(), (4 * density).toInt())
+            val lp = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                marginStart = (3 * density).toInt()
+                marginEnd = (3 * density).toInt()
+            }
+            layoutParams = lp
+            setOnClickListener { onClick(it) }
+        }
+    }
+
+    private fun toggleEditPopover() {
+        editPopoverView?.let { popover ->
+            popover.visibility = if (popover.visibility == View.VISIBLE) View.GONE else View.VISIBLE
+            if (popover.visibility == View.VISIBLE) {
+                popover.bringToFront()
+            }
+        }
+    }
+
+    private fun dispatchFormatCommand() {
+        val params = mapOf(
+            "font_size" to currentFontSizeSp.toString(),
+            "font_style" to currentFontStyle,
+            "word_wrap" to currentWordWrap.toString(),
+            "line_spacing" to currentLineSpacingMult.toString()
+        )
+        sendNoteCommand("note_format", params)
+    }
+
+    private fun sendNoteCommand(action: String, params: Map<String, String> = emptyMap()) {
+        val connectionManager = HeavyProcessConnectionManager.getInstance(context)
+        val cmd = HeavyCommand(
+            commandId = UUID.randomUUID().toString(),
+            type = HeavyCommandType.PAUSE_OPERATION,
+            targetId = instanceId,
+            payload = mapOf(
+                "action" to action,
+                "instance_id" to instanceId,
+                "sessionId" to activeImeSessionId,
+                "app_type" to appType
+            ) + params
+        )
+        if (connectionManager.state == ConnectionState.CONNECTED) {
+            connectionManager.sendCommand(cmd, autoConnect = false)
+        } else {
+            HeavyFloatingHost.getInstance(context).dispatchNoteCommand(instanceId, action, params)
+        }
+        applyNoteCommandLocally(action, params)
+    }
+
+    private fun applyNoteCommandLocally(action: String, params: Map<String, String>) {
+        val edit = noteEditText ?: return
+        when (action) {
+            "note_format" -> {
+                val size = params["font_size"]?.toFloatOrNull() ?: currentFontSizeSp
+                val style = params["font_style"] ?: currentFontStyle
+                val wrap = params["word_wrap"]?.toBooleanStrictOrNull() ?: currentWordWrap
+                val spacing = params["line_spacing"]?.toFloatOrNull() ?: currentLineSpacingMult
+                edit.textSize = size
+                val tf = when (style.lowercase()) {
+                    "bold" -> Typeface.DEFAULT_BOLD
+                    "italic" -> Typeface.create(Typeface.DEFAULT, Typeface.ITALIC)
+                    "monospace" -> Typeface.MONOSPACE
+                    else -> Typeface.DEFAULT
+                }
+                edit.typeface = tf
+                edit.setHorizontallyScrolling(!wrap)
+                edit.setLineSpacing(0f, spacing)
+            }
+            "note_clear" -> {
+                currentNoteText = ""
+                edit.setText("")
+            }
+        }
     }
 
     private fun setupTopBarGestures(topBar: View, context: Context) {
@@ -1369,6 +1747,10 @@ class FloatingMiniAppWindow(
             mapOf(
                 TestNotesMiniAppInstance.KEY_TEXT to currentNoteText,
                 "text" to currentNoteText,
+                "font_size" to currentFontSizeSp.toString(),
+                "font_style" to currentFontStyle,
+                "word_wrap" to currentWordWrap.toString(),
+                "line_spacing" to currentLineSpacingMult.toString(),
                 "source" to when (activeTextAuthority) {
                     TextAuthority.IME_BRIDGE -> "ime_bridge"
                     TextAuthority.FALLBACK -> "fallback_editor"

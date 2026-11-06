@@ -108,6 +108,10 @@ class HeavyFloatingHostService : Service() {
                     host.updateLiveInstanceText(instanceId, liveText, selStart, selEnd, sess)
                     return@HeavyCommandHandler IpcResult.success("Synced live text for $instanceId")
                 }
+                if (action in listOf("note_format", "note_undo", "note_redo", "note_clear")) {
+                    host.dispatchNoteCommand(instanceId, action ?: "", cmd.payload)
+                    return@HeavyCommandHandler IpcResult.success("Handled $action for $instanceId")
+                }
                 val isSleep = cmd.payload["sleep"] == "true" || action == "sleep"
                 val isSnapshotOnly = action == "get_snapshot" || (isSleep && cmd.payload["release"] != "true")
                 val returnedData = if (isSnapshotOnly) {

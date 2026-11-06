@@ -384,6 +384,27 @@
   - Preserved filter state across tab switching and log refreshes; hidden on Running tab.
   - Integrated filtered export into "Copy Logs" and TopAppBar "Share Logs" actions.
   - Added `FloatingMiniAppLogFilterTest` unit tests covering all matching, exclusion, multiline exception, and empty state cases.
+- [x] **Phase 13.4: Shared Floating Mini-App Framework Stabilization & Note Mini-App (Stages B–E)**:
+  - **Stage B — Shared Shell & 16dp Rounded Clipping (`FloatingMiniAppWindow.kt`)**:
+    - Enforced 16dp rounded corner clipping across all four corners using `ViewOutlineProvider` with `setRoundRect` and `clipToOutline = true` on `rootCardView` and `contentContainer`.
+    - Protected embedded `SurfaceView` using reflection-safe `setCornerRadius(cardCornerRadius)` on API 30+ with `outlineProvider` + `clipToOutline = true` fallback.
+    - Updated `applyCardCornerRadius` to dynamically remove clipping (0dp radius) upon safe maximize and restore 16dp radius upon restore, cleanly filling display bounds.
+    - Implemented 48dp bottom clearance padding in `NoteMiniAppInstance` content view and fallback editor, ensuring scrollable text and cursor are never obscured by the bottom-right 3-control sticker `[ ×  —  ↘ ]`.
+    - Maintained top-bar drag with touch-slop detection, double-tap maximize/restore, and 36dp launcher bubble.
+  - **Stage C — Single Input Route & Focus Stabilization (`FloatingMiniAppWindow.kt`, `TestNotesMiniApp.kt`)**:
+    - Maintained Main-owned IME bridge (`createImeBridgeEditText`) and Heavy-owned editor (`EmbeddedNoteEditText`) via narrow Binder IPC.
+    - Strictly removed `JvmStubEditable` fallback from production `getText()`, always exposing real Android `Editable` (`super.getText()`) for native IME and selection handling.
+    - Stabilized overlay window focus sequence: clears `FLAG_NOT_FOCUSABLE` and `FLAG_ALT_FOCUSABLE_IM`, requests bridge view focus, listens to legitimate WMS window focus transitions, and requests soft-input without artificial synthetic touch simulation.
+    - Bidirectional synchronization (`syncLiveTextToHeavy` and `applyLiveTextFromHost`) with `isSyncingImeBridge` and `isApplyingHostUpdate` flags preventing echo loops.
+  - **Stage D — Production Note Mini-App in Heavy (`TestNotesMiniApp.kt`, `FloatingMiniAppWindow.kt`, `HeavyFloatingHost.kt`)**:
+    - Renamed displayed title to "Note" and registered `"note"` alias alongside `"test_notes"`.
+    - Added compact "Edit" control button in top bar and toggleable in-window Edit popover card (`editPopoverView`).
+    - Implemented formatting options: Font Size (- / +), Font Style (Regular, Bold, Italic, Monospace), Word wrap toggle (ON/OFF), and Line spacing (1.0x, 1.2x, 1.5x).
+    - Implemented content-scoped Undo/Redo stack (`undoStack`, `redoStack`) and Clear action in `:heavy` Note runtime.
+    - Persisted formatting attributes durably in `DurableMiniAppStore` snapshots across Sleep (Fold) / Wake cycles; discarded cleanly on Close.
+  - **Stage E — Test Validation (`FloatingMiniAppFrameworkTest.kt`)**:
+    - Added unit tests for 16dp rounded clipping, Note formatting controls, undo/redo state stack, and snapshot serialization across sleep/wake.
+    - All 36 tests in `FloatingMiniAppFrameworkTest` and all tests in `FloatingMiniAppLogFilterTest` passing 100%. Compile succeeded.
 
 ---
 

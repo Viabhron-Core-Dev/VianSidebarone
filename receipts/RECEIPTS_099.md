@@ -389,3 +389,39 @@ Capped at 500 lines per file.
 * How it was verified: Local JVM compilation and unit tests (`compile_applet` succeeded, `FloatingMiniAppLogFilterTest` and `FloatingMiniAppFrameworkTest` passed 100%) — not physically tested on device.
 * Any deviation from what was requested, and why: None.
 * Any known issue or follow-up needed: Manual verification of FilterChip toggle, copy, and share actions in the Log Keeper UI on device.
+
+## [2026-11-06T09:30:00Z] Stabilize and Complete Shared Floating Mini-App Framework (Stages B–E)
+* Summary: Completed Stages B–E of the Shared Floating Mini-App Framework using local workspace as source of truth: 16dp rounded corner clipping, protected bottom sticker clearance, native-only Editable IME bridge, legitimate window focus sequence, production Note mini-app with edit formatting popover and undo/redo, and sleep/wake snapshot persistence.
+* Exact files touched:
+  - app/src/main/java/com/example/feature/floating/TestNotesMiniApp.kt
+  - app/src/main/java/com/example/feature/floating/FloatingMiniAppWindow.kt
+  - app/src/main/java/com/example/feature/floating/HeavyFloatingHost.kt
+  - app/src/main/java/com/example/feature/floating/HeavyFloatingHostService.kt
+  - app/src/main/java/com/example/feature/floating/FloatingMiniAppLauncherBubble.kt
+  - app/src/test/java/com/example/feature/floating/FloatingMiniAppFrameworkTest.kt
+  - blueprint/BLUEPRINT.md
+  - receipts/RECEIPTS_099.md
+* What was actually done:
+  - Stage B (Shared Shell & 16dp Rounded Clipping):
+    - Implemented 16dp rounded corner clipping across all 4 corners via `ViewOutlineProvider` with `setRoundRect` and `clipToOutline = true` on `rootCardView` and `contentContainer`.
+    - Protected embedded `SurfaceView` with API 30+ reflection-safe `setCornerRadius(cardCornerRadius)` and outline provider fallback.
+    - Updated `applyCardCornerRadius` to dynamically remove clipping (0dp radius) upon safe maximize and restore 16dp radius upon restore.
+    - Added 48dp bottom clearance padding in `NoteMiniAppInstance` content view and fallback editor to ensure text and cursor are never obscured by the 32dp elevated bottom-right 3-control sticker `[ ×  —  ↘ ]`.
+    - Maintained top-bar drag with touch-slop detection, double-tap maximize/restore, and 36dp launcher bubble.
+  - Stage C (Single Input Route & Focus Stabilization):
+    - Maintained single input path: Main-owned IME bridge (`createImeBridgeEditText`) and Heavy-owned editor (`EmbeddedNoteEditText`) via narrow Binder IPC.
+    - Strictly removed `JvmStubEditable` fallback from production `getText()`, always exposing real Android `Editable` (`super.getText()`) for native IME and selection handling.
+    - Stabilized overlay window focus sequence in `activateEmbeddedEditorIme`: clears `FLAG_NOT_FOCUSABLE` and `FLAG_ALT_FOCUSABLE_IM`, requests bridge view focus, listens to legitimate WMS `onWindowFocusChanged(true)` or window token binding before requesting `showSoftInput` without artificial synthetic touch simulation.
+    - Bidirectional synchronization (`syncLiveTextToHeavy` and `applyLiveTextFromHost`) guarded by `isSyncingImeBridge` and `isApplyingHostUpdate` flags to prevent echo loops.
+  - Stage D (Production Note Mini-App in Heavy):
+    - Replaced "Test Notes" placeholder title with "Note" (subtitle "Multiline editor • Floating runtime") and registered `"note"` alias.
+    - Added compact "Edit" button in top bar and toggleable in-window Edit popover card (`editPopoverView`).
+    - Implemented formatting controls: Font Size (- / +), Font Style (Regular, Bold, Italic, Monospace), Word wrap toggle (ON/OFF), and Line spacing (1.0x, 1.2x, 1.5x).
+    - Implemented content-scoped Undo/Redo stack (`undoStack`, `redoStack`) and Clear action in `:heavy` Note runtime.
+    - Handled IPC commands `note_format`, `note_undo`, `note_redo`, `note_clear` across `HeavyFloatingHostService` and `HeavyFloatingHost`.
+    - Persisted formatting attributes durably in `DurableMiniAppStore` snapshots across Sleep (Fold) / Wake cycles; discarded cleanly on Close.
+  - Stage E (Test Validation):
+    - Expanded `FloatingMiniAppFrameworkTest` with tests for 16dp rounded clipping, bottom clearance padding, formatting controls, undo/redo stack, and snapshot serialization across sleep/wake.
+* How it was verified: Local JVM compilation and unit tests only (`compile_applet` passed, 36/36 tests passed in `FloatingMiniAppFrameworkTest`, `FloatingMiniAppLogFilterTest` passed) — not tested on physical hardware. Physical keyboard input, hardware surface clipping, and on-device window focus transitions have NOT been verified on a physical device.
+* Any deviation from what was requested, and why: None.
+* Any known issue or follow-up needed: Physical-device verification required for soft keyboard popup, text typing, and SurfaceView corner clipping on actual Android hardware.

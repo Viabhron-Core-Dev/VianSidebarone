@@ -252,10 +252,23 @@ class EmbeddedNoteEditText(
         }
     }
 
-    override fun getText(): Editable {
-        val real = try { super.getText() } catch (_: Throwable) { null }
-        if (real != null) return real
-        return JvmStubEditable(mirroredText)
+    fun applyFormatting(fontSizeSp: Float, fontStyle: String, wordWrap: Boolean, lineSpacingMult: Float) {
+        textSize = fontSizeSp
+        val tf = when (fontStyle.lowercase()) {
+            "bold" -> Typeface.DEFAULT_BOLD
+            "italic" -> Typeface.create(Typeface.DEFAULT, Typeface.ITALIC)
+            "monospace" -> Typeface.MONOSPACE
+            else -> Typeface.DEFAULT
+        }
+        typeface = tf
+        setHorizontallyScrolling(!wordWrap)
+        setLineSpacing(0f, lineSpacingMult)
+    }
+
+    fun getMirroredText(): String = mirroredText
+
+    override fun getText(): Editable? {
+        return super.getText()
     }
 
     override fun setSelection(start: Int, stop: Int) {
@@ -389,12 +402,109 @@ class TestNotesMiniAppInstance(
     var hasUserEditedText: Boolean = false
         private set
 
+    @Volatile
+    var fontSizeSp: Float = 15f
+        private set
+
+    @Volatile
+    var fontStyle: String = "regular"
+        private set
+
+    @Volatile
+    var wordWrap: Boolean = true
+        private set
+
+    @Volatile
+    var lineSpacingMult: Float = 1.2f
+        private set
+
+    private val undoStack = ArrayDeque<String>()
+    private val redoStack = ArrayDeque<String>()
+    @Volatile
+    private var isPerformingUndoRedo: Boolean = false
+
     private var appContext: Context? = null
     private val mainHandler = Handler(Looper.getMainLooper())
     private var noteEditText: EmbeddedNoteEditText? = null
     private var statusView: TextView? = null
 
     fun getEditTextForTesting(): EditText? = noteEditText
+
+    fun applyFormat(sizeSp: Float, style: String, wrap: Boolean, lineSpacing: Float) {
+        fontSizeSp = sizeSp
+        fontStyle = style
+        wordWrap = wrap
+        lineSpacingMult = lineSpacing
+        val updateBlock = {
+            noteEditText?.applyFormatting(sizeSp, style, wrap, lineSpacing)
+            Unit
+        }
+        if (Looper.myLooper() == Looper.getMainLooper() || noteEditText?.isAttachedToWindow != true) {
+            updateBlock()
+        } else {
+            mainHandler.post(updateBlock)
+        }
+    }
+
+    fun pushUndoState(text: String) {
+        if (isPerformingUndoRedo) return
+        if (undoStack.isEmpty() || undoStack.last() != text) {
+            if (undoStack.size >= 50) undoStack.removeFirst()
+            undoStack.addLast(text)
+            redoStack.clear()
+        }
+    }
+
+    fun undo(): Boolean {
+        if (undoStack.isEmpty()) return false
+        isPerformingUndoRedo = true
+        try {
+            val current = noteText
+            redoStack.addLast(current)
+            val prev = undoStack.removeLast()
+            applyLiveTextFromHost(prev)
+            reportTextChangedToMain(prev, prev.length, prev.length)
+            return true
+        } finally {
+            isPerformingUndoRedo = false
+        }
+    }
+
+    fun redo(): Boolean {
+        if (redoStack.isEmpty()) return false
+        isPerformingUndoRedo = true
+        try {
+            val current = noteText
+            undoStack.addLast(current)
+            val next = redoStack.removeLast()
+            applyLiveTextFromHost(next)
+            reportTextChangedToMain(next, next.length, next.length)
+            return true
+        } finally {
+            isPerformingUndoRedo = false
+        }
+    }
+
+    fun clearContent() {
+        pushUndoState(noteText)
+        applyLiveTextFromHost("")
+        reportTextChangedToMain("", 0, 0)
+    }
+
+    fun handleNoteCommand(action: String, params: Map<String, String>) {
+        when (action) {
+            ACTION_NOTE_FORMAT -> {
+                val size = params["font_size"]?.toFloatOrNull() ?: fontSizeSp
+                val style = params["font_style"] ?: fontStyle
+                val wrap = params["word_wrap"]?.toBooleanStrictOrNull() ?: wordWrap
+                val spacing = params["line_spacing"]?.toFloatOrNull() ?: lineSpacingMult
+                applyFormat(size, style, wrap, spacing)
+            }
+            ACTION_NOTE_UNDO -> undo()
+            ACTION_NOTE_REDO -> redo()
+            ACTION_NOTE_CLEAR -> clearContent()
+        }
+    }
 
     override fun onCreate(savedSnapshot: MiniAppRecoverySnapshot?) {
         lifecycleState = MiniAppLifecycleState.CREATED
@@ -431,7 +541,11 @@ class TestNotesMiniAppInstance(
         val payload = LinkedHashMap<String, String>()
         payload[KEY_TEXT] = noteText
         payload["text"] = noteText
-        payload["app_type"] = APP_TYPE
+        payload["app_type"] = appType
+        payload["font_size"] = fontSizeSp.toString()
+        payload["font_style"] = fontStyle
+        payload["word_wrap"] = wordWrap.toString()
+        payload["line_spacing"] = lineSpacingMult.toString()
         payload["timestamp"] = System.currentTimeMillis().toString()
         releaseRuntime()
         return payload
@@ -448,12 +562,24 @@ class TestNotesMiniAppInstance(
         if (restored != null) {
             noteText = restored
         }
+        payload["font_size"]?.toFloatOrNull()?.let { fontSizeSp = it }
+        payload["font_style"]?.let { fontStyle = it }
+        payload["word_wrap"]?.toBooleanStrictOrNull()?.let { wordWrap = it }
+        payload["line_spacing"]?.toFloatOrNull()?.let { lineSpacingMult = it }
         syncUi()
+        noteEditText?.applyFormatting(fontSizeSp, fontStyle, wordWrap, lineSpacingMult)
     }
 
     override fun onSaveState(): Map<String, String> {
         saveTextFromUi()
-        return mapOf(KEY_TEXT to noteText, "text" to noteText)
+        return mapOf(
+            KEY_TEXT to noteText,
+            "text" to noteText,
+            "font_size" to fontSizeSp.toString(),
+            "font_style" to fontStyle,
+            "word_wrap" to wordWrap.toString(),
+            "line_spacing" to lineSpacingMult.toString()
+        )
     }
 
     /**
@@ -479,7 +605,7 @@ class TestNotesMiniAppInstance(
                     if (edit.text?.toString() != newText) {
                         edit.setText(newText, TextView.BufferType.EDITABLE)
                     }
-                    val len = edit.text?.length ?: 0
+                    val len = (edit.text?.length ?: newText.length).coerceAtLeast(0)
                     val targetStart = if (selStart >= 0) selStart.coerceIn(0, len) else len
                     val targetEnd = if (selEnd >= 0) selEnd.coerceIn(targetStart, len) else targetStart
                     edit.setSelection(targetStart, targetEnd)
@@ -522,6 +648,7 @@ class TestNotesMiniAppInstance(
                         edit.isApplyingHostUpdate = false
                     }
                 }
+                edit.applyFormatting(fontSizeSp, fontStyle, wordWrap, lineSpacingMult)
             }
             statusView?.text = "State: ${lifecycleState.name}"
         }
@@ -602,13 +729,13 @@ class TestNotesMiniAppInstance(
                 (16 * density).toInt(),
                 (14 * density).toInt(),
                 (16 * density).toInt(),
-                (42 * density).toInt()
+                (48 * density).toInt()
             )
         }
 
-        // Title Header
+        // Title Header: Clean production "Note" title
         val titleView = TextView(context).apply {
-            text = "Test Notes"
+            text = "Note"
             setTextColor(Color.WHITE)
             textSize = 15f
             typeface = Typeface.DEFAULT_BOLD
@@ -617,7 +744,7 @@ class TestNotesMiniAppInstance(
 
         // Subtitle / Instructions label
         val subtitleView = TextView(context).apply {
-            text = "Floating framework test • Heavy Process Runtime"
+            text = "Multiline editor • Floating runtime"
             setTextColor(Color.parseColor("#89B4FA"))
             textSize = 11f
             setPadding(0, (2 * density).toInt(), 0, (8 * density).toInt())
@@ -647,7 +774,7 @@ class TestNotesMiniAppInstance(
             setHintTextColor(Color.parseColor("#6C7086"))
             setTextColor(Color.WHITE)
             highlightColor = Color.parseColor("#585B70")
-            textSize = 13f
+            textSize = fontSizeSp
             val bg = GradientDrawable().apply {
                 shape = GradientDrawable.RECTANGLE
                 cornerRadius = 8 * density
@@ -666,6 +793,7 @@ class TestNotesMiniAppInstance(
                 0,
                 1f
             )
+            applyFormatting(fontSizeSp, fontStyle, wordWrap, lineSpacingMult)
             isApplyingHostUpdate = true
             setText(noteText, TextView.BufferType.EDITABLE)
             setSelection(noteText.length)
@@ -675,6 +803,9 @@ class TestNotesMiniAppInstance(
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
                 override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
                     val updated = s?.toString() ?: ""
+                    if (!isApplyingHostUpdate && !isPerformingUndoRedo) {
+                        pushUndoState(noteText)
+                    }
                     noteText = updated
                     hasUserEditedText = true
                     if (!isApplyingHostUpdate) {
@@ -694,10 +825,15 @@ class TestNotesMiniAppInstance(
 
     companion object {
         const val APP_TYPE = "test_notes"
+        const val APP_TYPE_NOTE = "note"
         const val KEY_TEXT = "note_text"
         const val ACTION_MINIAPP_EDITOR_FOCUS = "miniapp_editor_focus"
         const val ACTION_MINIAPP_SELECTION_CHANGED = "miniapp_selection_changed"
         const val ACTION_MINIAPP_TEXT_CHANGED = "miniapp_text_changed"
+        const val ACTION_NOTE_FORMAT = "note_format"
+        const val ACTION_NOTE_UNDO = "note_undo"
+        const val ACTION_NOTE_REDO = "note_redo"
+        const val ACTION_NOTE_CLEAR = "note_clear"
         const val DEFAULT_INSTRUCTIONAL_TEXT =
             "Floating framework test.\nMove, resize, maximize, sleep, wake, and edit this text."
     }
@@ -708,7 +844,7 @@ class TestNotesMiniAppInstance(
  */
 class TestNotesMiniAppFactory : MiniAppFactory {
     override fun createAppInstance(instanceId: String, appType: String): MiniAppInstance? {
-        if (appType == TestNotesMiniAppInstance.APP_TYPE) {
+        if (appType == TestNotesMiniAppInstance.APP_TYPE || appType == TestNotesMiniAppInstance.APP_TYPE_NOTE) {
             return TestNotesMiniAppInstance(instanceId, appType)
         }
         return null

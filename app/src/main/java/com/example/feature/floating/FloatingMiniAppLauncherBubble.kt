@@ -69,7 +69,7 @@ class FloatingMiniAppLauncherBubble(
             "reader", "ebook_reader" -> com.example.R.drawable.ic_library_books
             "dictionary" -> android.R.drawable.ic_menu_sort_alphabetically
             "translation" -> android.R.drawable.ic_menu_sort_alphabetically
-            "test_notes", "work_notes" -> android.R.drawable.ic_menu_edit
+            "test_notes", "work_notes", "note" -> android.R.drawable.ic_menu_edit
             else -> android.R.drawable.ic_menu_edit
         }
 

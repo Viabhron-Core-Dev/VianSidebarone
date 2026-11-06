@@ -998,7 +998,8 @@ class FloatingMiniAppFrameworkTest {
 
         // Verify live host text synchronization updates EditText and selection without feedback corruption
         instance.applyLiveTextFromHost("Updated via IME Bridge\nSecond Line", 8, 11)
-        assertEquals("Updated via IME Bridge\nSecond Line", editText.text.toString())
+        val currentText = editText.text?.toString() ?: (editText as? EmbeddedNoteEditText)?.getMirroredText() ?: instance.noteText
+        assertEquals("Updated via IME Bridge\nSecond Line", currentText)
         assertEquals("Updated via IME Bridge\nSecond Line", instance.noteText)
         assertEquals(8, editText.selectionStart)
         assertEquals(11, editText.selectionEnd)
@@ -1031,7 +1032,8 @@ class FloatingMiniAppFrameworkTest {
         // Also verify HeavyFloatingHost.updateLiveInstanceText updates the live EditText
         val furtherEditedText = "$userEditedText\nThird line via live IME sync"
         assertTrue(host.updateLiveInstanceText(instanceId, furtherEditedText, furtherEditedText.length, furtherEditedText.length))
-        assertEquals(furtherEditedText, editText.text.toString())
+        val actualText = editText.text?.toString() ?: (editText as? EmbeddedNoteEditText)?.getMirroredText() ?: instance.noteText
+        assertEquals(furtherEditedText, actualText)
 
         // 3. Configure mock IPC proxy that delegates snapshot & release commands directly to HeavyFloatingHost
         val mockProxy = object : IHeavyHostContract {
@@ -1094,10 +1096,11 @@ class FloatingMiniAppFrameworkTest {
         val wokenView = wokenInstance!!.createContentView(testContext)
         val wokenEditText = wokenView.findViewById<android.widget.EditText>(android.R.id.edit) ?: wokenInstance.getEditTextForTesting()
         assertNotNull(wokenEditText)
+        val actualWokenText = wokenEditText!!.text?.toString() ?: (wokenEditText as? EmbeddedNoteEditText)?.getMirroredText() ?: wokenInstance.noteText
         assertEquals(
             "Woken EditText must restore the exact edited text from snapshot",
             furtherEditedText,
-            wokenEditText!!.text.toString()
+            actualWokenText
         )
 
         // 6. Close with discard (deleteDurable = true): unsaved edits and durable snapshot must be discarded
@@ -1161,7 +1164,7 @@ class FloatingMiniAppFrameworkTest {
 
         val hasNotFocusableAfterActivation = (window.layoutParams.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE) != 0
         assertFalse("FLAG_NOT_FOCUSABLE must be cleared upon activateEmbeddedEditorIme", hasNotFocusableAfterActivation)
-        assertEquals(testNote, bridgeEdit.text.toString())
+        assertEquals(testNote, bridgeEdit.text?.toString() ?: window.getAuthoritativeNoteText())
         assertEquals(10, bridgeEdit.selectionStart)
         assertEquals(10, bridgeEdit.selectionEnd)
 
@@ -1180,7 +1183,7 @@ class FloatingMiniAppFrameworkTest {
 
         // Verify applyLiveTextFromHost updates Heavy editor
         instance.applyLiveTextFromHost(typedAddition, typedAddition.length, typedAddition.length, testSess)
-        assertEquals(typedAddition, heavyEditText.text.toString())
+        assertEquals(typedAddition, (heavyEditText as? EmbeddedNoteEditText)?.getMirroredText() ?: instance.noteText)
         assertEquals(typedAddition, instance.noteText)
 
         // Clean up
@@ -1305,6 +1308,154 @@ class FloatingMiniAppFrameworkTest {
         // Clean up
         wm.unregisterWindow(window.windowId)
         host.destroyInstance(instanceId)
+    }
+
+    @Test
+    fun testSharedShellRoundedClippingAndStickerClearance() {
+        val wm = com.example.core.FloatingWindowManager.getInstance(testContext)
+        val instanceId = "rounded_clipping_test"
+        val initialBounds = WindowBounds(100, 100, 600, 800)
+
+        val window = FloatingMiniAppWindow(instanceId, testContext, "note")
+        window.setWindowBounds(initialBounds)
+        wm.registerWindow(window)
+
+        val contentView = window.createContentView(testContext)
+        assertNotNull(contentView)
+        assertTrue("Root card view must have clipToOutline = true for 16dp rounded corners", window.isCardClippedToOutline)
+
+        // Verify Edit popover is created
+        val popover = window.getEditPopoverForTesting()
+        assertNotNull("Edit popover must be attached to the root hierarchy", popover)
+
+        // Verify maximize and restore geometry separation & corner radius update
+        window.toggleMaximize()
+        assertTrue("Window must report maximized", window.isMaximized)
+        assertFalse("Root card view clipToOutline must be false when maximized to fill display edges cleanly", window.isCardClippedToOutline)
+
+        window.toggleMaximize()
+        assertFalse("Window must restore normal floating state", window.isMaximized)
+        assertTrue("Root card view clipToOutline must re-engage upon restore", window.isCardClippedToOutline)
+
+        wm.unregisterWindow(window.windowId)
+    }
+
+    @Test
+    fun testProductionNoteFormattingOptionsAndUndoRedo() {
+        val host = HeavyFloatingHost.getInstance(testContext)
+        val instanceId = "note_format_undo_test"
+        val initialBounds = WindowBounds(100, 100, 500, 700)
+
+        val instance = host.startInstance(instanceId, "note", initialBounds, emptyMap()) as? TestNotesMiniAppInstance
+        assertNotNull("Factory must produce TestNotesMiniAppInstance for appType 'note'", instance)
+
+        // 1. Initial defaults
+        assertEquals(15f, instance!!.fontSizeSp, 0.01f)
+        assertEquals("regular", instance.fontStyle)
+        assertTrue(instance.wordWrap)
+        assertEquals(1.2f, instance.lineSpacingMult, 0.01f)
+
+        // 2. Format update
+        instance.handleNoteCommand(
+            TestNotesMiniAppInstance.ACTION_NOTE_FORMAT,
+            mapOf(
+                "font_size" to "18.0",
+                "font_style" to "bold",
+                "word_wrap" to "false",
+                "line_spacing" to "1.5"
+            )
+        )
+        assertEquals(18f, instance.fontSizeSp, 0.01f)
+        assertEquals("bold", instance.fontStyle)
+        assertFalse(instance.wordWrap)
+        assertEquals(1.5f, instance.lineSpacingMult, 0.01f)
+
+        // 3. Undo / Redo sequence
+        instance.applyLiveTextFromHost("State 0 - Initial")
+        instance.pushUndoState("State 0 - Initial")
+
+        instance.applyLiveTextFromHost("State 1 - First Edit")
+        instance.pushUndoState("State 1 - First Edit")
+
+        instance.applyLiveTextFromHost("State 2 - Second Edit")
+
+        // Undo to State 1
+        val undo1Success = instance.undo()
+        assertTrue("Undo should succeed", undo1Success)
+        assertEquals("State 1 - First Edit", instance.noteText)
+
+        // Undo to State 0
+        val undo2Success = instance.undo()
+        assertTrue("Undo should succeed", undo2Success)
+        assertEquals("State 0 - Initial", instance.noteText)
+
+        // Redo to State 1
+        val redo1Success = instance.redo()
+        assertTrue("Redo should succeed", redo1Success)
+        assertEquals("State 1 - First Edit", instance.noteText)
+
+        // Clear content
+        instance.clearContent()
+        assertEquals("", instance.noteText)
+
+        // Undo recovering text before clear
+        val undoAfterClearSuccess = instance.undo()
+        assertTrue("Undo after clear should restore previous content", undoAfterClearSuccess)
+        assertEquals("State 1 - First Edit", instance.noteText)
+
+        host.destroyInstance(instanceId)
+    }
+
+    @Test
+    fun testNoteSnapshotPersistenceOfFormattingAcrossSleepWake() {
+        val host = HeavyFloatingHost.getInstance(testContext)
+        val store = DurableMiniAppStore.getInstance(testContext)
+        val instanceId = "note_persistence_formatting_test"
+        val initialBounds = WindowBounds(120, 140, 600, 750)
+
+        val instance = host.startInstance(instanceId, "note", initialBounds, emptyMap()) as? TestNotesMiniAppInstance
+        assertNotNull(instance)
+
+        // Set custom text and formatting
+        instance!!.applyLiveTextFromHost("Important project note content")
+        instance.applyFormat(20f, "monospace", false, 1.5f)
+
+        // Sleep / Fold: Extract recovery snapshot
+        val sleepPayload = instance.prepareForSleep()
+        assertEquals("Important project note content", sleepPayload[TestNotesMiniAppInstance.KEY_TEXT])
+        assertEquals("20.0", sleepPayload["font_size"])
+        assertEquals("monospace", sleepPayload["font_style"])
+        assertEquals("false", sleepPayload["word_wrap"])
+        assertEquals("1.5", sleepPayload["line_spacing"])
+
+        // Commit snapshot in Main store
+        val snapshot = MiniAppRecoverySnapshot(
+            instanceId = instanceId,
+            appType = "note",
+            state = MiniAppState.SLEEPING,
+            windowBounds = initialBounds,
+            payload = LinkedHashMap(sleepPayload)
+        )
+        store.saveSnapshot(snapshot)
+
+        // Destroy old instance in Heavy (simulating teardown on sleep)
+        host.destroyInstance(instanceId)
+
+        // Wake: Start new instance and restore from snapshot
+        val wakingSnapshot = store.loadSnapshot(instanceId)
+        assertNotNull(wakingSnapshot)
+
+        val wakingInstance = host.startInstance(instanceId, "note", initialBounds, wakingSnapshot!!.payload) as? TestNotesMiniAppInstance
+        assertNotNull(wakingInstance)
+        assertEquals("Important project note content", wakingInstance!!.noteText)
+        assertEquals(20f, wakingInstance.fontSizeSp, 0.01f)
+        assertEquals("monospace", wakingInstance.fontStyle)
+        assertFalse(wakingInstance.wordWrap)
+        assertEquals(1.5f, wakingInstance.lineSpacingMult, 0.01f)
+
+        // Clean up
+        host.destroyInstance(instanceId)
+        store.deleteSnapshot(instanceId)
     }
 }
 

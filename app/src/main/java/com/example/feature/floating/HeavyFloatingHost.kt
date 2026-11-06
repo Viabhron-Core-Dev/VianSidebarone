@@ -32,8 +32,8 @@ class HeavyFloatingHost private constructor(private val context: Context) {
         registerFactory("reader", defaultFactory)
         registerFactory("dictionary", defaultFactory)
         registerFactory("translation", defaultFactory)
-        registerFactory("test_app", defaultFactory)
         registerFactory(TestNotesMiniAppInstance.APP_TYPE, testNotesFactory)
+        registerFactory(TestNotesMiniAppInstance.APP_TYPE_NOTE, testNotesFactory)
     }
 
     /**
@@ -147,6 +147,20 @@ class HeavyFloatingHost private constructor(private val context: Context) {
                 )
             )
             return true
+        }
+    }
+
+    /**
+     * Dispatches formatting, undo, redo, and clear commands directly to NoteMiniAppInstance.
+     */
+    fun dispatchNoteCommand(instanceId: String, action: String, params: Map<String, String>): Boolean {
+        synchronized(lock) {
+            val instance = activeInstances[instanceId] ?: return false
+            if (instance is TestNotesMiniAppInstance) {
+                instance.handleNoteCommand(action, params)
+                return true
+            }
+            return false
         }
     }
 
