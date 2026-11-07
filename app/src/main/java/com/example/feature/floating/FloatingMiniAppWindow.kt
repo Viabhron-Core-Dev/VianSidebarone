@@ -322,6 +322,19 @@ class FloatingMiniAppWindow(
         isCardClippedToOutline = true
 
         val root = object : FrameLayout(context) {
+            override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+                val action = ev.actionMasked
+                if (action == MotionEvent.ACTION_DOWN || action == MotionEvent.ACTION_UP) {
+                    val sess = if (isDiagnosticMode) diagnosticSessionId else activeImeSessionId
+                    val actName = if (action == MotionEvent.ACTION_DOWN) "DOWN" else "UP"
+                    LogKeeper.log(
+                        context,
+                        "TestNotesImeDebug",
+                        "TOUCH_BOUNDARY_1_MAIN_OVERLAY action=$actName sess=$sess id=$instanceId x=${ev.x} y=${ev.y} w=$width h=$height hasFocus=${hasFocus()} winFocus=${hasWindowFocus()}"
+                    )
+                }
+                return super.dispatchTouchEvent(ev)
+            }
             override fun onWindowFocusChanged(hasWindowFocus: Boolean) {
                 super.onWindowFocusChanged(hasWindowFocus)
                 hasRealWindowFocus = hasWindowFocus
@@ -851,7 +864,34 @@ class FloatingMiniAppWindow(
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             val density = context.resources.displayMetrics.density
             val cardCornerRadius = 16 * density
-            val sv = SurfaceView(context).apply {
+            val sv = object : SurfaceView(context) {
+                override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+                    val action = ev.actionMasked
+                    if (action == MotionEvent.ACTION_DOWN || action == MotionEvent.ACTION_UP) {
+                        val sess = if (isDiagnosticMode) diagnosticSessionId else activeImeSessionId
+                        val actName = if (action == MotionEvent.ACTION_DOWN) "DOWN" else "UP"
+                        LogKeeper.log(
+                            context,
+                            "TestNotesImeDebug",
+                            "TOUCH_BOUNDARY_2_MAIN_SURFACE_VIEW_DISPATCH action=$actName sess=$sess id=$instanceId x=${ev.x} y=${ev.y} w=$width h=$height attached=$isSurfaceAttached"
+                        )
+                    }
+                    return super.dispatchTouchEvent(ev)
+                }
+                override fun onTouchEvent(ev: MotionEvent): Boolean {
+                    val action = ev.actionMasked
+                    if (action == MotionEvent.ACTION_DOWN || action == MotionEvent.ACTION_UP) {
+                        val sess = if (isDiagnosticMode) diagnosticSessionId else activeImeSessionId
+                        val actName = if (action == MotionEvent.ACTION_DOWN) "DOWN" else "UP"
+                        LogKeeper.log(
+                            context,
+                            "TestNotesImeDebug",
+                            "TOUCH_BOUNDARY_2_MAIN_SURFACE_VIEW_TOUCH action=$actName sess=$sess id=$instanceId x=${ev.x} y=${ev.y}"
+                        )
+                    }
+                    return super.onTouchEvent(ev)
+                }
+            }.apply {
                 layoutParams = FrameLayout.LayoutParams(
                     FrameLayout.LayoutParams.MATCH_PARENT,
                     FrameLayout.LayoutParams.MATCH_PARENT

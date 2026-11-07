@@ -288,10 +288,16 @@ class SidebarView(
                 marginStart = edgeMargin
             }
             setOnClickListener {
+                val sess = "edit_${System.currentTimeMillis() % 100000}"
                 if (pageConfigs.isNotEmpty()) {
                     val currentItem = viewPager.currentItem
                     val actualPosition = if (pageConfigs.size > 2) currentItem % pageConfigs.size else currentItem
                     val pageConfig = pageConfigs.getOrNull(actualPosition)
+                    com.example.core.LogKeeper.log(
+                        context,
+                        "MiniAppLaunchRouting",
+                        "ROUTING_DIAG: EDIT_BUTTON_CLICKED sess=$sess containerId=$containerId pageIndex=$actualPosition pageType=${pageConfig?.type} pageId=${pageConfig?.id}"
+                    )
                     if (pageConfig != null) {
                         SidebarEditNavigator.navigateToEditScreen(
                             context = context,

@@ -1,6 +1,7 @@
 package com.example.feature.miniapps
 
 import android.content.Context
+import com.example.core.LogKeeper
 import com.example.feature.floating.FloatingMiniAppBridge
 
 /**
@@ -9,6 +10,12 @@ import com.example.feature.floating.FloatingMiniAppBridge
  */
 object MiniAppManager {
     fun toggleApp(context: Context, pageType: String) {
+        val caller = Throwable().stackTrace.getOrNull(1)?.let { "${it.className}.${it.methodName}:${it.lineNumber}" } ?: "unknown"
+        LogKeeper.log(
+            context,
+            "MiniAppLaunchRouting",
+            "ROUTING_DIAG: MINI_APP_MANAGER_TOGGLE pageType=$pageType caller=$caller"
+        )
         FloatingMiniAppBridge.getInstance(context).toggleMiniApp(pageType)
     }
 }

@@ -1621,5 +1621,35 @@ class FloatingMiniAppFrameworkTest {
         window.onDestroy()
         assertFalse("IME session must be deactivated when window is destroyed", window.isNoteEditorImeActiveForTesting())
     }
+
+    @Test
+    fun testTouchDeliveryBoundariesAndActionDownPriming() {
+        val miniApp = TestNotesMiniAppInstance("touch_boundary_test_inst", "test_notes")
+        miniApp.onCreate(null)
+        val heavyRoot = miniApp.createContentView(testContext)
+        assertNotNull(heavyRoot)
+
+        val editor = miniApp.getEditTextForTesting()
+        assertNotNull(editor)
+
+        val embeddedEditor = editor as com.example.feature.floating.EmbeddedNoteEditText
+
+        // Verify touch down primes focus
+        embeddedEditor.simulateTouchDownForTesting("test_prime_sess")
+        assertTrue("Editor must gain cursor visibility on touch down", embeddedEditor.isCursorVisible)
+
+        // Verify touch up completes focus request
+        embeddedEditor.simulateTouchUpForTesting("test_prime_sess")
+        assertTrue("Editor remains focusable and cursor visible", embeddedEditor.isCursorVisible)
+    }
+
+    @Test
+    fun testRoutingDiagnosticsLoggingAndFilterTag() {
+        // Verify "MiniAppLaunchRouting" is present in FloatingMiniAppLogFilter tags
+        val tags = com.example.core.FloatingMiniAppLogFilter.MINI_APP_COMPONENT_TAGS
+        assertTrue("FloatingMiniAppLogFilter must include MiniAppLaunchRouting", tags.contains("MiniAppLaunchRouting"))
+        assertTrue("FloatingMiniAppLogFilter must include TestNotesImeDebug", tags.contains("TestNotesImeDebug"))
+    }
 }
+
 

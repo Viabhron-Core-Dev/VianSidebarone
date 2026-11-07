@@ -768,7 +768,7 @@ class HeavyPageHostManager private constructor(private val context: Context) {
                             }
                         }
                     }
-                    "test_notes", "work_notes", "reader", "dictionary", "translation", "test_app", "generic" -> {
+                    "test_notes", "work_notes", "reader", "dictionary", "translation", "test_app", "generic", "note" -> {
                         LogKeeper.log(context, TAG, "Instantiating mini-app embedded view in :heavy for pageId='$pageId', type='$pageType'")
                         val heavyFloatingHost = com.example.feature.floating.HeavyFloatingHost.getInstance(context)
                         val initialPayload = LinkedHashMap<String, String>()
@@ -847,6 +847,14 @@ class HeavyPageHostManager private constructor(private val context: Context) {
                 }
 
                 host.setView(pageView, width, finalHostHeight)
+                if (isMiniApp) {
+                    val tHostSet = SystemClock.elapsedRealtime()
+                    LogKeeper.log(
+                        context,
+                        "TestNotesImeDebug",
+                        "TOUCH_BOUNDARY_3_HEAVY_HOST_LIFECYCLE id=$pageId type=$pageType w=$width h=$finalHostHeight hostSetTime=$tHostSet"
+                    )
+                }
                 if (isMiniApp) {
                     pageView.viewTreeObserver.addOnPreDrawListener(object : ViewTreeObserver.OnPreDrawListener {
                         override fun onPreDraw(): Boolean {

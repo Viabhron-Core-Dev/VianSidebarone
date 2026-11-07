@@ -301,6 +301,20 @@ class EmbeddedNoteEditText(
         return if (super.getText() != null) super.getSelectionEnd() else mirroredSelEnd
     }
 
+    override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        val action = ev.actionMasked
+        if (action == MotionEvent.ACTION_DOWN || action == MotionEvent.ACTION_UP) {
+            val sess = activeTouchSessionId ?: "ime_${System.currentTimeMillis() % 100000}"
+            val actName = if (action == MotionEvent.ACTION_DOWN) "DOWN" else "UP"
+            LogKeeper.log(
+                viewContext,
+                "TestNotesImeDebug",
+                "TOUCH_BOUNDARY_5_HEAVY_EDITOR_DISPATCH action=$actName sess=$sess x=${ev.x} y=${ev.y} hasFocus=${hasFocus()} winFocus=${hasWindowFocus()}"
+            )
+        }
+        return super.dispatchTouchEvent(ev)
+    }
+
     override fun onTouchEvent(event: MotionEvent): Boolean {
         val action = event.actionMasked
         if (action == MotionEvent.ACTION_DOWN) {
@@ -309,12 +323,23 @@ class EmbeddedNoteEditText(
             LogKeeper.log(
                 viewContext,
                 "TestNotesImeDebug",
-                "STAGE_1_HEAVY_DOWN sess=$sess hasFocus=${hasFocus()} winFocus=${hasWindowFocus()}"
+                "TOUCH_BOUNDARY_6_HEAVY_EDITOR_TOUCH action=DOWN sess=$sess hasFocus=${hasFocus()} winFocus=${hasWindowFocus()}"
             )
             if (!hasFocus()) {
                 requestFocus()
             }
             isCursorVisible = true
+
+            // Prime Main overlay early on ACTION_DOWN: clear FLAG_NOT_FOCUSABLE before finger lifts on ACTION_UP
+            val currentText = text?.toString() ?: ""
+            val sStart = selectionStart.coerceIn(0, currentText.length)
+            val sEnd = selectionEnd.coerceIn(0, currentText.length)
+            LogKeeper.log(
+                viewContext,
+                "TestNotesImeDebug",
+                "HEAVY_EDITOR_PRIME_FOCUS_DOWN sess=$sess textLen=${currentText.length} sel=($sStart,$sEnd)"
+            )
+            onEditorFocusedOrTouched(currentText, sStart, sEnd, sess)
         }
         val handled = try {
             super.onTouchEvent(event)
@@ -327,20 +352,18 @@ class EmbeddedNoteEditText(
                 requestFocus()
             }
             isCursorVisible = true
-            try {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                    windowInsetsController?.show(android.view.WindowInsets.Type.ime())
-                }
-            } catch (_: Throwable) {}
-            try {
-                val imm = viewContext.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
-                imm?.viewClicked(this)
-                imm?.showSoftInput(this, InputMethodManager.SHOW_IMPLICIT)
-            } catch (_: Throwable) {}
 
+            // Architectural fix: Main process exclusively owns the Android window token and soft keyboard InputConnection.
+            // In a windowless SurfaceControlViewHost, calling imm.showSoftInput or windowInsetsController?.show creates
+            // an architectural race/conflict. Main activates the IME bridge and drives the keyboard.
             val currentText = text?.toString() ?: ""
             val sStart = selectionStart.coerceIn(0, currentText.length)
             val sEnd = selectionEnd.coerceIn(0, currentText.length)
+            LogKeeper.log(
+                viewContext,
+                "TestNotesImeDebug",
+                "TOUCH_BOUNDARY_6_HEAVY_EDITOR_TOUCH action=UP sess=$sess hasFocus=${hasFocus()} winFocus=${hasWindowFocus()} textLen=${currentText.length} sel=($sStart,$sEnd)"
+            )
             LogKeeper.log(
                 viewContext,
                 "TestNotesImeDebug",
@@ -349,6 +372,50 @@ class EmbeddedNoteEditText(
             onEditorFocusedOrTouched(currentText, sStart, sEnd, sess)
         }
         return handled || true
+    }
+
+    /**
+     * Testing helper to simulate physical touch down and focus priming without native MotionEvent.
+     */
+    fun simulateTouchDownForTesting(sessionId: String = "test_sess_down") {
+        activeTouchSessionId = sessionId
+        LogKeeper.log(
+            viewContext,
+            "TestNotesImeDebug",
+            "TOUCH_BOUNDARY_6_HEAVY_EDITOR_TOUCH action=DOWN sess=$sessionId hasFocus=${hasFocus()} winFocus=${hasWindowFocus()}"
+        )
+        if (!hasFocus()) {
+            requestFocus()
+        }
+        isCursorVisible = true
+        val currentText = text?.toString() ?: mirroredText
+        val sStart = selectionStart.coerceIn(0, currentText.length)
+        val sEnd = selectionEnd.coerceIn(0, currentText.length)
+        onEditorFocusedOrTouched(currentText, sStart, sEnd, sessionId)
+    }
+
+    /**
+     * Testing helper to simulate physical touch up and focus request without native MotionEvent.
+     */
+    fun simulateTouchUpForTesting(sessionId: String = activeTouchSessionId ?: "test_sess_up") {
+        if (!hasFocus()) {
+            requestFocus()
+        }
+        isCursorVisible = true
+        val currentText = text?.toString() ?: mirroredText
+        val sStart = selectionStart.coerceIn(0, currentText.length)
+        val sEnd = selectionEnd.coerceIn(0, currentText.length)
+        LogKeeper.log(
+            viewContext,
+            "TestNotesImeDebug",
+            "TOUCH_BOUNDARY_6_HEAVY_EDITOR_TOUCH action=UP sess=$sessionId hasFocus=${hasFocus()} winFocus=${hasWindowFocus()} textLen=${currentText.length} sel=($sStart,$sEnd)"
+        )
+        LogKeeper.log(
+            viewContext,
+            "TestNotesImeDebug",
+            "HEAVY_EDITOR_FOCUS_REQUEST sess=$sessionId hasFocus=${hasFocus()} winFocus=${hasWindowFocus()} textLen=${currentText.length} sel=($sStart,$sEnd)"
+        )
+        onEditorFocusedOrTouched(currentText, sStart, sEnd, sessionId)
     }
 
     override fun onCreateInputConnection(outAttrs: EditorInfo?): InputConnection? {
@@ -724,6 +791,30 @@ class TestNotesMiniAppInstance(
         val density = context.resources.displayMetrics.density
         val root = object : LinearLayout(context) {
             override fun hasWindowFocus(): Boolean = true
+            override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+                val action = ev.actionMasked
+                if (action == MotionEvent.ACTION_DOWN || action == MotionEvent.ACTION_UP) {
+                    val actName = if (action == MotionEvent.ACTION_DOWN) "DOWN" else "UP"
+                    LogKeeper.log(
+                        context,
+                        "TestNotesImeDebug",
+                        "TOUCH_BOUNDARY_4_HEAVY_ROOT_DISPATCH action=$actName id=$instanceId x=${ev.x} y=${ev.y} w=$width h=$height"
+                    )
+                }
+                return super.dispatchTouchEvent(ev)
+            }
+            override fun onTouchEvent(ev: MotionEvent): Boolean {
+                val action = ev.actionMasked
+                if (action == MotionEvent.ACTION_DOWN || action == MotionEvent.ACTION_UP) {
+                    val actName = if (action == MotionEvent.ACTION_DOWN) "DOWN" else "UP"
+                    LogKeeper.log(
+                        context,
+                        "TestNotesImeDebug",
+                        "TOUCH_BOUNDARY_4_HEAVY_ROOT_TOUCH action=$actName id=$instanceId x=${ev.x} y=${ev.y}"
+                    )
+                }
+                return super.onTouchEvent(ev)
+            }
         }.apply {
             orientation = LinearLayout.VERTICAL
             isFocusable = false

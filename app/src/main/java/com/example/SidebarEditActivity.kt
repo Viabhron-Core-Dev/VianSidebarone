@@ -215,6 +215,11 @@ class SidebarEditActivity : ComponentActivity() {
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
+        com.example.core.LogKeeper.log(
+            this,
+            "MiniAppLaunchRouting",
+            "ROUTING_DIAG: SIDEBAR_EDIT_ON_ACTIVITY_RESULT req=$requestCode res=$resultCode id=${data?.getStringExtra("ELEMENT_ID")} pageId=$pageId"
+        )
         if (requestCode == 100 && resultCode == RESULT_OK) {
             val id = data?.getStringExtra("ELEMENT_ID")
             if (id != null) {

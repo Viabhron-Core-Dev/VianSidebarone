@@ -88,6 +88,11 @@ object SidebarEditNavigator {
         onClose: () -> Unit
     ) {
         val intent = createEditIntent(context, pageConfig, containerId, physicalHandleId)
+        com.example.core.LogKeeper.log(
+            context,
+            "MiniAppLaunchRouting",
+            "ROUTING_DIAG: NAVIGATE_TO_EDIT_SCREEN targetActivity=${intent.component?.className} pageType=${pageConfig.type} pageId=${pageConfig.id} containerId=$containerId"
+        )
         context.startActivity(intent)
         onClose()
     }

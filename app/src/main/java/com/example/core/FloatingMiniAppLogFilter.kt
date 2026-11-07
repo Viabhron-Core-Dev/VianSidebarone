@@ -21,7 +21,8 @@ object FloatingMiniAppLogFilter {
         "HeavyFloatingHost",
         "HeavyFloatingHostService",
         "TestNotesImeDebug",
-        "FloatingMiniAppTiming"
+        "FloatingMiniAppTiming",
+        "MiniAppLaunchRouting"
     )
 
     private val MINI_APP_TYPE_MARKERS = listOf(
@@ -38,6 +39,7 @@ object FloatingMiniAppLogFilter {
         "HeavyFloatingHostService",
         "TestNotesImeDebug",
         "FloatingMiniAppTiming",
+        "MiniAppLaunchRouting",
         "TestNotesMiniApp",
         "SpeedMonitorMiniApp",
         "EBookReaderMiniApp",

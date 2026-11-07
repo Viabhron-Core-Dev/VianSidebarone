@@ -123,6 +123,11 @@ object ElementActionDispatcher {
 
                 is SidebarItem.PageWindow -> {
                     LogKeeper.log(context, TAG, "Toggling PageWindow element: ${item.pageType}")
+                    LogKeeper.log(
+                        context,
+                        "MiniAppLaunchRouting",
+                        "ROUTING_DIAG: ELEMENT_ACTION_PAGE_WINDOW item=${item.id} pageType=${item.pageType}"
+                    )
                     MiniAppManager.toggleApp(context, item.pageType)
                     true
                 }
@@ -198,6 +203,11 @@ object ElementActionDispatcher {
                 true
             }
             "test_notes" -> {
+                LogKeeper.log(
+                    context,
+                    "MiniAppLaunchRouting",
+                    "ROUTING_DIAG: ELEMENT_ACTION_SYSTEM_ACTION action=test_notes containerId=$containerId"
+                )
                 MiniAppManager.toggleApp(context, "test_notes")
                 true
             }

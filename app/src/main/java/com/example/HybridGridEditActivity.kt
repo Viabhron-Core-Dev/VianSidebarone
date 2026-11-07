@@ -142,6 +142,11 @@ class HybridGridEditActivity : ComponentActivity() {
             }
         } else if (requestCode == 201 && resultCode == Activity.RESULT_OK && data != null) {
             val elementId = data.getStringExtra("ELEMENT_ID")
+            com.example.core.LogKeeper.log(
+                this,
+                "MiniAppLaunchRouting",
+                "ROUTING_DIAG: HYBRID_GRID_EDIT_ON_ACTIVITY_RESULT req=$requestCode res=$resultCode elementId=$elementId pageId=$pageId"
+            )
             if (elementId != null) {
                 val prefs = getSharedPreferences("FloatingReaderPrefs", Context.MODE_PRIVATE)
                 val parsedItems = loadHybridLocalItems(prefs, pageId, containerId).toMutableList()

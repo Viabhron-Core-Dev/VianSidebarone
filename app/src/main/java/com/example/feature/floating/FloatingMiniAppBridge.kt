@@ -37,6 +37,12 @@ class FloatingMiniAppBridge private constructor(private val context: Context) {
         appType: String,
         initialBounds: WindowBounds? = null
     ): FloatingMiniAppWindow {
+        val caller = Throwable().stackTrace.getOrNull(1)?.let { "${it.className}.${it.methodName}:${it.lineNumber}" } ?: "unknown"
+        LogKeeper.log(
+            context,
+            "MiniAppLaunchRouting",
+            "ROUTING_DIAG: BRIDGE_OPEN_MINI_APP id=$instanceId type=$appType caller=$caller"
+        )
         LogKeeper.log(context, TAG, "FLOATING_SESSION_START id=$instanceId type=$appType initialBounds=$initialBounds")
 
         // Dismiss launcher bubble if present
@@ -298,6 +304,12 @@ class FloatingMiniAppBridge private constructor(private val context: Context) {
      * Toggles a mini-app based on appType from Sidebar or element clicks.
      */
     fun toggleMiniApp(appType: String) {
+        val caller = Throwable().stackTrace.getOrNull(1)?.let { "${it.className}.${it.methodName}:${it.lineNumber}" } ?: "unknown"
+        LogKeeper.log(
+            context,
+            "MiniAppLaunchRouting",
+            "ROUTING_DIAG: BRIDGE_TOGGLE_MINI_APP type=$appType caller=$caller"
+        )
         val existingSnapshot = durableStore.getAllSnapshots().firstOrNull { it.appType == appType }
         val instanceId = existingSnapshot?.instanceId ?: "miniapp_$appType"
 

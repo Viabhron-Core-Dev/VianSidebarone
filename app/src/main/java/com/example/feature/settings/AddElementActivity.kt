@@ -130,6 +130,12 @@ class AddElementActivity : ComponentActivity() {
         val isHybridGrid = intent.getBooleanExtra("IS_HYBRID_GRID", false)
         val pageType = intent.getStringExtra("PAGE_TYPE")
 
+        com.example.core.LogKeeper.log(
+            this,
+            "MiniAppLaunchRouting",
+            "ROUTING_DIAG: ADD_ELEMENT_ACTIVITY_CREATED pageId=$pageId containerId=$containerId isHybrid=$isHybridGrid pageType=$pageType"
+        )
+
         addHeader("Default actions")
         addItem(android.R.drawable.ic_menu_agenda, "App") {
             val appIntent = Intent(this, AppPickerActivity::class.java).apply {
@@ -271,6 +277,11 @@ class AddElementActivity : ComponentActivity() {
             handleElementSelected("system:ebook_reader", "eBook Reader")
         }
         addItem(android.R.drawable.ic_menu_edit, "Test Notes") {
+            com.example.core.LogKeeper.log(
+                this,
+                "MiniAppLaunchRouting",
+                "ROUTING_DIAG: ELEMENT_PICKER_ITEM_CLICKED elementId=system:test_notes isHybrid=$isHybridGrid pageId=$pageId containerId=$containerId"
+            )
             handleElementSelected("system:test_notes", "Test Notes")
         }
 
@@ -284,6 +295,11 @@ class AddElementActivity : ComponentActivity() {
         val pageId = intent.getStringExtra("PAGE_ID")
         val containerId = intent.getStringExtra("CONTAINER_ID") ?: "sidebar"
         val isHybridGrid = intent.getBooleanExtra("IS_HYBRID_GRID", false)
+        com.example.core.LogKeeper.log(
+            this,
+            "MiniAppLaunchRouting",
+            "ROUTING_DIAG: HANDLE_ELEMENT_SELECTED elementId=$id isHybrid=$isHybridGrid pageId=$pageId containerId=$containerId"
+        )
         if (isHybridGrid && !pageId.isNullOrEmpty()) {
             val cols = if (id.startsWith("widget:") || id.startsWith("popup_widget:")) 2 else 1
             val rows = if (id.startsWith("widget:") || id.startsWith("popup_widget:")) 2 else 1
@@ -314,6 +330,11 @@ class AddElementActivity : ComponentActivity() {
     
     private fun finishWithId(id: String) {
         val containerId = intent.getStringExtra("CONTAINER_ID")
+        com.example.core.LogKeeper.log(
+            this,
+            "MiniAppLaunchRouting",
+            "ROUTING_DIAG: FINISH_WITH_ELEMENT_ID elementId=$id containerId=$containerId"
+        )
         val resultIntent = Intent().apply {
             putExtra("ELEMENT_ID", id)
             if (containerId != null) {

@@ -427,11 +427,25 @@
   - Repaired WindowInsets focus race in `FloatingMiniAppWindow.kt`: added `isNoteEditorImeActive`, `isImeVisibleInInsets`, and `isAwaitingImeVisibility` state tracking, preventing `setOnApplyWindowInsetsListener` from prematurely re-arming `FLAG_NOT_FOCUSABLE` before soft keyboard opens.
   - Implemented `deactivateEmbeddedEditorIme()` to safely restore `FLAG_NOT_FOCUSABLE`, clear bridge focus, and hide IME when keyboard is dismissed by user, or when the window folds/hides (`onHide()`) or closes (`onDestroy()`).
   - Repaired InputMethodManager target binding in `triggerImeFocusOnBridge()`: verified bridge view attachment and valid window token, invoked `imm.viewClicked(bridge)` and `imm.restartInput(bridge)` before `imm.showSoftInput()`, and added `windowInsetsController?.show(WindowInsets.Type.ime())` on API 30+.
-  - Preserved Heavy authoritative data model: kept live text sync via `syncLiveTextToHeavy` and native `TextWatcher` without echo loops.
-  - Preserved Test A diagnostic mode and Phase 13.6 rendering updates completely.
-  - Added unit tests `testNoteEditorImeFocusLockLifecycleAndSync()` and `testNoteEditorImeDeactivationOnHideAndDestroy()` in `FloatingMiniAppFrameworkTest.kt`; all 40 tests passing 100%.
+- [x] **Phase 13.8: Note Launch Routing Diagnostics & Heavy Editor Touch Delivery Tracing**:
+  - **Problem A — Note Launch Routing Diagnostics (`SidebarView.kt`, `SidebarEditNavigator.kt`, `AddElementActivity.kt`, `SidebarEditActivity.kt`, `HybridGridEditActivity.kt`, `ElementActionDispatcher.kt`, `MiniAppManager.kt`, `FloatingMiniAppBridge.kt`)**:
+    - Added minimal zero-PII logging tagged `MiniAppLaunchRouting` and `ROUTING_DIAG` across the full action and navigation pipeline.
+    - Captures exact session IDs, container IDs, page IDs, target edit activities, element picker clicks (distinguishing `"system:test_notes"`), activity result intents, and caller stack traces (`class.method:line`) on `MiniAppManager.toggleMiniApp`, `FloatingMiniAppBridge.openMiniApp`, and `FloatingMiniAppBridge.toggleMiniApp`.
+    - Added `MiniAppLaunchRouting` to `FloatingMiniAppLogFilter` so routing diagnostics appear under the "Floating Mini-apps" filter chip in Log Keeper.
+  - **Problem B — Touch Delivery Path Tracing & Single IME Authority (`FloatingMiniAppWindow.kt`, `HeavyPageHostManager.kt`, `TestNotesMiniApp.kt`)**:
+    - Established end-to-end 6-boundary zero-PII touch logging:
+      * Boundary 1: `TOUCH_BOUNDARY_1_MAIN_OVERLAY` on `FloatingMiniAppWindow.rootCardView.dispatchTouchEvent`.
+      * Boundary 2: `TOUCH_BOUNDARY_2_MAIN_SURFACE_VIEW_DISPATCH` & `TOUCH_BOUNDARY_2_MAIN_SURFACE_VIEW_TOUCH` on `SurfaceView`.
+      * Boundary 3: Added `"note"` pageType support and logged `TOUCH_BOUNDARY_3_HEAVY_HOST_LIFECYCLE` on `HeavyPageHostManager.host.setView`.
+      * Boundary 4: `TOUCH_BOUNDARY_4_HEAVY_ROOT_DISPATCH` & `TOUCH_BOUNDARY_4_HEAVY_ROOT_TOUCH` on root layout in `TestNotesMiniApp`.
+      * Boundary 5: `TOUCH_BOUNDARY_5_HEAVY_EDITOR_DISPATCH` on `EmbeddedNoteEditText.dispatchTouchEvent`.
+      * Boundary 6: `TOUCH_BOUNDARY_6_HEAVY_EDITOR_TOUCH` on `EmbeddedNoteEditText.onTouchEvent` for both `ACTION_DOWN` and `ACTION_UP`.
+    - Focus Priming on `ACTION_DOWN`: Triggered `onEditorFocusedOrTouched()` on `ACTION_DOWN` so Main clears `FLAG_NOT_FOCUSABLE` and arms focus in advance of the `ACTION_UP` lift event.
+    - Single IME Authority: Removed competing `imm.showSoftInput(this)` and `windowInsetsController?.show` in `:heavy` within windowless `SurfaceControlViewHost`. Main alone owns window focus and soft keyboard activation.
+    - Added unit tests `testTouchDeliveryBoundariesAndActionDownPriming()` and `testRoutingDiagnosticsLoggingAndFilterTag()` in `FloatingMiniAppFrameworkTest.kt`; all 42 framework tests passing 100%. Compile succeeded.
 
 ---
+
 
 
 ## Phase 14: PWA Engine & External AI App Integration (Tier 5 - Highest Complexity)
