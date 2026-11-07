@@ -9,9 +9,11 @@ import android.os.Bundle
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.provider.Settings
 import android.view.Gravity
 import android.view.View
+import android.view.ViewTreeObserver
 import android.view.WindowManager
 import android.widget.FrameLayout
 import androidx.annotation.RequiresApi
@@ -553,8 +555,12 @@ class HeavyPageHostManager private constructor(private val context: Context) {
 
         mainHandler.post {
             try {
+                val tHostStart = SystemClock.elapsedRealtime()
+                LogKeeper.log(context, "FloatingMiniAppTiming", "HEAVY_HOST_CREATION_START id=$pageId elapsedRealtime=$tHostStart")
                 LogKeeper.log(context, TAG, "Creating SurfaceControlViewHost for '$pageId' ($pageType) size ${width}x$height in :heavy")
                 val host = android.view.SurfaceControlViewHost(context, display, hostToken)
+                val tHostDone = SystemClock.elapsedRealtime()
+                LogKeeper.log(context, "FloatingMiniAppTiming", "HEAVY_HOST_CREATION_DONE id=$pageId elapsedRealtime=$tHostDone durationMs=${tHostDone - tHostStart}")
                 val pageView: View = when (pageType) {
                     "calculator" -> {
                         CalculatorPageView(context) { newH ->
@@ -810,13 +816,15 @@ class HeavyPageHostManager private constructor(private val context: Context) {
                     }
                 }
 
-                val isMiniApp = params.getBoolean("isMiniApp", false) || pageType in listOf("test_notes", "work_notes", "reader", "dictionary", "translation", "test_app", "generic")
+                val isMiniApp = params.getBoolean("isMiniApp", false) || pageType in listOf("test_notes", "work_notes", "reader", "dictionary", "translation", "test_app", "generic", "note")
                 val finalHostHeight = if (isMiniApp) {
                     pageView.measure(
                         View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
                         View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY)
                     )
                     pageView.layout(0, 0, width, height)
+                    val tMeasure = SystemClock.elapsedRealtime()
+                    LogKeeper.log(context, "FloatingMiniAppTiming", "HEAVY_FIRST_MEASURE_LAYOUT_DONE id=$pageId width=$width height=$height elapsedRealtime=$tMeasure")
                     height
                 } else {
                     pageView.measure(
@@ -839,8 +847,38 @@ class HeavyPageHostManager private constructor(private val context: Context) {
                 }
 
                 host.setView(pageView, width, finalHostHeight)
+                if (isMiniApp) {
+                    pageView.viewTreeObserver.addOnPreDrawListener(object : ViewTreeObserver.OnPreDrawListener {
+                        override fun onPreDraw(): Boolean {
+                            pageView.viewTreeObserver.removeOnPreDrawListener(this)
+                            val tPreDraw = SystemClock.elapsedRealtime()
+                            LogKeeper.log(context, "FloatingMiniAppTiming", "HEAVY_FIRST_PRE_DRAW id=$pageId elapsedRealtime=$tPreDraw")
+                            return true
+                        }
+                    })
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        pageView.viewTreeObserver.registerFrameCommitCallback {
+                            val tCommit = SystemClock.elapsedRealtime()
+                            LogKeeper.log(context, "FloatingMiniAppTiming", "HEAVY_FRAME_COMMITTED id=$pageId elapsedRealtime=$tCommit")
+                            HeavyProcessHost.getInstance(context).reportEvent(HeavyEvent(
+                                eventId = "frame_commit_${pageId}_$tCommit",
+                                type = HeavyEventType.STATE_UPDATED,
+                                sourceId = pageId,
+                                payload = mapOf(
+                                    "action" to "miniapp_frame_committed",
+                                    "instanceId" to pageId,
+                                    "commitTime" to tCommit.toString()
+                                )
+                            ))
+                        }
+                    }
+                }
                 (pageView as? com.example.feature.sidebar.SidebarPageControllable)?.onPageSelected()
                 val surfacePackage = host.surfacePackage
+                val tDelivery = SystemClock.elapsedRealtime()
+                if (isMiniApp) {
+                    LogKeeper.log(context, "FloatingMiniAppTiming", "HEAVY_SURFACE_PACKAGE_DELIVERY id=$pageId elapsedRealtime=$tDelivery")
+                }
                 val holder = EmbeddedHostHolder(pageId, pageType, host, pageView, width, finalHostHeight)
                 activeEmbeddedHosts[pageId] = holder
 

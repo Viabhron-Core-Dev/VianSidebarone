@@ -447,3 +447,30 @@ Capped at 500 lines per file.
 * How it was verified: Local JVM compilation and unit tests (`compile_applet` passed, 37/37 tests in `FloatingMiniAppFrameworkTest` passed, `FloatingMiniAppLogFilterTest` passed) — not tested on physical hardware. Physical keyboard opening and touch input on device are NOT verified until the user performs the manual physical-device test.
 * Any deviation from what was requested, and why: None.
 * Any known issue or follow-up needed: Physical device execution required to determine which outcome (A, B, C, D, or E) occurs.
+
+---
+
+### Receipt 100 — Floating Mini-App Initial Rendering Delay & Transparent Flash Fix (Phase 13.6)
+* Timestamp: 2026-11-07T00:45:00-08:00
+* Summary: Diagnosed and repaired floating mini-app initial rendering delay and transparent flash; added zero-PII lifecycle timing logs, neutral 16dp placeholder, frame committed reveal signal, and relayout priming.
+* Exact files touched:
+  - app/src/main/java/com/example/core/FloatingMiniAppLogFilter.kt
+  - app/src/main/java/com/example/feature/heavy/page/HeavyPageHostManager.kt
+  - app/src/main/java/com/example/feature/floating/TestNotesMiniApp.kt
+  - app/src/main/java/com/example/feature/floating/FloatingMiniAppWindow.kt
+  - app/src/test/java/com/example/feature/floating/FloatingMiniAppFrameworkTest.kt
+  - blueprint/BLUEPRINT.md
+  - receipts/RECEIPTS_099.md
+* What was actually done:
+  - In `FloatingMiniAppLogFilter.kt`: Added `FloatingMiniAppTiming` to `MINI_APP_COMPONENT_TAGS` and `MINI_APP_STACK_MARKERS`.
+  - In `HeavyPageHostManager.kt`: Added zero-PII timing logs for Heavy host creation, measure/layout, pre-draw, and frame commit callback (`registerFrameCommitCallback` on Q+) dispatching `miniapp_frame_committed` to Main across Binder.
+  - In `TestNotesMiniApp.kt`: Added `HEAVY_VIEW_CREATION_START`, `HEAVY_VIEW_CREATION_DONE` logs and `ACTION_MINIAPP_FRAME_COMMITTED`.
+  - In `FloatingMiniAppWindow.kt`:
+    - Initialized `SurfaceView` with `alpha = 0f` and added neutral 16dp rounded content placeholder (`contentPlaceholderView`).
+    - Removed immediate background deletion (`container.background = null`) on attach.
+    - Primed `lastRelayoutWidth = w` and `lastRelayoutHeight = h` in `tryAttachSurfacePackage()` to prevent immediate redundant IPC relayout during initial frame rendering.
+    - Added `miniapp_frame_committed` event listener triggering `revealEmbeddedContent()` to unmask surface and dismiss placeholder seamlessly, backed by 400ms safeguard timeout.
+  - In `FloatingMiniAppFrameworkTest.kt`: Added unit test `testContentPlaceholderAndFrameRevealTiming()`.
+* How it was verified: Local build only (`compile_applet` passed, 38/38 unit tests in `FloatingMiniAppFrameworkTest` passed, `FloatingMiniAppLogFilterTest` passed) — physical device testing required to evaluate visual presentation.
+* Any deviation from what was requested, and why: None.
+* Any known issue or follow-up needed: Physical device verification required to compare visual perception and inspect timing logs in Log Keeper under the "Floating Mini-apps" filter chip.

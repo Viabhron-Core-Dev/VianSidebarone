@@ -7,6 +7,7 @@ import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.text.Editable
 import android.text.InputFilter
 import android.text.InputType
@@ -18,6 +19,7 @@ import android.text.method.TextKeyListener
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
+import android.view.ViewTreeObserver
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
 import android.view.inputmethod.InputMethodManager
@@ -716,6 +718,8 @@ class TestNotesMiniAppInstance(
     }
 
     override fun createContentView(context: Context): View {
+        val tCreateStart = SystemClock.elapsedRealtime()
+        LogKeeper.log(context, "FloatingMiniAppTiming", "HEAVY_VIEW_CREATION_START id=$instanceId elapsedRealtime=$tCreateStart")
         this.appContext = context.applicationContext
         val density = context.resources.displayMetrics.density
         val root = object : LinearLayout(context) {
@@ -820,6 +824,9 @@ class TestNotesMiniAppInstance(
         noteEditText = editor
         root.addView(editor)
 
+        val tCreateDone = SystemClock.elapsedRealtime()
+        LogKeeper.log(context, "FloatingMiniAppTiming", "HEAVY_VIEW_CREATION_DONE id=$instanceId durationMs=${tCreateDone - tCreateStart} elapsedRealtime=$tCreateDone")
+
         return root
     }
 
@@ -830,6 +837,7 @@ class TestNotesMiniAppInstance(
         const val ACTION_MINIAPP_EDITOR_FOCUS = "miniapp_editor_focus"
         const val ACTION_MINIAPP_SELECTION_CHANGED = "miniapp_selection_changed"
         const val ACTION_MINIAPP_TEXT_CHANGED = "miniapp_text_changed"
+        const val ACTION_MINIAPP_FRAME_COMMITTED = "miniapp_frame_committed"
         const val ACTION_NOTE_FORMAT = "note_format"
         const val ACTION_NOTE_UNDO = "note_undo"
         const val ACTION_NOTE_REDO = "note_redo"

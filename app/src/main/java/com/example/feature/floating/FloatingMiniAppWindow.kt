@@ -150,6 +150,25 @@ class FloatingMiniAppWindow(
     private var isDiagnosticAwaitingWindowFocus: Boolean = false
     private var diagnosticSessionId: String = "none"
 
+    // Content reveal & timing state
+    private var contentPlaceholderView: View? = null
+    var isContentRevealed: Boolean = false
+        private set
+    private var surfaceAttachTime: Long = 0L
+    private val revealSurfaceTimeoutRunnable = Runnable {
+        revealEmbeddedContent("timeout_safeguard")
+    }
+
+    fun isContentRevealedForTesting(): Boolean = isContentRevealed
+    fun getContentPlaceholderViewForTesting(): View? = contentPlaceholderView
+    fun resetContentRevealForTesting() {
+        isContentRevealed = false
+        contentPlaceholderView?.visibility = View.VISIBLE
+    }
+    fun revealEmbeddedContentForTesting(reason: String = "test") {
+        revealEmbeddedContent(reason)
+    }
+
     fun isDiagnosticModeForTesting(): Boolean = isDiagnosticMode
     fun getDiagnosticEditTextForTesting(): EditText? = diagnosticEditText
     fun getDiagnosticModeButtonForTesting(): TextView? = diagnosticModeButton
@@ -226,6 +245,16 @@ class FloatingMiniAppWindow(
                             "TEXT_CHANGE_SYNC_ACK direction=heavy_to_main textLen=${text.length} sel=($selStart,$selEnd)"
                         )
                         updateImeBridgeTextAndSelection(text, selStart, selEnd)
+                    }
+                    "miniapp_frame_committed" -> {
+                        val commitTime = event.payload["commitTime"]?.toLongOrNull() ?: SystemClock.elapsedRealtime()
+                        val now = SystemClock.elapsedRealtime()
+                        LogKeeper.log(
+                            context,
+                            "FloatingMiniAppTiming",
+                            "MAIN_RECEIVE_FRAME_COMMITTED id=$instanceId commitTime=$commitTime now=$now latencyMs=${now - commitTime}"
+                        )
+                        revealEmbeddedContent("frame_committed")
                     }
                 }
             }
@@ -357,7 +386,22 @@ class FloatingMiniAppWindow(
         }
         contentContainer = container
         mainLayout.addView(container)
-        root.addView(mainLayout)
+        // 3a. Neutral Content Placeholder (prevents initial transparency / un-rendered hole)
+        val placeholder = FrameLayout(context).apply {
+            layoutParams = FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
+            )
+            val pBg = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadii = floatArrayOf(0f, 0f, 0f, 0f, cardCornerRadius, cardCornerRadius, cardCornerRadius, cardCornerRadius)
+                setColor(Color.parseColor("#181825"))
+            }
+            background = pBg
+            visibility = View.VISIBLE
+        }
+        contentPlaceholderView = placeholder
+        container.addView(placeholder)
 
         // 3. Embedded Heavy Content Setup
         setupEmbeddedContent(context, container)
@@ -365,6 +409,8 @@ class FloatingMiniAppWindow(
         // 3b. Diagnostic Main-Process IME Container (Test A: Isolated Main-process IME)
         val diagContainer = createDiagnosticContainer(context)
         container.addView(diagContainer)
+
+        root.addView(mainLayout)
 
         // 4. Compact in-window Edit Popover
         val popover = createEditPopover(context)
@@ -694,6 +740,7 @@ class FloatingMiniAppWindow(
                     FrameLayout.LayoutParams.MATCH_PARENT,
                     FrameLayout.LayoutParams.MATCH_PARENT
                 )
+                alpha = 0f
                 setZOrderMediaOverlay(true)
                 holder.setFormat(android.graphics.PixelFormat.TRANSLUCENT)
                 outlineProvider = object : android.view.ViewOutlineProvider() {
@@ -712,11 +759,15 @@ class FloatingMiniAppWindow(
 
             sv.holder.addCallback(object : SurfaceHolder.Callback {
                 override fun surfaceCreated(holder: SurfaceHolder) {
+                    val tCreated = SystemClock.elapsedRealtime()
+                    LogKeeper.log(context, "FloatingMiniAppTiming", "MAIN_SURFACE_CREATED id=$instanceId elapsedRealtime=$tCreated")
                     surfaceReady = true
                     tryAttachSurfacePackage()
                 }
 
                 override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
+                    val tChanged = SystemClock.elapsedRealtime()
+                    LogKeeper.log(context, "FloatingMiniAppTiming", "MAIN_SURFACE_CHANGED id=$instanceId width=$width height=$height elapsedRealtime=$tChanged")
                     if (isResizing) return
                     val expectedViewportH = getContentViewportHeight(bounds.height)
                     if (width != bounds.width || height != expectedViewportH) {
@@ -728,6 +779,7 @@ class FloatingMiniAppWindow(
                 override fun surfaceDestroyed(holder: SurfaceHolder) {
                     surfaceReady = false
                     isSurfaceAttached = false
+                    isContentRevealed = false
                     try {
                         (currentSurfacePackage as? SurfaceControlViewHost.SurfacePackage)?.release()
                     } catch (_: Throwable) {}
@@ -791,16 +843,29 @@ class FloatingMiniAppWindow(
             putBundle("initialPayload", initialPayloadBundle)
         }
 
+        val tAttachStart = SystemClock.elapsedRealtime()
+        LogKeeper.log(context, "FloatingMiniAppTiming", "MAIN_SURFACE_ATTACH_START id=$instanceId width=$w height=$h elapsedRealtime=$tAttachStart")
+
         val reply = connectionManager.createSurfacePackage(params)
         if (reply != null && reply.getBoolean("success")) {
             reply.classLoader = SurfaceControlViewHost.SurfacePackage::class.java.classLoader
             @Suppress("DEPRECATION")
             val sp = reply.getParcelable<SurfaceControlViewHost.SurfacePackage>("surfacePackage")
             if (sp != null) {
+                val tPkgReceived = SystemClock.elapsedRealtime()
+                LogKeeper.log(context, "FloatingMiniAppTiming", "MAIN_SURFACE_PACKAGE_RECEIVED id=$instanceId elapsedRealtime=$tPkgReceived latencyMs=${tPkgReceived - tAttachStart}")
                 currentSurfacePackage = sp
                 sv.setChildSurfacePackage(sp)
-                container.background = null
+                // Prime relayout dimensions to prevent immediate redundant IPC from surfaceChanged
+                lastRelayoutWidth = w
+                lastRelayoutHeight = h
                 isSurfaceAttached = true
+                surfaceAttachTime = tPkgReceived
+
+                // Schedule safeguard timeout so placeholder never hangs if frame committed event is delayed
+                mainHandler.removeCallbacks(revealSurfaceTimeoutRunnable)
+                mainHandler.postDelayed(revealSurfaceTimeoutRunnable, 400L)
+
                 val fallback = container.findViewById<View>(android.R.id.text1)
                 if (fallback != null) {
                     container.removeView(fallback)
@@ -819,9 +884,37 @@ class FloatingMiniAppWindow(
         }
     }
 
+    /**
+     * Seamlessly reveals the embedded SurfaceView and dismisses the neutral placeholder
+     * once the first complete frame is committed by Heavy (or after the safeguard timeout).
+     */
+    fun revealEmbeddedContent(reason: String = "frame_committed") {
+        mainHandler.removeCallbacks(revealSurfaceTimeoutRunnable)
+        val wasAlreadyRevealed = isContentRevealed
+        isContentRevealed = true
+
+        val now = SystemClock.elapsedRealtime()
+        val durationSinceAttach = if (surfaceAttachTime > 0L) now - surfaceAttachTime else 0L
+        if (!wasAlreadyRevealed) {
+            LogKeeper.log(
+                context,
+                "FloatingMiniAppTiming",
+                "MAIN_SURFACE_REVEALED id=$instanceId reason=$reason durationSinceAttachMs=$durationSinceAttach elapsedRealtime=$now"
+            )
+        }
+
+        embeddedSurfaceView?.apply {
+            visibility = View.VISIBLE
+            alpha = 1f
+        }
+        contentPlaceholderView?.visibility = View.GONE
+    }
+
     fun relayoutEmbeddedSurface(viewportWidth: Int, viewportHeight: Int) {
         if (viewportWidth <= 0 || viewportHeight <= 0) return
         if (viewportWidth == lastRelayoutWidth && viewportHeight == lastRelayoutHeight) return
+        val tRelayout = SystemClock.elapsedRealtime()
+        LogKeeper.log(context, "FloatingMiniAppTiming", "MAIN_RELAYOUT_SURFACE id=$instanceId width=$viewportWidth height=$viewportHeight elapsedRealtime=$tRelayout")
         lastRelayoutWidth = viewportWidth
         lastRelayoutHeight = viewportHeight
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && embeddedSurfaceView != null) {
@@ -835,6 +928,8 @@ class FloatingMiniAppWindow(
 
     private fun attachFallbackContentView(context: Context, container: FrameLayout, reason: String = "fallback") {
         if (container.findViewById<View>(android.R.id.text1) != null) return
+        contentPlaceholderView?.visibility = View.GONE
+        isContentRevealed = true
 
         val density = context.resources.displayMetrics.density
         val savedSnapshot = durableStore.loadSnapshot(instanceId)
@@ -941,6 +1036,7 @@ class FloatingMiniAppWindow(
         embeddedSurfaceView?.visibility = View.GONE
         embeddedSurfaceView?.isEnabled = false
         noteEditText?.visibility = View.GONE
+        contentPlaceholderView?.visibility = View.GONE
 
         // Show diagnostic container & diagnostic EditText
         diagnosticContainer?.visibility = View.VISIBLE

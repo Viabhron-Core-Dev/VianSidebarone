@@ -1500,5 +1500,29 @@ class FloatingMiniAppFrameworkTest {
             (window.layoutParams.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE) != 0
         )
     }
+
+    @Test
+    fun testContentPlaceholderAndFrameRevealTiming() {
+        val window = FloatingMiniAppWindow("placeholder_test_1", testContext, "note")
+        val root = window.createContentView(testContext)
+        assertNotNull(root)
+
+        val placeholder = window.getContentPlaceholderViewForTesting()
+        assertNotNull("Content placeholder must be instantiated", placeholder)
+
+        // Reset reveal state for test verification of the revealEmbeddedContent method
+        // (In local JVM unit tests, Build.VERSION.SDK_INT is 0, so in-process fallback attaches synchronously.
+        // In real Android R+ runtime, SurfaceView attaches asynchronously, so placeholder remains VISIBLE until frame_committed).
+        window.resetContentRevealForTesting()
+        assertFalse("Content should be unrevealed after reset", window.isContentRevealedForTesting())
+
+        // Simulate frame committed reveal
+        window.revealEmbeddedContentForTesting("test_frame_committed")
+        assertTrue("Content should be marked as revealed after frame_committed signal", window.isContentRevealedForTesting())
+
+        // Repeated reveal calls should be safely idempotent
+        window.revealEmbeddedContentForTesting("test_idempotent")
+        assertTrue("Idempotent reveal must maintain revealed state", window.isContentRevealedForTesting())
+    }
 }
 
