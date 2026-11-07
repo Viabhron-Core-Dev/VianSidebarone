@@ -90,6 +90,12 @@ class FloatingMiniAppWindow(
     var imeShiftOffsetY: Int = 0
         internal set
     private var globalLayoutListener: ViewTreeObserver.OnGlobalLayoutListener? = null
+    var isNoteEditorImeActive: Boolean = false
+        private set
+    var isImeVisibleInInsets: Boolean = false
+        private set
+    var isAwaitingImeVisibility: Boolean = false
+        private set
 
     // Resize state
     var isResizing: Boolean = false
@@ -172,6 +178,30 @@ class FloatingMiniAppWindow(
     fun isDiagnosticModeForTesting(): Boolean = isDiagnosticMode
     fun getDiagnosticEditTextForTesting(): EditText? = diagnosticEditText
     fun getDiagnosticModeButtonForTesting(): TextView? = diagnosticModeButton
+    fun isNoteEditorImeActiveForTesting(): Boolean = isNoteEditorImeActive
+    fun isImeVisibleInInsetsForTesting(): Boolean = isImeVisibleInInsets
+    fun isAwaitingImeVisibilityForTesting(): Boolean = isAwaitingImeVisibility
+    fun deactivateEmbeddedEditorImeForTesting() {
+        deactivateEmbeddedEditorIme()
+    }
+    fun simulateImeVisibilityInsetsForTesting(visible: Boolean) {
+        if (visible) {
+            isImeVisibleInInsets = true
+            isAwaitingImeVisibility = false
+        } else {
+            if (isImeVisibleInInsets && isNoteEditorImeActive) {
+                deactivateEmbeddedEditorIme()
+            } else if (!isAwaitingImeVisibility && !isAwaitingWindowFocusForIme && !isDiagnosticAwaitingWindowFocus) {
+                val isDiagActive = isDiagnosticMode && (diagnosticEditText?.hasFocus() == true)
+                if (!isNoteEditorImeActive && !isDiagActive) {
+                    if ((layoutParams.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE) == 0 && !isResizing) {
+                        layoutParams.flags = layoutParams.flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                        applyLayoutUpdate()
+                    }
+                }
+            }
+        }
+    }
 
     fun getImeBridgeEditTextForTesting(): EditText? = imeBridgeEditText
     fun getFallbackEditTextForTesting(): EditText? = noteEditText
@@ -430,10 +460,23 @@ class FloatingMiniAppWindow(
                 "TestNotesImeDebug",
                 "IME_VISIBILITY_INSETS visible=$imeVisible height=$imeHeight"
             )
-            val isWaitingForIme = isAwaitingWindowFocusForIme || isDiagnosticAwaitingWindowFocus || (isDiagnosticMode && diagnosticEditText?.hasFocus() == true)
-            if (!imeVisible && (layoutParams.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE) == 0 && !isResizing && !isWaitingForIme) {
-                layoutParams.flags = layoutParams.flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
-                applyLayoutUpdate()
+
+            if (imeVisible) {
+                isImeVisibleInInsets = true
+                isAwaitingImeVisibility = false
+            } else {
+                if (isImeVisibleInInsets && isNoteEditorImeActive) {
+                    LogKeeper.log(context, "TestNotesImeDebug", "IME_DISMISSED_BY_USER insets")
+                    deactivateEmbeddedEditorIme()
+                } else if (!isAwaitingImeVisibility && !isAwaitingWindowFocusForIme && !isDiagnosticAwaitingWindowFocus) {
+                    val isDiagActive = isDiagnosticMode && (diagnosticEditText?.hasFocus() == true)
+                    if (!isNoteEditorImeActive && !isDiagActive) {
+                        if ((layoutParams.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE) == 0 && !isResizing) {
+                            layoutParams.flags = layoutParams.flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                            applyLayoutUpdate()
+                        }
+                    }
+                }
             }
             insets
         }
@@ -549,6 +592,8 @@ class FloatingMiniAppWindow(
         sessionId: String = "ime_${System.currentTimeMillis() % 100000}"
     ) {
         activeImeSessionId = sessionId
+        isNoteEditorImeActive = true
+        isAwaitingImeVisibility = true
         manager?.setFocus(windowId)
         if (manager?.getTopVisibleWindow()?.windowId != windowId) {
             manager?.bringToFront(windowId)
@@ -573,21 +618,42 @@ class FloatingMiniAppWindow(
         val bridge = imeBridgeEditText
         bridge?.requestFocus()
 
-        val alreadyHasFocus = (root?.hasWindowFocus() == true) || hasRealWindowFocus
-        if (alreadyHasFocus && bridge != null) {
+        val rootHasFocus = (root?.hasWindowFocus() == true) || hasRealWindowFocus
+        val bridgeHasFocus = bridge?.hasWindowFocus() == true
+        LogKeeper.log(
+            context,
+            "TestNotesImeDebug",
+            "TOUCH_WINDOW_FOCUS_CHECK sess=$sessionId rootHasFocus=$rootHasFocus bridgeHasFocus=$bridgeHasFocus hasRealWindowFocus=$hasRealWindowFocus"
+        )
+
+        if (rootHasFocus || bridgeHasFocus) {
             isAwaitingWindowFocusForIme = false
             triggerImeFocusOnBridge()
         } else {
             isAwaitingWindowFocusForIme = true
-            root?.post {
-                if (((root.hasWindowFocus()) || hasRealWindowFocus) && isAwaitingWindowFocusForIme) {
-                    isAwaitingWindowFocusForIme = false
-                    triggerImeFocusOnBridge()
-                } else if (isAwaitingWindowFocusForIme && bridge != null && bridge.windowToken != null) {
-                    triggerImeFocusOnBridge()
+            root?.postDelayed({
+                if (isAwaitingWindowFocusForIme) {
+                    val rFocus = root.hasWindowFocus() || hasRealWindowFocus
+                    val bFocus = bridge?.hasWindowFocus() == true
+                    val token = bridge?.windowToken != null
+                    LogKeeper.log(
+                        context,
+                        "TestNotesImeDebug",
+                        "AWAITING_WINDOW_FOCUS_POLL sess=$sessionId rootWinFocus=$rFocus bridgeWinFocus=$bFocus hasToken=$token"
+                    )
+                    if (rFocus || bFocus || token) {
+                        isAwaitingWindowFocusForIme = false
+                        triggerImeFocusOnBridge()
+                    }
                 }
-            }
+            }, 150)
         }
+
+        root?.postDelayed({
+            if (isAwaitingImeVisibility && !isImeVisibleInInsets) {
+                isAwaitingImeVisibility = false
+            }
+        }, 3000)
 
         LogKeeper.log(
             context,
@@ -599,10 +665,24 @@ class FloatingMiniAppWindow(
     private fun triggerImeFocusOnBridge() {
         val bridge = imeBridgeEditText ?: return
         val sess = activeImeSessionId
-        val isFocused = bridge.requestFocus()
-        val hasWinFocus = bridge.hasWindowFocus() || hasRealWindowFocus
         val isAttached = bridge.isAttachedToWindow
         val hasToken = bridge.windowToken != null
+        if (!isAttached || !hasToken) {
+            LogKeeper.log(
+                context,
+                "TestNotesImeDebug",
+                "BRIDGE_NOT_READY_FOR_IMM sess=$sess attached=$isAttached token=$hasToken - deferring to next frame"
+            )
+            bridge.post {
+                if (isNoteEditorImeActive && bridge.isAttachedToWindow && bridge.windowToken != null) {
+                    triggerImeFocusOnBridge()
+                }
+            }
+            return
+        }
+
+        val isFocused = bridge.requestFocus()
+        val hasWinFocus = bridge.hasWindowFocus() || hasRealWindowFocus
         LogKeeper.log(
             context,
             "TestNotesImeDebug",
@@ -610,6 +690,11 @@ class FloatingMiniAppWindow(
         )
 
         val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+        try {
+            imm?.viewClicked(bridge)
+            imm?.restartInput(bridge)
+        } catch (_: Throwable) {}
+
         val showResult = imm?.showSoftInput(bridge, InputMethodManager.SHOW_IMPLICIT) ?: false
         var insetsResult = false
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -622,6 +707,37 @@ class FloatingMiniAppWindow(
             context,
             "TestNotesImeDebug",
             "SHOW_SOFT_INPUT_RESULT sess=$sess result=$showResult insetsControllerResult=$insetsResult"
+        )
+    }
+
+    /**
+     * Safely ends the embedded Note editor IME session, clearing focus and re-arming FLAG_NOT_FOCUSABLE.
+     */
+    fun deactivateEmbeddedEditorIme() {
+        if (!isNoteEditorImeActive && !isAwaitingWindowFocusForIme && !isAwaitingImeVisibility) return
+        val wasActive = isNoteEditorImeActive
+        isNoteEditorImeActive = false
+        isAwaitingWindowFocusForIme = false
+        isImeVisibleInInsets = false
+        isAwaitingImeVisibility = false
+
+        val bridge = imeBridgeEditText
+        bridge?.clearFocus()
+
+        val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+        try {
+            imm?.hideSoftInputFromWindow(bridge?.windowToken, 0)
+        } catch (_: Throwable) {}
+
+        if ((layoutParams.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE) == 0 && !isResizing) {
+            layoutParams.flags = layoutParams.flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+            applyLayoutUpdate()
+        }
+
+        LogKeeper.log(
+            context,
+            "TestNotesImeDebug",
+            "EDITOR_FOCUS_DEACTIVATED id=$instanceId wasActive=$wasActive"
         )
     }
 
@@ -2143,6 +2259,8 @@ class FloatingMiniAppWindow(
             val isKeyboardOpen = keypadHeight > screenH * 0.15
 
             if (isKeyboardOpen) {
+                isImeVisibleInInsets = true
+                isAwaitingImeVisibility = false
                 if (isMaximized) {
                     return@OnGlobalLayoutListener
                 }
@@ -2175,17 +2293,23 @@ class FloatingMiniAppWindow(
                         applyLayoutUpdate()
                     }
                 }
-            } else if (isImeShifted) {
-                // Restore exact persistent normalFloatingBounds.y on keyboard dismiss
-                val restoredY = normalFloatingBounds.y
-                LogKeeper.log(context, "FloatingMiniAppWindow", "IME_HIDDEN")
-                LogKeeper.log(context, "FloatingMiniAppWindow", "IME_TEMP_RESTORE id=$instanceId restoredY=$restoredY")
-                layoutParams.y = restoredY
-                bounds.y = restoredY
-                isImeShifted = false
-                imeShiftOffsetY = 0
-                LogKeeper.log(context, "FloatingMiniAppWindow", "IME_RESTORE id=$instanceId y=$restoredY")
-                applyLayoutUpdate()
+            } else {
+                if (isImeVisibleInInsets && isNoteEditorImeActive) {
+                    LogKeeper.log(context, "TestNotesImeDebug", "IME_DISMISSED_BY_USER globalLayout")
+                    deactivateEmbeddedEditorIme()
+                }
+                if (isImeShifted) {
+                    // Restore exact persistent normalFloatingBounds.y on keyboard dismiss
+                    val restoredY = normalFloatingBounds.y
+                    LogKeeper.log(context, "FloatingMiniAppWindow", "IME_HIDDEN")
+                    LogKeeper.log(context, "FloatingMiniAppWindow", "IME_TEMP_RESTORE id=$instanceId restoredY=$restoredY")
+                    layoutParams.y = restoredY
+                    bounds.y = restoredY
+                    isImeShifted = false
+                    imeShiftOffsetY = 0
+                    LogKeeper.log(context, "FloatingMiniAppWindow", "IME_RESTORE id=$instanceId y=$restoredY")
+                    applyLayoutUpdate()
+                }
             }
         }
         globalLayoutListener = listener
@@ -2198,6 +2322,8 @@ class FloatingMiniAppWindow(
     fun simulateImeVisibilityForTesting(isKeyboardOpen: Boolean, keypadHeight: Int, displayBottom: Int) {
         val r = Rect(0, 0, bounds.width, displayBottom)
         if (isKeyboardOpen) {
+            isImeVisibleInInsets = true
+            isAwaitingImeVisibility = false
             if (isMaximized) return
             val baselineY = normalFloatingBounds.y
             val windowBottom = baselineY + normalFloatingBounds.height
@@ -2214,13 +2340,18 @@ class FloatingMiniAppWindow(
                     applyLayoutUpdate()
                 }
             }
-        } else if (isImeShifted) {
-            val restoredY = normalFloatingBounds.y
-            layoutParams.y = restoredY
-            bounds.y = restoredY
-            isImeShifted = false
-            imeShiftOffsetY = 0
-            applyLayoutUpdate()
+        } else {
+            if (isImeVisibleInInsets && isNoteEditorImeActive) {
+                deactivateEmbeddedEditorIme()
+            }
+            if (isImeShifted) {
+                val restoredY = normalFloatingBounds.y
+                layoutParams.y = restoredY
+                bounds.y = restoredY
+                isImeShifted = false
+                imeShiftOffsetY = 0
+                applyLayoutUpdate()
+            }
         }
     }
 
@@ -2317,6 +2448,7 @@ class FloatingMiniAppWindow(
 
     override fun onHide() {
         super.onHide()
+        deactivateEmbeddedEditorIme()
         val connectionManager = HeavyProcessConnectionManager.getInstance(context)
         val cmd = HeavyCommand(
             commandId = UUID.randomUUID().toString(),
@@ -2347,6 +2479,7 @@ class FloatingMiniAppWindow(
 
     override fun onDestroy() {
         super.onDestroy()
+        deactivateEmbeddedEditorIme()
         HeavyProcessConnectionManager.getInstance(context).removeListener(connectionListener)
         globalLayoutListener?.let {
             getView()?.viewTreeObserver?.removeOnGlobalLayoutListener(it)

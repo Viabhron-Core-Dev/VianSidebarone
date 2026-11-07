@@ -1524,5 +1524,102 @@ class FloatingMiniAppFrameworkTest {
         window.revealEmbeddedContentForTesting("test_idempotent")
         assertTrue("Idempotent reveal must maintain revealed state", window.isContentRevealedForTesting())
     }
+
+    @Test
+    fun testNoteEditorImeFocusLockLifecycleAndSync() {
+        val window = FloatingMiniAppWindow("ime_lifecycle_test_1", testContext, "note")
+        val root = window.createContentView(testContext)
+        assertNotNull(root)
+
+        // 1. Initial State: not focusable by default
+        assertFalse("Note editor IME should initially be inactive", window.isNoteEditorImeActiveForTesting())
+        assertTrue(
+            "FLAG_NOT_FOCUSABLE must be present by default",
+            (window.layoutParams.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE) != 0
+        )
+
+        // 2. Heavy Editor Focus Activation
+        window.activateEmbeddedEditorIme("Initial test note", 17, 17, "test_session_1")
+        assertTrue("Note editor IME should be active after activation", window.isNoteEditorImeActiveForTesting())
+        assertTrue("Window should be awaiting IME visibility", window.isAwaitingImeVisibilityForTesting())
+        assertEquals(
+            "FLAG_NOT_FOCUSABLE must be cleared for IME session",
+            0,
+            window.layoutParams.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+        )
+        assertEquals(
+            "FLAG_ALT_FOCUSABLE_IM must be cleared for IME session",
+            0,
+            window.layoutParams.flags and WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM
+        )
+        assertEquals(
+            "Bridge text must be initialized with the active note content",
+            "Initial test note",
+            window.getImeBridgeEditTextForTesting()?.text?.toString() ?: window.getAuthoritativeNoteText()
+        )
+
+        // 3. WindowInsets focus race prevention:
+        // Insets dispatch occurs immediately when window layout updates, with imeVisible = false
+        window.simulateImeVisibilityInsetsForTesting(false)
+        assertEquals(
+            "Window must REMAIN focusable while awaiting IME visibility (focus race prevented)",
+            0,
+            window.layoutParams.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+        )
+
+        // 4. Keyboard becomes visible
+        window.simulateImeVisibilityInsetsForTesting(true)
+        assertTrue("IME should be marked visible in insets", window.isImeVisibleInInsetsForTesting())
+        assertFalse("Awaiting IME visibility flag should be cleared once visible", window.isAwaitingImeVisibilityForTesting())
+        assertEquals(
+            "Window remains focusable while keyboard is open",
+            0,
+            window.layoutParams.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+        )
+
+        // 5. User typing on IME bridge
+        window.simulateBridgeTextInputForTesting("Initial test note - updated live")
+        assertEquals(
+            "Authoritative text must be updated from bridge",
+            "Initial test note - updated live",
+            window.getAuthoritativeNoteText()
+        )
+
+        // 6. Keyboard dismissed by user
+        window.simulateImeVisibilityInsetsForTesting(false)
+        assertFalse("IME session should deactivate on keyboard dismiss", window.isNoteEditorImeActiveForTesting())
+        assertTrue(
+            "FLAG_NOT_FOCUSABLE must be restored after keyboard dismissal",
+            (window.layoutParams.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE) != 0
+        )
+    }
+
+    @Test
+    fun testNoteEditorImeDeactivationOnHideAndDestroy() {
+        val window = FloatingMiniAppWindow("ime_hide_test_1", testContext, "note")
+        val root = window.createContentView(testContext)
+        assertNotNull(root)
+
+        // Activate IME
+        window.activateEmbeddedEditorIme("Note text", 9, 9, "test_session_2")
+        assertTrue(window.isNoteEditorImeActiveForTesting())
+        assertEquals(0, window.layoutParams.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE)
+
+        // Hide window (fold / minimize)
+        window.onHide()
+        assertFalse("IME session must be deactivated when window hides", window.isNoteEditorImeActiveForTesting())
+        assertTrue(
+            "FLAG_NOT_FOCUSABLE must be restored on hide",
+            (window.layoutParams.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE) != 0
+        )
+
+        // Reactivate and destroy
+        window.activateEmbeddedEditorIme("Note text 2", 11, 11, "test_session_3")
+        assertTrue(window.isNoteEditorImeActiveForTesting())
+        assertEquals(0, window.layoutParams.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE)
+
+        window.onDestroy()
+        assertFalse("IME session must be deactivated when window is destroyed", window.isNoteEditorImeActiveForTesting())
+    }
 }
 

@@ -415,6 +415,22 @@
   - Zero-PII diagnostics logging touch events, focus transitions, window flags, connection nullability, and text length/selection.
   - Unit test `testIsolatedMainProcessImeDiagnosticModeTestA()` added; 37/37 framework tests passing 100%.
 
+- [x] **Phase 13.6: Floating Mini-App Initial Rendering Delay & Transparent Flash Fix**:
+  - Diagnosed initial transparency / un-rendered hole on opening/waking floating mini-apps.
+  - Added zero-PII timing logs in `HeavyPageHostManager`, `TestNotesMiniApp`, and `FloatingMiniAppWindow` using `SystemClock.elapsedRealtime()`.
+  - Added neutral 16dp rounded content placeholder (`contentPlaceholderView`) in `FloatingMiniAppWindow` container to mask un-rendered surface frames cleanly.
+  - Primed `lastRelayoutWidth = w` and `lastRelayoutHeight = h` in `tryAttachSurfacePackage()` to eliminate redundant IPC relayout during initial frame rendering.
+  - Implemented `miniapp_frame_committed` signal via `registerFrameCommitCallback` on Q+ in `:heavy` to notify Main when the first frame is drawn; Main unmasks surface and dismisses placeholder with 400ms fallback.
+  - Unit test `testContentPlaceholderAndFrameRevealTiming()` added; all 38 framework tests passing 100%.
+
+- [x] **Phase 13.7: Heavy Note Editor Typing Fix (IME Insets Focus Race & IMM Binding)**:
+  - Repaired WindowInsets focus race in `FloatingMiniAppWindow.kt`: added `isNoteEditorImeActive`, `isImeVisibleInInsets`, and `isAwaitingImeVisibility` state tracking, preventing `setOnApplyWindowInsetsListener` from prematurely re-arming `FLAG_NOT_FOCUSABLE` before soft keyboard opens.
+  - Implemented `deactivateEmbeddedEditorIme()` to safely restore `FLAG_NOT_FOCUSABLE`, clear bridge focus, and hide IME when keyboard is dismissed by user, or when the window folds/hides (`onHide()`) or closes (`onDestroy()`).
+  - Repaired InputMethodManager target binding in `triggerImeFocusOnBridge()`: verified bridge view attachment and valid window token, invoked `imm.viewClicked(bridge)` and `imm.restartInput(bridge)` before `imm.showSoftInput()`, and added `windowInsetsController?.show(WindowInsets.Type.ime())` on API 30+.
+  - Preserved Heavy authoritative data model: kept live text sync via `syncLiveTextToHeavy` and native `TextWatcher` without echo loops.
+  - Preserved Test A diagnostic mode and Phase 13.6 rendering updates completely.
+  - Added unit tests `testNoteEditorImeFocusLockLifecycleAndSync()` and `testNoteEditorImeDeactivationOnHideAndDestroy()` in `FloatingMiniAppFrameworkTest.kt`; all 40 tests passing 100%.
+
 ---
 
 
