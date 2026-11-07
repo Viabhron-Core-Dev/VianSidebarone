@@ -1160,7 +1160,13 @@ class FloatingMiniAppFrameworkTest {
         // 3. Activate IME Bridge and verify FLAG_NOT_FOCUSABLE is cleared
         val testNote = "Diagnostic testing of IME bridge\nSecond line"
         val testSess = "diag_sess_42"
-        window.activateEmbeddedEditorIme(testNote, 10, 10, testSess)
+        val prevExp = FloatingMiniAppWindow.EXPERIMENT_HEAVY_NATIVE_IME
+        try {
+            FloatingMiniAppWindow.EXPERIMENT_HEAVY_NATIVE_IME = false
+            window.activateEmbeddedEditorIme(testNote, 10, 10, testSess)
+        } finally {
+            FloatingMiniAppWindow.EXPERIMENT_HEAVY_NATIVE_IME = prevExp
+        }
 
         val hasNotFocusableAfterActivation = (window.layoutParams.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE) != 0
         assertFalse("FLAG_NOT_FOCUSABLE must be cleared upon activateEmbeddedEditorIme", hasNotFocusableAfterActivation)
@@ -1539,7 +1545,13 @@ class FloatingMiniAppFrameworkTest {
         )
 
         // 2. Heavy Editor Focus Activation
-        window.activateEmbeddedEditorIme("Initial test note", 17, 17, "test_session_1")
+        val prevExp = FloatingMiniAppWindow.EXPERIMENT_HEAVY_NATIVE_IME
+        try {
+            FloatingMiniAppWindow.EXPERIMENT_HEAVY_NATIVE_IME = false
+            window.activateEmbeddedEditorIme("Initial test note", 17, 17, "test_session_1")
+        } finally {
+            FloatingMiniAppWindow.EXPERIMENT_HEAVY_NATIVE_IME = prevExp
+        }
         assertTrue("Note editor IME should be active after activation", window.isNoteEditorImeActiveForTesting())
         assertTrue("Window should be awaiting IME visibility", window.isAwaitingImeVisibilityForTesting())
         assertEquals(
@@ -1649,6 +1661,24 @@ class FloatingMiniAppFrameworkTest {
         val tags = com.example.core.FloatingMiniAppLogFilter.MINI_APP_COMPONENT_TAGS
         assertTrue("FloatingMiniAppLogFilter must include MiniAppLaunchRouting", tags.contains("MiniAppLaunchRouting"))
         assertTrue("FloatingMiniAppLogFilter must include TestNotesImeDebug", tags.contains("TestNotesImeDebug"))
+    }
+
+    @Test
+    fun testPhase14HeavyNativeImeExperimentToggle() {
+        // Verify toggle state and behavior
+        val defaultVal = FloatingMiniAppWindow.EXPERIMENT_HEAVY_NATIVE_IME
+        assertTrue("Phase 14.1 experiment toggle should default to true during live experiment", defaultVal)
+
+        val window = FloatingMiniAppWindow("phase14_test_inst", testContext, "note")
+        window.createContentView(testContext)
+
+        // When EXPERIMENT_HEAVY_NATIVE_IME is true:
+        FloatingMiniAppWindow.EXPERIMENT_HEAVY_NATIVE_IME = true
+        window.activateEmbeddedEditorIme("Test note text", 5, 5, "exp_sess_1")
+        assertEquals(0, window.layoutParams.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE)
+
+        // Reset to default
+        FloatingMiniAppWindow.EXPERIMENT_HEAVY_NATIVE_IME = defaultVal
     }
 }
 

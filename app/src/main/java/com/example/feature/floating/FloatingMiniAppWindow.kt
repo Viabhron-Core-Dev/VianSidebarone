@@ -625,43 +625,56 @@ class FloatingMiniAppWindow(
             applyLayoutUpdate()
         }
 
-        updateImeBridgeTextAndSelection(text, selStart, selEnd)
-
-        val root = getView()
-        val bridge = imeBridgeEditText
-        bridge?.requestFocus()
-
-        val rootHasFocus = (root?.hasWindowFocus() == true) || hasRealWindowFocus
-        val bridgeHasFocus = bridge?.hasWindowFocus() == true
-        LogKeeper.log(
-            context,
-            "TestNotesImeDebug",
-            "TOUCH_WINDOW_FOCUS_CHECK sess=$sessionId rootHasFocus=$rootHasFocus bridgeHasFocus=$bridgeHasFocus hasRealWindowFocus=$hasRealWindowFocus"
-        )
-
-        if (rootHasFocus || bridgeHasFocus) {
-            isAwaitingWindowFocusForIme = false
-            triggerImeFocusOnBridge()
+        if (EXPERIMENT_HEAVY_NATIVE_IME) {
+            // PHASE 14.1 EXPERIMENT:
+            // Do NOT update or focus Main's imeBridgeEditText.
+            // Let Main clear FLAG_NOT_FOCUSABLE so the window is focusable, while Heavy's EmbeddedNoteEditText
+            // receives native window focus and attempts to establish its own InputConnection.
+            LogKeeper.log(
+                context,
+                "TestNotesImeDebug",
+                "PHASE_14_1_EXP_MAIN_FOCUS_CARRIER_ARMED sess=$sessionId flags=0x${Integer.toHexString(focusClearedFlags)} bridgeActivationSkipped=true"
+            )
         } else {
-            isAwaitingWindowFocusForIme = true
-            root?.postDelayed({
-                if (isAwaitingWindowFocusForIme) {
-                    val rFocus = root.hasWindowFocus() || hasRealWindowFocus
-                    val bFocus = bridge?.hasWindowFocus() == true
-                    val token = bridge?.windowToken != null
-                    LogKeeper.log(
-                        context,
-                        "TestNotesImeDebug",
-                        "AWAITING_WINDOW_FOCUS_POLL sess=$sessionId rootWinFocus=$rFocus bridgeWinFocus=$bFocus hasToken=$token"
-                    )
-                    if (rFocus || bFocus || token) {
-                        isAwaitingWindowFocusForIme = false
-                        triggerImeFocusOnBridge()
+            updateImeBridgeTextAndSelection(text, selStart, selEnd)
+
+            val root = getView()
+            val bridge = imeBridgeEditText
+            bridge?.requestFocus()
+
+            val rootHasFocus = (root?.hasWindowFocus() == true) || hasRealWindowFocus
+            val bridgeHasFocus = bridge?.hasWindowFocus() == true
+            LogKeeper.log(
+                context,
+                "TestNotesImeDebug",
+                "TOUCH_WINDOW_FOCUS_CHECK sess=$sessionId rootHasFocus=$rootHasFocus bridgeHasFocus=$bridgeHasFocus hasRealWindowFocus=$hasRealWindowFocus"
+            )
+
+            if (rootHasFocus || bridgeHasFocus) {
+                isAwaitingWindowFocusForIme = false
+                triggerImeFocusOnBridge()
+            } else {
+                isAwaitingWindowFocusForIme = true
+                root?.postDelayed({
+                    if (isAwaitingWindowFocusForIme) {
+                        val rFocus = root.hasWindowFocus() || hasRealWindowFocus
+                        val bFocus = bridge?.hasWindowFocus() == true
+                        val token = bridge?.windowToken != null
+                        LogKeeper.log(
+                            context,
+                            "TestNotesImeDebug",
+                            "AWAITING_WINDOW_FOCUS_POLL sess=$sessionId rootWinFocus=$rFocus bridgeWinFocus=$bFocus hasToken=$token"
+                        )
+                        if (rFocus || bFocus || token) {
+                            isAwaitingWindowFocusForIme = false
+                            triggerImeFocusOnBridge()
+                        }
                     }
-                }
-            }, 150)
+                }, 150)
+            }
         }
 
+        val root = getView()
         root?.postDelayed({
             if (isAwaitingImeVisibility && !isImeVisibleInInsets) {
                 isAwaitingImeVisibility = false
@@ -2553,5 +2566,15 @@ class FloatingMiniAppWindow(
 
     companion object {
         const val TYPE_MINIAPP = "miniapp"
+
+        /**
+         * Phase 14.1 Controlled Experiment toggle:
+         * When true, Main skips requesting focus and showing IME on imeBridgeEditText,
+         * serving strictly as the Focus Carrier window while Heavy's EmbeddedNoteEditText
+         * requests focus and triggers its own native InputConnection.
+         * Default is true for live physical-device experiment.
+         */
+        @Volatile
+        var EXPERIMENT_HEAVY_NATIVE_IME: Boolean = true
     }
 }

@@ -71,3 +71,27 @@ Capped at 500 lines per file.
 * Any deviation from what was requested, and why: None.
 * Any known issue or follow-up needed: On-device testing required to collect `ROUTING_DIAG` trace upon tapping Sidebar Edit and `TOUCH_BOUNDARY` trace upon tapping the Note editor.
 
+---
+
+### Receipt 103 — Phase 14.1 Controlled Heavy-Native IME Experiment
+* Timestamp: 2026-11-07T14:34:00-08:00
+* One-line summary of what was requested: Configure a controlled, reversible experiment to determine whether the Heavy process can directly own the active Android InputConnection through SurfaceControlViewHost by having Main act strictly as the Focus Carrier while Heavy requests focus and triggers soft input.
+* Exact files touched:
+  - `app/src/main/java/com/example/feature/floating/FloatingMiniAppWindow.kt`
+  - `app/src/main/java/com/example/feature/floating/TestNotesMiniApp.kt`
+  - `app/src/test/java/com/example/feature/floating/FloatingMiniAppFrameworkTest.kt`
+  - `receipts/RECEIPTS_100.md`
+* What was actually done — factual, not persuasive:
+  - Added `FloatingMiniAppWindow.EXPERIMENT_HEAVY_NATIVE_IME` toggle (default `true` for live physical-device experiment).
+  - In `FloatingMiniAppWindow.kt`: When `EXPERIMENT_HEAVY_NATIVE_IME` is `true`, `activateEmbeddedEditorIme` clears `FLAG_NOT_FOCUSABLE` and `FLAG_ALT_FOCUSABLE_IM` to arm window focus, but intentionally skips requesting focus on `imeBridgeEditText` and skips calling `triggerImeFocusOnBridge()`. Main acts strictly as the Focus Carrier window.
+  - In `TestNotesMiniApp.kt`:
+    1. On `ACTION_UP`, `EmbeddedNoteEditText` requests focus via `requestFocus()`, invokes `imm.viewClicked(this)` and `imm.showSoftInput(this, InputMethodManager.SHOW_IMPLICIT)`, and calls `windowInsetsController?.show(WindowInsets.Type.ime())` on API 30+.
+    2. Emits structured diagnostic log `PHASE_14_1_HEAVY_SHOW_IME_ATTEMPT` logging `immClicked`, `showSoftResult`, `insetsResult`, `hasWinFocus`, and `tokenNull`.
+    3. Wrapped `onCreateInputConnection()` in `InputConnectionWrapper` to log typing events (`commitText`, `setComposingText`, `finishComposingText`, `deleteSurroundingText`, `setSelection`) without capturing PII.
+  - In `FloatingMiniAppFrameworkTest.kt`: Added `testPhase14HeavyNativeImeExperimentToggle` verifying the toggle state and window focus clearing. Maintained 100% test compatibility for existing bridge tests by scoping toggle overrides.
+  - Reversibility: The experiment is 100% reversible by setting `FloatingMiniAppWindow.EXPERIMENT_HEAVY_NATIVE_IME = false` or reverting the 2 touched source files.
+* How it was verified: local build only (`compile_applet` passed, 43/43 tests in `FloatingMiniAppFrameworkTest` passed) — on-device claim only / not tested on physical hardware. Physical on-device execution required to observe whether Gboard opens and whether Heavy's `InputConnection` is served.
+* Any deviation from what was requested, and why: None.
+* Any known issue or follow-up needed: Physical on-device test required to check Log Keeper for `PHASE_14_1_HEAVY_SHOW_IME_ATTEMPT` and `INPUT_CONNECTION_CREATED` and observe keyboard typing.
+
+

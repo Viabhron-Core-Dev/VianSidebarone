@@ -22,6 +22,7 @@ import android.view.View
 import android.view.ViewTreeObserver
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
+import android.view.inputmethod.InputConnectionWrapper
 import android.view.inputmethod.InputMethodManager
 import android.widget.EditText
 import android.widget.LinearLayout
@@ -348,28 +349,51 @@ class EmbeddedNoteEditText(
         }
         if (action == MotionEvent.ACTION_UP) {
             val sess = activeTouchSessionId ?: "ime_${System.currentTimeMillis() % 100000}"
-            if (!hasFocus()) {
-                requestFocus()
-            }
+            val focused = if (!hasFocus()) requestFocus() else true
             isCursorVisible = true
 
-            // Architectural fix: Main process exclusively owns the Android window token and soft keyboard InputConnection.
-            // In a windowless SurfaceControlViewHost, calling imm.showSoftInput or windowInsetsController?.show creates
-            // an architectural race/conflict. Main activates the IME bridge and drives the keyboard.
             val currentText = text?.toString() ?: ""
             val sStart = selectionStart.coerceIn(0, currentText.length)
             val sEnd = selectionEnd.coerceIn(0, currentText.length)
             LogKeeper.log(
                 viewContext,
                 "TestNotesImeDebug",
-                "TOUCH_BOUNDARY_6_HEAVY_EDITOR_TOUCH action=UP sess=$sess hasFocus=${hasFocus()} winFocus=${hasWindowFocus()} textLen=${currentText.length} sel=($sStart,$sEnd)"
+                "TOUCH_BOUNDARY_6_HEAVY_EDITOR_TOUCH action=UP sess=$sess hasFocus=${hasFocus()} winFocus=${hasWindowFocus()} reqFocusResult=$focused textLen=${currentText.length} sel=($sStart,$sEnd)"
             )
             LogKeeper.log(
                 viewContext,
                 "TestNotesImeDebug",
                 "HEAVY_EDITOR_FOCUS_REQUEST sess=$sess hasFocus=${hasFocus()} winFocus=${hasWindowFocus()} textLen=${currentText.length} sel=($sStart,$sEnd)"
             )
+
+            // Notify Main to clear FLAG_NOT_FOCUSABLE on the carrier overlay window
             onEditorFocusedOrTouched(currentText, sStart, sEnd, sess)
+
+            // PHASE 14.1 EXPERIMENT:
+            // Heavy natively requests soft keyboard through its own View and IMM context
+            try {
+                val imm = viewContext.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+                val clicked = try { imm?.viewClicked(this); true } catch (_: Throwable) { false }
+                val showSoftResult = imm?.showSoftInput(this, InputMethodManager.SHOW_IMPLICIT) ?: false
+                var insetsShowResult = false
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    try {
+                        windowInsetsController?.show(android.view.WindowInsets.Type.ime())
+                        insetsShowResult = true
+                    } catch (_: Throwable) {}
+                }
+                LogKeeper.log(
+                    viewContext,
+                    "TestNotesImeDebug",
+                    "PHASE_14_1_HEAVY_SHOW_IME_ATTEMPT sess=$sess immClicked=$clicked showSoftResult=$showSoftResult insetsResult=$insetsShowResult hasWinFocus=${hasWindowFocus()} tokenNull=${windowToken == null}"
+                )
+            } catch (t: Throwable) {
+                LogKeeper.log(
+                    viewContext,
+                    "TestNotesImeDebug",
+                    "PHASE_14_1_HEAVY_SHOW_IME_ERROR sess=$sess error=${t.javaClass.simpleName}"
+                )
+            }
         }
         return handled || true
     }
@@ -419,7 +443,7 @@ class EmbeddedNoteEditText(
     }
 
     override fun onCreateInputConnection(outAttrs: EditorInfo?): InputConnection? {
-        val ic = try {
+        val baseIc = try {
             super.onCreateInputConnection(outAttrs)
         } catch (_: Throwable) {
             null
@@ -427,9 +451,55 @@ class EmbeddedNoteEditText(
         LogKeeper.log(
             viewContext,
             "TestNotesImeDebug",
-            "INPUT_CONNECTION_CREATED target=heavy_embedded icNull=${ic == null} outAttrsType=${outAttrs?.inputType} imeOptions=${outAttrs?.imeOptions}"
+            "INPUT_CONNECTION_CREATED target=heavy_embedded icNull=${baseIc == null} outAttrsType=${outAttrs?.inputType} imeOptions=${outAttrs?.imeOptions} tokenNull=${windowToken == null}"
         )
-        return ic
+        if (baseIc == null) return null
+
+        // Wrap the InputConnection to trace typing, composition, cursor movements, and backspace during Phase 14.1 experiment
+        return object : InputConnectionWrapper(baseIc, true) {
+            override fun commitText(text: CharSequence?, newCursorPosition: Int): Boolean {
+                val len = text?.length ?: 0
+                LogKeeper.log(
+                    viewContext,
+                    "TestNotesImeDebug",
+                    "PHASE_14_1_HEAVY_IC_COMMIT_TEXT textLen=$len newCursorPos=$newCursorPosition"
+                )
+                return super.commitText(text, newCursorPosition)
+            }
+
+            override fun setComposingText(text: CharSequence?, newCursorPosition: Int): Boolean {
+                val len = text?.length ?: 0
+                LogKeeper.log(
+                    viewContext,
+                    "TestNotesImeDebug",
+                    "PHASE_14_1_HEAVY_IC_SET_COMPOSING textLen=$len newCursorPos=$newCursorPosition"
+                )
+                return super.setComposingText(text, newCursorPosition)
+            }
+
+            override fun finishComposingText(): Boolean {
+                LogKeeper.log(viewContext, "TestNotesImeDebug", "PHASE_14_1_HEAVY_IC_FINISH_COMPOSING")
+                return super.finishComposingText()
+            }
+
+            override fun deleteSurroundingText(beforeLength: Int, afterLength: Int): Boolean {
+                LogKeeper.log(
+                    viewContext,
+                    "TestNotesImeDebug",
+                    "PHASE_14_1_HEAVY_IC_DELETE_SURROUNDING before=$beforeLength after=$afterLength"
+                )
+                return super.deleteSurroundingText(beforeLength, afterLength)
+            }
+
+            override fun setSelection(start: Int, end: Int): Boolean {
+                LogKeeper.log(
+                    viewContext,
+                    "TestNotesImeDebug",
+                    "PHASE_14_1_HEAVY_IC_SET_SELECTION start=$start end=$end"
+                )
+                return super.setSelection(start, end)
+            }
+        }
     }
 
     override fun onSelectionChanged(selStart: Int, selEnd: Int) {
