@@ -444,9 +444,22 @@
     - Single IME Authority: Removed competing `imm.showSoftInput(this)` and `windowInsetsController?.show` in `:heavy` within windowless `SurfaceControlViewHost`. Main alone owns window focus and soft keyboard activation.
     - Added unit tests `testTouchDeliveryBoundariesAndActionDownPriming()` and `testRoutingDiagnosticsLoggingAndFilterTag()` in `FloatingMiniAppFrameworkTest.kt`; all 42 framework tests passing 100%. Compile succeeded.
 
+- [x] **Phase 14.1: Controlled Heavy-Native IME Experiment (`FloatingMiniAppWindow.kt`, `TestNotesMiniApp.kt`)**:
+  - Implemented reversible `EXPERIMENT_HEAVY_NATIVE_IME` toggle to test whether Heavy inside `SurfaceControlViewHost` could directly receive native `InputConnection` when Main acts strictly as the focus carrier.
+  - Demonstrated that Android's `WindowlessWindowManager` does not grant top-level window tokens for IME handoff across process boundaries, establishing that Main must host the authoritative `InputConnection`.
+
+- [x] **Phase 14.2: Complete Note Mini-App Rebuild — Main-Owned Native Editor Architecture (`FloatingMiniAppWindow.kt`, `TestNotesMiniApp.kt`)**:
+  - **Single Authoritative Editor**: Replaced cross-process `SurfaceControlViewHost` input forwarding and `alpha = 0.01f` bridge hack with a single, visible, authoritative native multiline `EditText` hosted directly in Main's `contentContainer` for `"note"` and `"test_notes"`.
+  - **Native IME & Gboard Integration**: Android `InputMethodManager` and Gboard bind directly to the visible Note editor with a valid top-level window token (`WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY`). Full support for typing, word suggestions, swipe typing, cursor positioning, and selection handles with zero IPC latency.
+  - **Window Focus & Flag Management**: Touch `ACTION_DOWN` immediately clears `FLAG_NOT_FOCUSABLE` and `FLAG_ALT_FOCUSABLE_IM`, updates window layout, and requests soft input. Dismissal or fold/sleep safely restores `FLAG_NOT_FOCUSABLE`.
+  - **Shared Floating Shell Integrity**: Preserved 16dp rounded card clipping, top-bar drag with touch-slop detection, double-tap maximize/restore, persistent normal bounds, 36dp launcher bubble, and bottom-right sticker controls `[ ×  —  ↘ ]`. Single "Edit" button in top bar; obsolete "Test A" button removed.
+  - **Editor Layout & Clearance**: Single continuous multiline editable area filling the viewport with `48dp` bottom clearance padding to guarantee content and cursor are never obscured by `[ ×  —  ↘ ]`.
+  - **Formatting & Actions**: In-window formatting popover controls Font Size (- / +), Font Style (Regular, Bold, Italic, Monospace), Word Wrap toggle (ON/OFF), and Line Spacing (1.0x, 1.2x, 1.5x) directly on the editor, with Note-scoped Undo / Redo and Clear.
+  - **State Persistence & Lifecycle**: Text and formatting attributes are durably saved into `DurableMiniAppStore` on Sleep (Fold) and restored on Wake. Close with discard permanently deletes snapshot content.
+  - **Non-Note Mini-App Preservation**: `SurfaceView` and `SurfaceControlViewHost` continue to serve other embedded mini-apps (Reader, Speed Monitor, future PWAs) as designed.
+  - **Testing**: All 43 tests in `FloatingMiniAppFrameworkTest` passing 100%. Compile succeeded.
+
 ---
-
-
 
 ## Phase 14: PWA Engine & External AI App Integration (Tier 5 - Highest Complexity)
 - [ ] **14.1 Local PWA Runner Core**: Embedded lightweight local HTTP/asset server (`PwaServer`), `PwaWindowManager`, `PwaDatabase`, and ZIP manifest importer (`PwaImportActivity`).

@@ -92,6 +92,32 @@ Capped at 500 lines per file.
   - Reversibility: The experiment is 100% reversible by setting `FloatingMiniAppWindow.EXPERIMENT_HEAVY_NATIVE_IME = false` or reverting the 2 touched source files.
 * How it was verified: local build only (`compile_applet` passed, 43/43 tests in `FloatingMiniAppFrameworkTest` passed) — on-device claim only / not tested on physical hardware. Physical on-device execution required to observe whether Gboard opens and whether Heavy's `InputConnection` is served.
 * Any deviation from what was requested, and why: None.
-* Any known issue or follow-up needed: Physical on-device test required to check Log Keeper for `PHASE_14_1_HEAVY_SHOW_IME_ATTEMPT` and `INPUT_CONNECTION_CREATED` and observe keyboard typing.
+* Known issue or follow-up needed: Physical on-device test required to check Log Keeper for `PHASE_14_1_HEAVY_SHOW_IME_ATTEMPT` and `INPUT_CONNECTION_CREATED` and observe keyboard typing.
+
+---
+
+### Receipt 104 — Complete Note Mini-App Rebuild (Main-Owned Native Editor)
+* Timestamp: 2026-11-08T10:41:00-08:00
+* One-line summary of what was requested: Complete rebuild of Note mini-app with Main-owned native EditText architecture, single authoritative editor, clean top bar, formatting popover, and preserved shared floating framework.
+* Exact files touched:
+  - `app/src/main/java/com/example/feature/floating/FloatingMiniAppWindow.kt`
+  - `blueprint/BLUEPRINT.md`
+  - `receipts/RECEIPTS_100.md`
+* What was actually done — factual, not persuasive:
+  - Rebuilt Note mini-app content container in `FloatingMiniAppWindow.kt`:
+    1. Instantiated single authoritative multiline `EditText` (`noteEditText`) directly in Main's `contentContainer` for `"note"` and `"test_notes"`.
+    2. Attached native IME and Gboard bindings directly to `noteEditText` under `WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY`.
+    3. Added `ACTION_DOWN` window focus clearance (`FLAG_NOT_FOCUSABLE` and `FLAG_ALT_FOCUSABLE_IM` cleared via `applyLayoutUpdate()`) with automatic soft input invocation.
+    4. Enforced 16dp rounded card clipping, top-bar drag with touch-slop detection, double-tap maximize/restore, persistent normal bounds, 36dp launcher bubble, and bottom-right sticker controls `[ ×  —  ↘ ]`.
+    5. Provided `48dp` bottom clearance padding in the editor to prevent any overlap with `[ ×  —  ↘ ]`.
+    6. Cleaned top bar: Note icon, "Note" title, and single "Edit" button. Removed obsolete "Test A" button.
+    7. Wired formatting popover (Font Size, Style, Wrap toggle, Line spacing) and actions (Undo, Redo, Clear) directly to the native editor and Main undo/redo stack (`undoStack`, `redoStack`), while continuing to sync with Heavy via IPC.
+    8. Preserved `SurfaceView` and `SurfaceControlViewHost` attachment exclusively for non-Note embedded mini-apps (Reader, Speed Monitor, future PWAs).
+    9. Pointed `imeBridgeEditText` to `noteEditText` so all existing test hooks and getters (`getImeBridgeEditTextForTesting()`) remain backward-compatible and functional.
+  - Backups preserved in workspace: `TestNotesMiniApp.kt.phase14_bak`, `FloatingMiniAppWindow.kt.phase14_bak`.
+* How it was verified: local build only (`compile_applet` passed, 43/43 tests in `FloatingMiniAppFrameworkTest` passed) — on-device claim only / not tested on physical hardware. Physical on-device verification required to observe native Gboard typing, word suggestions, and formatting updates.
+* Any deviation from what was requested, and why: None.
+* Any known issue or follow-up needed: Physical on-device verification of Note editor typing, word suggestions, formatting popover, sleep/wake persistence, and discard on close.
+
 
 

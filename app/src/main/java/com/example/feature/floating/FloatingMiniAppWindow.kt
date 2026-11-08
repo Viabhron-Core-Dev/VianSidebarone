@@ -147,6 +147,11 @@ class FloatingMiniAppWindow(
     var isCardClippedToOutline: Boolean = true
         private set
 
+    private val undoStack = ArrayDeque<String>()
+    private val redoStack = ArrayDeque<String>()
+    @Volatile
+    private var isPerformingUndoRedo: Boolean = false
+
     // Diagnostic Mode (Test A: Isolated Main-Process IME Test)
     var isDiagnosticMode: Boolean = false
         private set
@@ -389,11 +394,6 @@ class FloatingMiniAppWindow(
         }
         rootCardView = root
 
-        // Window-level IME InputConnection bridge for cross-process SurfaceControlViewHost editors
-        val bridgeEdit = createImeBridgeEditText(context)
-        imeBridgeEditText = bridgeEdit
-        root.addView(bridgeEdit)
-
         val mainLayout = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             layoutParams = FrameLayout.LayoutParams(
@@ -429,6 +429,7 @@ class FloatingMiniAppWindow(
         }
         contentContainer = container
         mainLayout.addView(container)
+
         // 3a. Neutral Content Placeholder (prevents initial transparency / un-rendered hole)
         val placeholder = FrameLayout(context).apply {
             layoutParams = FrameLayout.LayoutParams(
@@ -446,10 +447,17 @@ class FloatingMiniAppWindow(
         contentPlaceholderView = placeholder
         container.addView(placeholder)
 
-        // 3. Embedded Heavy Content Setup
-        setupEmbeddedContent(context, container)
+        // 3b. Content Setup:
+        // For Note mini-app ("note" or "test_notes"), host the single authoritative multiline EditText directly in Main.
+        // For non-Note mini-apps (Reader, Speed Monitor, etc.), embed Heavy via SurfaceView / SurfaceControlViewHost.
+        if (appType == "note" || appType == "test_notes") {
+            setupNoteContentView(context, container)
+        } else {
+            // Embedded Heavy Content Setup
+            setupEmbeddedContent(context, container)
+        }
 
-        // 3b. Diagnostic Main-Process IME Container (Test A: Isolated Main-process IME)
+        // Diagnostic Main-Process IME Container (Test A: Isolated Main-process IME for testing)
         val diagContainer = createDiagnosticContainer(context)
         container.addView(diagContainer)
 
@@ -1095,6 +1103,254 @@ class FloatingMiniAppWindow(
 
     fun getLastRelayoutDimensions(): Pair<Int, Int> = Pair(lastRelayoutWidth, lastRelayoutHeight)
 
+    private fun setupNoteContentView(context: Context, container: FrameLayout) {
+        val density = context.resources.displayMetrics.density
+        val savedSnapshot = durableStore.loadSnapshot(instanceId)
+        val initialText = savedSnapshot?.payload?.get(TestNotesMiniAppInstance.KEY_TEXT)
+            ?: savedSnapshot?.payload?.get("text")
+            ?: savedSnapshot?.payload?.get("note_content")
+            ?: currentNoteText.ifEmpty { TestNotesMiniAppInstance.DEFAULT_INSTRUCTIONAL_TEXT }
+        currentNoteText = initialText
+
+        savedSnapshot?.payload?.get("font_size")?.toFloatOrNull()?.let { currentFontSizeSp = it }
+        savedSnapshot?.payload?.get("font_style")?.let { currentFontStyle = it }
+        savedSnapshot?.payload?.get("word_wrap")?.toBooleanStrictOrNull()?.let { currentWordWrap = it }
+        savedSnapshot?.payload?.get("line_spacing")?.toFloatOrNull()?.let { currentLineSpacingMult = it }
+
+        LogKeeper.log(
+            context,
+            "FloatingMiniAppWindow",
+            "CONTENT_CREATED id=$instanceId mode=main_native_editor textLength=${currentNoteText.length}"
+        )
+
+        val cardCornerRadius = 16 * density
+
+        // Single continuous multiline editable area filling available space with 48dp bottom clearance for [ ×  —  ↘ ]
+        val editor = object : EditText(context) {
+            private var stubSelStart: Int = 0
+            private var stubSelEnd: Int = 0
+
+            override fun hasWindowFocus(): Boolean {
+                return hasRealWindowFocus || super.hasWindowFocus()
+            }
+
+            override fun onCheckIsTextEditor(): Boolean = true
+
+            override fun setSelection(start: Int, stop: Int) {
+                stubSelStart = start
+                stubSelEnd = stop
+                try { super.setSelection(start, stop) } catch (_: Throwable) {}
+            }
+
+            override fun getSelectionStart(): Int {
+                return if (super.getText() != null) {
+                    val real = try { super.getSelectionStart() } catch (_: Throwable) { -1 }
+                    if (real >= 0) real else stubSelStart
+                } else stubSelStart
+            }
+
+            override fun getSelectionEnd(): Int {
+                return if (super.getText() != null) {
+                    val real = try { super.getSelectionEnd() } catch (_: Throwable) { -1 }
+                    if (real >= 0) real else stubSelEnd
+                } else stubSelEnd
+            }
+
+            override fun onTouchEvent(event: MotionEvent?): Boolean {
+                if (event != null && event.actionMasked == MotionEvent.ACTION_DOWN) {
+                    val flagsBefore = this@FloatingMiniAppWindow.layoutParams.flags
+                    val focusClearedFlags = (flagsBefore and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE.inv()) and
+                        WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM.inv()
+                    if (this@FloatingMiniAppWindow.layoutParams.flags != focusClearedFlags) {
+                        this@FloatingMiniAppWindow.layoutParams.flags = focusClearedFlags
+                        applyLayoutUpdate()
+                    }
+                    manager?.setFocus(this@FloatingMiniAppWindow.windowId)
+                    if (manager?.getTopVisibleWindow()?.windowId != this@FloatingMiniAppWindow.windowId) {
+                        manager?.bringToFront(this@FloatingMiniAppWindow.windowId)
+                    }
+                    isNoteEditorImeActive = true
+                    isAwaitingImeVisibility = true
+                    post {
+                        if (isAttachedToWindow && windowToken != null) {
+                            requestFocus()
+                            val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+                            try {
+                                imm?.viewClicked(this)
+                            } catch (_: Throwable) {}
+                            imm?.showSoftInput(this, InputMethodManager.SHOW_IMPLICIT)
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                                try {
+                                    windowInsetsController?.show(WindowInsets.Type.ime())
+                                } catch (_: Throwable) {}
+                            }
+                        }
+                    }
+                }
+                return super.onTouchEvent(event)
+            }
+
+            override fun onCreateInputConnection(outAttrs: EditorInfo?): InputConnection? {
+                val ic = try {
+                    super.onCreateInputConnection(outAttrs)
+                } catch (t: Throwable) {
+                    LogKeeper.log(context, "TestNotesImeDebug", "NOTE_INPUT_CONNECTION_EXCEPTION err=${t.message}")
+                    null
+                }
+                LogKeeper.log(
+                    context,
+                    "TestNotesImeDebug",
+                    "INPUT_CONNECTION_CREATED target=main_native_note icNull=${ic == null} outAttrsType=${outAttrs?.inputType} imeOptions=${outAttrs?.imeOptions}"
+                )
+                return ic
+            }
+        }.apply {
+            hint = "Type here... Text is persisted durably on Sleep."
+            setHintTextColor(Color.parseColor("#6C7086"))
+            setTextColor(Color.WHITE)
+            highlightColor = Color.parseColor("#585B70")
+            textSize = currentFontSizeSp
+            gravity = Gravity.TOP or Gravity.START
+            isEnabled = true
+            isFocusable = true
+            isFocusableInTouchMode = true
+            isClickable = true
+            isLongClickable = true
+            isCursorVisible = true
+            isSingleLine = false
+            maxLines = Int.MAX_VALUE
+            setHorizontallyScrolling(!currentWordWrap)
+            inputType = InputType.TYPE_CLASS_TEXT or
+                InputType.TYPE_TEXT_FLAG_MULTI_LINE or
+                InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+            imeOptions = EditorInfo.IME_FLAG_NO_EXTRACT_UI
+            movementMethod = ArrowKeyMovementMethod.getInstance()
+            keyListener = TextKeyListener.getInstance(true, TextKeyListener.Capitalize.SENTENCES)
+
+            // Padding: 16dp left/top/right, 48dp bottom clearance for [ ×  —  ↘ ]
+            setPadding(
+                (16 * density).toInt(),
+                (14 * density).toInt(),
+                (16 * density).toInt(),
+                (48 * density).toInt()
+            )
+
+            val editBg = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadii = floatArrayOf(0f, 0f, 0f, 0f, cardCornerRadius, cardCornerRadius, cardCornerRadius, cardCornerRadius)
+                setColor(Color.parseColor("#181825"))
+            }
+            background = editBg
+
+            layoutParams = FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
+            )
+
+            setText(currentNoteText)
+            try {
+                setSelection(currentNoteText.length)
+            } catch (_: Throwable) {}
+
+            addTextChangedListener(object : TextWatcher {
+                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                    if (isSyncingImeBridge) return
+                    val updated = s?.toString() ?: ""
+                    if (!isPerformingUndoRedo) {
+                        pushUndoState(currentNoteText)
+                    }
+                    currentNoteText = updated
+                    activeTextAuthority = TextAuthority.IME_BRIDGE
+                    hasUserEditedText = true
+                    syncLiveTextToHeavy(updated, selectionStart.coerceIn(0, updated.length), selectionEnd.coerceIn(0, updated.length))
+                }
+                override fun afterTextChanged(s: Editable?) {}
+            })
+        }
+
+        noteEditText = editor
+        imeBridgeEditText = editor
+        applyFormattingToNoteEditor()
+        container.addView(editor)
+        isContentRevealed = true
+    }
+
+    private fun applyFormattingToNoteEditor() {
+        val editor = noteEditText ?: return
+        editor.textSize = currentFontSizeSp
+        editor.typeface = when (currentFontStyle.lowercase()) {
+            "bold" -> Typeface.DEFAULT_BOLD
+            "italic" -> Typeface.create(Typeface.DEFAULT, Typeface.ITALIC)
+            "monospace" -> Typeface.MONOSPACE
+            else -> Typeface.DEFAULT
+        }
+        editor.setHorizontallyScrolling(!currentWordWrap)
+        editor.setLineSpacing(0f, currentLineSpacingMult)
+    }
+
+    private fun pushUndoState(text: String) {
+        if (isPerformingUndoRedo) return
+        if (undoStack.isEmpty() || undoStack.last() != text) {
+            if (undoStack.size >= 50) undoStack.removeFirst()
+            undoStack.addLast(text)
+            redoStack.clear()
+        }
+    }
+
+    private fun performNoteUndo(): Boolean {
+        if (undoStack.isEmpty()) return false
+        isPerformingUndoRedo = true
+        try {
+            val current = currentNoteText
+            redoStack.addLast(current)
+            val prev = undoStack.removeLast()
+            updateNoteEditorText(prev)
+            sendNoteCommand("note_undo")
+            return true
+        } finally {
+            isPerformingUndoRedo = false
+        }
+    }
+
+    private fun performNoteRedo(): Boolean {
+        if (redoStack.isEmpty()) return false
+        isPerformingUndoRedo = true
+        try {
+            val current = currentNoteText
+            undoStack.addLast(current)
+            val next = redoStack.removeLast()
+            updateNoteEditorText(next)
+            sendNoteCommand("note_redo")
+            return true
+        } finally {
+            isPerformingUndoRedo = false
+        }
+    }
+
+    private fun clearNoteContent() {
+        pushUndoState(currentNoteText)
+        updateNoteEditorText("")
+        sendNoteCommand("note_clear")
+    }
+
+    private fun updateNoteEditorText(text: String) {
+        currentNoteText = text
+        hasUserEditedText = true
+        activeTextAuthority = TextAuthority.IME_BRIDGE
+        val editor = noteEditText ?: return
+        isSyncingImeBridge = true
+        try {
+            editor.setText(text)
+            val len = text.length
+            editor.setSelection(len)
+        } catch (_: Throwable) {
+        } finally {
+            isSyncingImeBridge = false
+        }
+        syncLiveTextToHeavy(text, text.length, text.length)
+    }
+
     private fun attachFallbackContentView(context: Context, container: FrameLayout, reason: String = "fallback") {
         if (container.findViewById<View>(android.R.id.text1) != null) return
         contentPlaceholderView?.visibility = View.GONE
@@ -1171,6 +1427,7 @@ class FloatingMiniAppWindow(
             })
         }
         noteEditText = edit
+        imeBridgeEditText = edit
         clientView.addView(edit)
 
         container.addView(clientView)
@@ -1574,36 +1831,8 @@ class FloatingMiniAppWindow(
         }
         bar.addView(titleView)
 
-        // Test A and Edit buttons for Note mini-app
+        // Single "Edit" button for Note mini-app (opens formatting options popover)
         if (appType == "note" || appType == "test_notes") {
-            val diagBtn = TextView(context).apply {
-                text = "Test A"
-                setTextColor(Color.parseColor("#F9E2AF"))
-                textSize = 12f
-                typeface = Typeface.DEFAULT_BOLD
-                isClickable = true
-                isFocusable = false
-                val diagBg = GradientDrawable().apply {
-                    shape = GradientDrawable.RECTANGLE
-                    cornerRadius = 4 * density
-                    setColor(Color.parseColor("#313244"))
-                    setStroke((1 * density).toInt(), Color.parseColor("#F9E2AF"))
-                }
-                background = diagBg
-                setPadding((8 * density).toInt(), (3 * density).toInt(), (8 * density).toInt(), (3 * density).toInt())
-                layoutParams = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.WRAP_CONTENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT
-                ).apply {
-                    marginEnd = (6 * density).toInt()
-                }
-                setOnClickListener {
-                    toggleDiagnosticMode()
-                }
-            }
-            diagnosticModeButton = diagBtn
-            bar.addView(diagBtn)
-
             val editBtn = TextView(context).apply {
                 text = "Edit"
                 setTextColor(Color.parseColor("#89B4FA"))
@@ -1802,13 +2031,13 @@ class FloatingMiniAppWindow(
             setPadding(0, (4 * density).toInt(), 0, (2 * density).toInt())
         }
         val undoBtn = createPopoverButton(context, "↶ Undo") {
-            sendNoteCommand("note_undo")
+            performNoteUndo()
         }
         val redoBtn = createPopoverButton(context, "↷ Redo") {
-            sendNoteCommand("note_redo")
+            performNoteRedo()
         }
         val clearBtn = createPopoverButton(context, "Clear", textColor = Color.parseColor("#F38BA8")) {
-            sendNoteCommand("note_clear")
+            clearNoteContent()
         }
         actionRow.addView(undoBtn)
         actionRow.addView(redoBtn)
@@ -1862,6 +2091,7 @@ class FloatingMiniAppWindow(
     }
 
     private fun dispatchFormatCommand() {
+        applyFormattingToNoteEditor()
         val params = mapOf(
             "font_size" to currentFontSizeSp.toString(),
             "font_style" to currentFontStyle,
