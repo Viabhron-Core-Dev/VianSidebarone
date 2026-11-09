@@ -149,10 +149,16 @@ class FloatingMiniAppBridge private constructor(private val context: Context) {
                     }
                 }
                 s.payload.putAll(finalPayload)
-                durableStore.saveSnapshot(s)
+                val saveOk = durableStore.saveSnapshot(s)
+                if (!saveOk) {
+                    LogKeeper.log(context, TAG, "DURABLE_SAVE_FAILURE id=$instanceId (Main-only)")
+                    LogKeeper.log(context, TAG, "FOLD_TRANSACTION_ABORTED id=$instanceId reason=durable_save_failed")
+                    return
+                }
                 s
             } catch (e: Throwable) {
                 LogKeeper.logCrash(context, "$TAG: DURABLE_SAVE_FAILURE id=$instanceId", e)
+                LogKeeper.log(context, TAG, "FOLD_TRANSACTION_ABORTED id=$instanceId reason=durable_save_exception")
                 return
             }
 

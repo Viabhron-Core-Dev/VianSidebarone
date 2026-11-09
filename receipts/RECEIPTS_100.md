@@ -207,5 +207,44 @@ Capped at 500 lines per file.
 * Any deviation from what was requested, and why: None.
 * Any known issue or follow-up needed: Physical on-device testing following the On-Device Verification Guide below.
 
+---
+
+### Receipt 107 — Phase 14.5 Serialize Note Persistence & Safe Lifecycle Flush
+* Timestamp: 2026-11-09T13:29:30-08:00
+* One-line summary of what was requested: Fix race conditions by serializing commits per Note instance, make lifecycle flushing safe from main-thread disk I/O, remove redundant synchronous flush from Clear, and add deterministic tests.
+* Exact files touched:
+  - `app/src/main/java/com/example/feature/floating/NotePersistenceCoordinator.kt`
+  - `app/src/main/java/com/example/feature/floating/FloatingMiniAppBridge.kt`
+  - `app/src/main/java/com/example/feature/floating/DurableMiniAppStore.kt`
+  - `app/src/test/java/com/example/feature/floating/FloatingMiniAppFrameworkTest.kt`
+  - `blueprint/BLUEPRINT.md`
+  - `receipts/RECEIPTS_100.md`
+* What was actually done — factual, not persuasive:
+  - Serialized Writes Per Note Instance:
+    1. In `NotePersistenceCoordinator.kt`: Added `instanceCommitLock` obtained via companion `ConcurrentHashMap<String, Any>` (`getInstanceLock(instanceId)`).
+    2. Wrapped the entire `commitSave` execution (stale check, snapshot loading, payload merge, and file writing) in `synchronized(instanceCommitLock)`.
+    3. Guarantees that validation and write operations are strictly atomic per Note instance, preventing an older debounced save from overwriting a newer flush, while keeping different Note instances completely unblocked from one another.
+  - Safe Lifecycle Flushing Without Main-Thread Disk I/O:
+    1. In `flushPendingSave(timeoutMs = DEFAULT_FLUSH_TIMEOUT_MS)`: Canceled pending debounced callbacks. If called on the main thread, offloaded `commitSave` execution to `backgroundExecutor.submit(Callable { ... })` and waited safely via `future.get(timeoutMs, TimeUnit.MILLISECONDS)`.
+    2. Configured `DEFAULT_FLUSH_TIMEOUT_MS = 2000L` with explicit `TimeoutException` handling, logging `NOTE_PERSIST_FLUSH_TIMEOUT` and returning `false`.
+    3. In `FloatingMiniAppBridge.kt`: Handled write failures explicitly in `sleepMiniApp`. Checked `saveOk`, logged `DURABLE_SAVE_FAILURE`, and aborted the fold transaction if persistence failed, preventing ghost/empty recovery bubbles.
+  - Call Site Review & Clear Optimization:
+    1. In `prepareClear()`: Removed synchronous `flushPendingSave()`. Pushed pre-clear state to undo stack, updated latest text to `""`, and called `scheduleDebouncedSave()`.
+    2. Maintained undoability of Clear and avoided main-thread blocking during user interface interaction.
+  - Unit Test Verification:
+    1. Added `testOlderBackgroundSaveRacingWithNewerFlush()` in `FloatingMiniAppFrameworkTest.kt` verifying older debounced writes are rejected when superseded by newer flushes.
+    2. Added `testMultipleConcurrentSaveRequestsForSameNoteSerialized()` verifying thread safety and consistency across multiple concurrent writes.
+    3. Added `testIndependentSavesForDifferentNoteInstancesDoNotBlock()` verifying independent commit locks and isolation between distinct Notes.
+    4. Added `testPendingDebounceSupersededByLifecycleFlush()` verifying immediate supersede semantics on fold.
+    5. Added `testLifecycleFlushWaitsForLatestCommittedStateWithoutMainThreadDiskIo()` verifying background offloading and bounded completion.
+    6. Added `testFailedWritesReportedAsFailures()` verifying explicit failure reporting.
+    7. Added `testNoUnnecessarySynchronousFlushDuringClear()` verifying debounced persistence and full undoability for Clear.
+    8. Executed JVM tests: 59/59 tests in `FloatingMiniAppFrameworkTest` passed cleanly.
+  - Build Verification:
+    - Executed `compile_applet`: Succeeded cleanly.
+* How it was verified: local build and JVM unit test suite only (`compile_applet` passed, 59/59 tests in `FloatingMiniAppFrameworkTest` passed) — on-device claim only / not tested on physical hardware. Physical on-device execution required to verify real-time typing, background writes, and UI responsiveness.
+* Any deviation from what was requested, and why: None.
+* Any known issue or follow-up needed: Physical on-device testing following the On-Device Verification Guide below.
+
 
 

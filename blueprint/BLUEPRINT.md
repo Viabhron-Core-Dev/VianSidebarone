@@ -485,7 +485,19 @@
     - Strict editing behavior: editing after undo clears redo history; clear is undoable (pushes pre-clear text to undo stack); programmatic state restoration (`isRestoringState` flag) does not generate duplicate undo entries.
     - Multiline text, double quotes, formatting characters, and emojis safely preserved via `JSONArray` escaping.
     - Graceful fallback: legacy snapshots without history keys load with empty undo/redo stacks with zero migration crashes.
-  - **Testing**: 52/52 tests in `FloatingMiniAppFrameworkTest` passing 100%. `compile_applet` succeeded cleanly.
+- [x] **Phase 14.5: Serialize Note Persistence and Safe Lifecycle Flush (`NotePersistenceCoordinator.kt`, `FloatingMiniAppBridge.kt`, `DurableMiniAppStore.kt`)**:
+  - **Per-Instance Commit Serialization**:
+    - Serialized commit transactions per Note instance via `instanceCommitLock = getInstanceLock(instanceId)` using a `ConcurrentHashMap<String, Any>`.
+    - Protects the complete commit pipeline (stale check, snapshot loading, payload merge, and file writing) as one unified atomic transaction.
+    - Prevents interleaving between asynchronous debounced saves and synchronous lifecycle flushes without introducing a global persistence bottleneck between independent Note instances.
+  - **Safe UI Thread Lifecycle Flushing**:
+    - Eliminated main-thread disk I/O during `flushPendingSave()`.
+    - When called from the Android main thread, offloads disk writes to `backgroundExecutor` and safely awaits completion using a bounded `Future.get(timeoutMs, TimeUnit.MILLISECONDS)` with a 2000ms safety timeout to prevent deadlocks.
+    - Preserves durability guarantee: fold (`sleepMiniApp`) and non-deleted close (`closeMiniApp`) await background commit before concluding the lifecycle transition.
+    - Explicit failure handling: returns `false` on save failure or timeout; aborts fold transaction if durable write fails.
+  - **Clear Interaction Optimization**:
+    - Removed redundant synchronous flush from `prepareClear()`. Clear pushes pre-clear state to undo stack, empties latest text, and schedules debounced save through the normal async persistence path.
+  - **Testing**: 59/59 tests in `FloatingMiniAppFrameworkTest` passing 100%. `compile_applet` succeeded cleanly.
 
 ---
 

@@ -2022,6 +2022,235 @@ class FloatingMiniAppFrameworkTest {
 
         store.deleteSnapshot(legacyId)
     }
+
+    @Test
+    fun testOlderBackgroundSaveRacingWithNewerFlush() {
+        val store = DurableMiniAppStore.getInstance(testContext)
+        val noteId = "test_race_older_bg_newer_flush"
+        val coordinator = NotePersistenceCoordinator(
+            instanceId = noteId,
+            context = testContext,
+            durableStore = store
+        )
+
+        val commitMethod = coordinator.javaClass.getDeclaredMethod(
+            "commitSave",
+            Long::class.javaPrimitiveType,
+            Map::class.java,
+            WindowBounds::class.java
+        ).apply { isAccessible = true }
+
+        // Start with background task for seq 1 (older debounced edit)
+        val seqOlder = 1L
+        val payloadOlder = mapOf(
+            "text" to "Older Debounced Text",
+            TestNotesMiniAppInstance.KEY_TEXT to "Older Debounced Text"
+        )
+
+        // Meanwhile, a newer flush arrives with seq 2 (e.g. user triggered fold)
+        val seqNewer = 2L
+        val payloadNewer = mapOf(
+            "text" to "Newer Flushed Text",
+            TestNotesMiniAppInstance.KEY_TEXT to "Newer Flushed Text"
+        )
+
+        // Flush commits seq 2
+        val flushResult = commitMethod.invoke(coordinator, seqNewer, payloadNewer, null) as Boolean
+        assertTrue("Newer flush commit must succeed", flushResult)
+
+        // Delayed background save for seq 1 now runs
+        val olderResult = commitMethod.invoke(coordinator, seqOlder, payloadOlder, null) as Boolean
+        assertFalse("Older background save must be skipped and return false", olderResult)
+
+        // Snapshot must remain "Newer Flushed Text"
+        val snapshot = store.loadSnapshot(noteId)
+        assertNotNull(snapshot)
+        assertEquals("Newer Flushed Text", snapshot!!.payload[TestNotesMiniAppInstance.KEY_TEXT])
+
+        store.deleteSnapshot(noteId)
+    }
+
+    @Test
+    fun testMultipleConcurrentSaveRequestsForSameNoteSerialized() {
+        val store = DurableMiniAppStore.getInstance(testContext)
+        val noteId = "test_concurrent_same_note"
+        val coordinator = NotePersistenceCoordinator(
+            instanceId = noteId,
+            context = testContext,
+            durableStore = store
+        )
+
+        val commitMethod = coordinator.javaClass.getDeclaredMethod(
+            "commitSave",
+            Long::class.javaPrimitiveType,
+            Map::class.java,
+            WindowBounds::class.java
+        ).apply { isAccessible = true }
+
+        val threadCount = 8
+        val executor = java.util.concurrent.Executors.newFixedThreadPool(threadCount)
+        val latch = java.util.concurrent.CountDownLatch(threadCount)
+        val completedCount = java.util.concurrent.atomic.AtomicInteger(0)
+
+        for (i in 1..threadCount) {
+            val seq = i.toLong()
+            val text = "Concurrent State $i"
+            val payload = mapOf("text" to text, TestNotesMiniAppInstance.KEY_TEXT to text)
+            executor.execute {
+                try {
+                    commitMethod.invoke(coordinator, seq, payload, null)
+                    completedCount.incrementAndGet()
+                } finally {
+                    latch.countDown()
+                }
+            }
+        }
+
+        val allFinished = latch.await(5, java.util.concurrent.TimeUnit.SECONDS)
+        assertTrue("All concurrent saves should finish within timeout", allFinished)
+        assertEquals(threadCount, completedCount.get())
+
+        // The durable store must have committed without throwing exceptions or corrupting the payload
+        val snapshot = store.loadSnapshot(noteId)
+        assertNotNull(snapshot)
+        assertTrue(snapshot!!.payload[TestNotesMiniAppInstance.KEY_TEXT]!!.startsWith("Concurrent State"))
+
+        executor.shutdown()
+        store.deleteSnapshot(noteId)
+    }
+
+    @Test
+    fun testIndependentSavesForDifferentNoteInstancesDoNotBlock() {
+        val store = DurableMiniAppStore.getInstance(testContext)
+        val note1 = "note_instance_alpha"
+        val note2 = "note_instance_beta"
+
+        val coord1 = NotePersistenceCoordinator(note1, testContext, store)
+        val coord2 = NotePersistenceCoordinator(note2, testContext, store)
+
+        // Verify independent instance locks
+        val lock1 = NotePersistenceCoordinator.getInstanceLock(note1)
+        val lock2 = NotePersistenceCoordinator.getInstanceLock(note2)
+        assertNotSame("Different Note instances must have distinct commit locks", lock1, lock2)
+
+        coord1.updateStateSnapshot("Alpha Text", 15f, "regular", true, 1.2f)
+        coord2.updateStateSnapshot("Beta Text", 16f, "bold", false, 1.5f)
+
+        val flush1 = coord1.flushPendingSave(2000L)
+        val flush2 = coord2.flushPendingSave(2000L)
+
+        assertTrue("Flush note 1 must succeed", flush1)
+        assertTrue("Flush note 2 must succeed", flush2)
+
+        val snap1 = store.loadSnapshot(note1)
+        val snap2 = store.loadSnapshot(note2)
+
+        assertEquals("Alpha Text", snap1?.payload?.get("text"))
+        assertEquals("Beta Text", snap2?.payload?.get("text"))
+
+        store.deleteSnapshot(note1)
+        store.deleteSnapshot(note2)
+    }
+
+    @Test
+    fun testPendingDebounceSupersededByLifecycleFlush() {
+        val store = DurableMiniAppStore.getInstance(testContext)
+        val noteId = "test_superseded_debounce"
+        val coordinator = NotePersistenceCoordinator(
+            instanceId = noteId,
+            context = testContext,
+            durableStore = store
+        )
+
+        // Schedule debounce save
+        coordinator.updateStateSnapshot("Typing intermediate text...", 15f, "regular", true, 1.2f)
+        coordinator.scheduleDebouncedSave(delayMs = 1000L)
+
+        // User immediately triggers fold -> update snapshot and flush
+        coordinator.updateStateSnapshot("Final text before fold", 15f, "regular", true, 1.2f)
+        val flushResult = coordinator.flushPendingSave(2000L)
+        assertTrue("Flush must succeed", flushResult)
+
+        val snapshot = store.loadSnapshot(noteId)
+        assertNotNull(snapshot)
+        assertEquals("Final text before fold", snapshot!!.payload[TestNotesMiniAppInstance.KEY_TEXT])
+
+        store.deleteSnapshot(noteId)
+    }
+
+    @Test
+    fun testLifecycleFlushWaitsForLatestCommittedStateWithoutMainThreadDiskIo() {
+        val store = DurableMiniAppStore.getInstance(testContext)
+        val noteId = "test_flush_waiting"
+        val coordinator = NotePersistenceCoordinator(
+            instanceId = noteId,
+            context = testContext,
+            durableStore = store
+        )
+
+        coordinator.updateStateSnapshot("Durably committed text", 15f, "regular", true, 1.2f)
+        val flushSuccess = coordinator.flushPendingSave(timeoutMs = 3000L)
+        assertTrue("Flush must succeed and commit state", flushSuccess)
+
+        val snapshot = store.loadSnapshot(noteId)
+        assertNotNull(snapshot)
+        assertEquals("Durably committed text", snapshot!!.payload[TestNotesMiniAppInstance.KEY_TEXT])
+
+        store.deleteSnapshot(noteId)
+    }
+
+    @Test
+    fun testFailedWritesReportedAsFailures() {
+        // Mock or failing store behavior
+        val failingStore = object : DurableMiniAppStore(testContext) {
+            override fun saveSnapshot(snapshot: MiniAppRecoverySnapshot): Boolean {
+                return false // simulate I/O or filesystem failure
+            }
+        }
+
+        val noteId = "test_failed_write"
+        val coordinator = NotePersistenceCoordinator(
+            instanceId = noteId,
+            context = testContext,
+            durableStore = failingStore
+        )
+
+        coordinator.updateStateSnapshot("Failing text", 15f, "regular", true, 1.2f)
+        val flushResult = coordinator.flushPendingSave(1000L)
+        assertFalse("Flush must explicitly report failure when store fails to save", flushResult)
+    }
+
+    @Test
+    fun testNoUnnecessarySynchronousFlushDuringClear() {
+        val store = DurableMiniAppStore.getInstance(testContext)
+        val noteId = "test_clear_debounce"
+        val coordinator = NotePersistenceCoordinator(
+            instanceId = noteId,
+            context = testContext,
+            durableStore = store
+        )
+
+        // Seed initial text
+        coordinator.pushUndoState("Pre-clear text")
+        coordinator.updateStateSnapshot("Pre-clear text", 15f, "regular", true, 1.2f)
+        coordinator.flushPendingSave(1000L)
+
+        // Clear content: must push pre-clear text to undo stack, empty latestText, and schedule debounced save (not synchronous flush)
+        coordinator.prepareClear("Pre-clear text")
+        assertEquals("", coordinator.latestText)
+        assertEquals("Pre-clear text", coordinator.undoStack.last())
+
+        // Flush scheduled save
+        coordinator.flushPendingSave(1000L)
+        val snap = store.loadSnapshot(noteId)
+        assertEquals("", snap?.payload?.get("text"))
+
+        // Undo must restore the pre-clear text
+        val undone = coordinator.performUndo("")
+        assertEquals("Pre-clear text", undone)
+
+        store.deleteSnapshot(noteId)
+    }
 }
 
 

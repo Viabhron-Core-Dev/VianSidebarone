@@ -19,7 +19,7 @@ import java.nio.charset.StandardCharsets
  * 3. Atomic File Writes: Uses temp-file write + rename to guarantee crash-resilient persistence.
  * 4. Lightweight & Reflection-Free: Uses standard Android org.json with zero heavyweight ORM or DB overhead.
  */
-class DurableMiniAppStore private constructor(context: Context) {
+open class DurableMiniAppStore internal constructor(context: Context) {
 
     private val storageDir: File = File(context.applicationContext.filesDir, DIR_NAME).apply {
         if (!exists()) {
@@ -32,7 +32,7 @@ class DurableMiniAppStore private constructor(context: Context) {
     /**
      * Atomically saves or updates the durable recovery snapshot for a mini-app instance.
      */
-    fun saveSnapshot(snapshot: MiniAppRecoverySnapshot): Boolean {
+    open fun saveSnapshot(snapshot: MiniAppRecoverySnapshot): Boolean {
         synchronized(lock) {
             if (!storageDir.exists()) {
                 storageDir.mkdirs()

@@ -7,8 +7,13 @@ import com.example.core.LogKeeper
 import com.example.core.WindowBounds
 import org.json.JSONArray
 import java.util.ArrayDeque
+import java.util.concurrent.Callable
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import java.util.concurrent.Future
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.AtomicLong
 
 /**
@@ -18,8 +23,8 @@ import java.util.concurrent.atomic.AtomicLong
  * Responsibilities:
  * 1. Continuous debounced persistence for typing edits to prevent disk I/O thrashing.
  * 2. Background thread execution for disk writes to keep the UI thread responsive.
- * 3. Immediate synchronous flushing before lifecycle events (fold, close, hide, destroy).
- * 4. Stale-write protection via monotonic save sequence numbers.
+ * 3. Safe lifecycle flushing with bounded background completion (no main-thread disk I/O).
+ * 4. Serialized per-instance commit transactions with monotonic stale-write protection.
  * 5. Bounded undo/redo history (50 states) serialized cleanly via JSONArray.
  * 6. Full restoration of text, formatting, and history across reconstruction and sleep/wake.
  * 7. Zero Heavy / Binder / IPC dependencies.
@@ -45,6 +50,10 @@ class NotePersistenceCoordinator(
 
     private val debounceLock = Any()
     private var pendingSaveRunnable: Runnable? = null
+
+    // Per-instance commit lock: ensures loading, merging, and writing to disk
+    // are strictly serialized per note instance, preventing interleaving or data corruption.
+    private val instanceCommitLock = getInstanceLock(instanceId)
 
     // Latest state snapshot cached for immediate flush
     @Volatile
@@ -120,7 +129,8 @@ class NotePersistenceCoordinator(
         if (currentText.isEmpty()) return
         pushUndoState(currentText)
         latestText = ""
-        flushPendingSave()
+        // Schedule debounced save rather than blocking the UI thread with a synchronous disk write
+        scheduleDebouncedSave()
     }
 
     fun updateStateSnapshot(
@@ -167,10 +177,11 @@ class NotePersistenceCoordinator(
     }
 
     /**
-     * Flushes any pending write immediately and synchronously on the calling thread.
+     * Flushes any pending write safely without performing disk I/O on the Android main/UI thread.
      * Guaranteed to persist the latest state before fold, close, or window teardown.
+     * Uses a bounded timeout (2000ms) to ensure the UI thread cannot deadlock.
      */
-    fun flushPendingSave(): Boolean {
+    fun flushPendingSave(timeoutMs: Long = DEFAULT_FLUSH_TIMEOUT_MS): Boolean {
         synchronized(debounceLock) {
             pendingSaveRunnable?.let {
                 mainHandler.removeCallbacks(it)
@@ -180,7 +191,26 @@ class NotePersistenceCoordinator(
         val seq = saveSequence.incrementAndGet()
         val snapshotPayload = createPayloadMap()
         val boundsCopy = latestBounds?.copyBounds()
-        return commitSave(seq, snapshotPayload, boundsCopy)
+
+        val isMainThread = Looper.myLooper() == Looper.getMainLooper()
+        if (TEST_DISPATCH_IMMEDIATELY || (!isMainThread && timeoutMs <= 0)) {
+            return commitSave(seq, snapshotPayload, boundsCopy)
+        }
+
+        // Offload disk I/O to backgroundExecutor and safely wait up to timeoutMs
+        val future: Future<Boolean> = backgroundExecutor.submit(Callable {
+            commitSave(seq, snapshotPayload, boundsCopy)
+        })
+
+        return try {
+            future.get(timeoutMs, TimeUnit.MILLISECONDS)
+        } catch (e: TimeoutException) {
+            LogKeeper.log(context, TAG, "NOTE_PERSIST_FLUSH_TIMEOUT id=$instanceId seq=$seq timeoutMs=$timeoutMs")
+            false
+        } catch (t: Throwable) {
+            LogKeeper.logError(context, TAG, "Error waiting for flush save on instance: $instanceId", t)
+            false
+        }
     }
 
     private fun commitSave(
@@ -188,38 +218,40 @@ class NotePersistenceCoordinator(
         payloadMap: Map<String, String>,
         bounds: WindowBounds?
     ): Boolean {
-        if (seq < latestCommittedSequence.get()) {
-            // Stale write protection: a newer save sequence has already committed
-            LogKeeper.log(context, TAG, "NOTE_PERSIST_STALE_SKIPPED id=$instanceId seq=$seq latest=${latestCommittedSequence.get()}")
-            return false
-        }
-
-        return try {
-            val existing = durableStore.loadSnapshot(instanceId)
-            val snapshotToSave = existing ?: MiniAppRecoverySnapshot(
-                instanceId = instanceId,
-                appType = "test_notes",
-                state = MiniAppState.ACTIVE,
-                windowBounds = bounds?.copyBounds() ?: WindowBounds(120, 150, 650, 850)
-            )
-
-            if (bounds != null) {
-                snapshotToSave.windowBounds = bounds.copyBounds()
+        synchronized(instanceCommitLock) {
+            if (seq < latestCommittedSequence.get()) {
+                // Stale write protection: a newer save sequence has already committed
+                LogKeeper.log(context, TAG, "NOTE_PERSIST_STALE_SKIPPED id=$instanceId seq=$seq latest=${latestCommittedSequence.get()}")
+                return false
             }
-            snapshotToSave.payload.putAll(payloadMap)
-            snapshotToSave.timestamp = System.currentTimeMillis()
 
-            val success = durableStore.saveSnapshot(snapshotToSave)
-            if (success) {
-                latestCommittedSequence.updateAndGet { current -> maxOf(current, seq) }
-                LogKeeper.log(context, TAG, "NOTE_PERSIST_SUCCESS id=$instanceId seq=$seq textLen=${latestText.length} undoCount=${undoStack.size}")
-            } else {
-                LogKeeper.log(context, TAG, "NOTE_PERSIST_FAILURE id=$instanceId seq=$seq")
+            return try {
+                val existing = durableStore.loadSnapshot(instanceId)
+                val snapshotToSave = existing ?: MiniAppRecoverySnapshot(
+                    instanceId = instanceId,
+                    appType = "test_notes",
+                    state = MiniAppState.ACTIVE,
+                    windowBounds = bounds?.copyBounds() ?: WindowBounds(120, 150, 650, 850)
+                )
+
+                if (bounds != null) {
+                    snapshotToSave.windowBounds = bounds.copyBounds()
+                }
+                snapshotToSave.payload.putAll(payloadMap)
+                snapshotToSave.timestamp = System.currentTimeMillis()
+
+                val success = durableStore.saveSnapshot(snapshotToSave)
+                if (success) {
+                    latestCommittedSequence.updateAndGet { current -> maxOf(current, seq) }
+                    LogKeeper.log(context, TAG, "NOTE_PERSIST_SUCCESS id=$instanceId seq=$seq textLen=${latestText.length} undoCount=${undoStack.size}")
+                } else {
+                    LogKeeper.log(context, TAG, "NOTE_PERSIST_FAILURE id=$instanceId seq=$seq")
+                }
+                success
+            } catch (e: Throwable) {
+                LogKeeper.logError(context, TAG, "Error persisting note instance: $instanceId", e)
+                false
             }
-            success
-        } catch (e: Throwable) {
-            LogKeeper.logError(context, TAG, "Error persisting note instance: $instanceId", e)
-            false
         }
     }
 
@@ -284,6 +316,13 @@ class NotePersistenceCoordinator(
         const val KEY_REDO_HISTORY = "redo_history"
         const val MAX_HISTORY = 50
         const val DEFAULT_DEBOUNCE_MS = 400L
+        const val DEFAULT_FLUSH_TIMEOUT_MS = 2000L
+
+        private val instanceLocks = ConcurrentHashMap<String, Any>()
+
+        fun getInstanceLock(instanceId: String): Any {
+            return instanceLocks.computeIfAbsent(instanceId) { Any() }
+        }
 
         /**
          * Test hook: when true, schedules execute synchronously without delay.
