@@ -29,6 +29,8 @@ class FloatingMiniAppBridge private constructor(private val context: Context) {
     private val durableStore = DurableMiniAppStore.getInstance(context)
     private val activeBubbles = LinkedHashMap<String, FloatingMiniAppLauncherBubble>()
 
+    fun isMainOnlyMiniApp(appType: String): Boolean = (appType == "note" || appType == "test_notes")
+
     /**
      * Opens or brings to front a mini-app floating window.
      */
@@ -48,10 +50,14 @@ class FloatingMiniAppBridge private constructor(private val context: Context) {
         // Dismiss launcher bubble if present
         dismissLauncherBubble(instanceId)
 
-        // 1. Acquire consumer first so Heavy process connects/mounts before window show
-        LogKeeper.log(context, TAG, "HEAVY_MOUNT_REQUEST id=$instanceId consumerTag=miniapp_$instanceId")
-        val connectionManager = HeavyProcessConnectionManager.getInstance(context)
-        connectionManager.acquireConsumer("miniapp_$instanceId", reason = "openMiniApp:$instanceId")
+        // 1. Acquire consumer first so Heavy process connects/mounts before window show (skipped for Main-only mini-apps)
+        if (!isMainOnlyMiniApp(appType)) {
+            LogKeeper.log(context, TAG, "HEAVY_MOUNT_REQUEST id=$instanceId consumerTag=miniapp_$instanceId")
+            val connectionManager = HeavyProcessConnectionManager.getInstance(context)
+            connectionManager.acquireConsumer("miniapp_$instanceId", reason = "openMiniApp:$instanceId")
+        } else {
+            LogKeeper.log(context, TAG, "MAIN_ONLY_MOUNT id=$instanceId type=$appType (skipping Heavy)")
+        }
 
         val existing = windowManager.getWindow(instanceId)
         if (existing is FloatingMiniAppWindow) {
@@ -113,12 +119,51 @@ class FloatingMiniAppBridge private constructor(private val context: Context) {
         LogKeeper.log(context, TAG, "FOLD_TRANSACTION_BEGIN id=$instanceId")
         LogKeeper.log(context, TAG, "SLEEP_REQUEST id=$instanceId")
 
-        val connectionManager = HeavyProcessConnectionManager.getInstance(context)
         val window = windowManager.getWindow(instanceId) as? FloatingMiniAppWindow
         val editedPayload = window?.getCurrentPayload() ?: emptyMap()
         val appType = window?.appType
             ?: durableStore.loadSnapshot(instanceId)?.appType
             ?: "generic"
+
+        if (isMainOnlyMiniApp(appType)) {
+            LogKeeper.log(context, TAG, "SLEEP_MAIN_ONLY id=$instanceId type=$appType (skipping Heavy)")
+            val finalPayload = editedPayload
+            val textLength = (finalPayload[TestNotesMiniAppInstance.KEY_TEXT]
+                ?: finalPayload["text"])?.length ?: 0
+
+            val snapshot = try {
+                val s = durableStore.loadSnapshot(instanceId) ?: MiniAppRecoverySnapshot(
+                    instanceId = instanceId,
+                    appType = appType,
+                    state = MiniAppState.SLEEPING,
+                    windowBounds = window?.bounds?.copyBounds() ?: WindowBounds(120, 150, 650, 850)
+                )
+                s.state = MiniAppState.SLEEPING
+                window?.let { w ->
+                    if (!w.isMaximized) {
+                        s.windowBounds = w.normalFloatingBounds.copyBounds()
+                    } else {
+                        w.maximizeRestoreBounds?.let { r -> s.windowBounds = r.copyBounds() }
+                            ?: run { s.windowBounds = w.normalFloatingBounds.copyBounds() }
+                    }
+                }
+                s.payload.putAll(finalPayload)
+                durableStore.saveSnapshot(s)
+                s
+            } catch (e: Throwable) {
+                LogKeeper.logCrash(context, "$TAG: DURABLE_SAVE_FAILURE id=$instanceId", e)
+                return
+            }
+
+            windowManager.unregisterWindow(instanceId)
+            showLauncherBubble(snapshot)
+            LogKeeper.log(context, TAG, "FOLDED_LAUNCHER_SHOWN id=$instanceId buttonPosition=${snapshot.buttonPosition}")
+            LogKeeper.log(context, TAG, "FOLD_TRANSACTION_COMPLETE id=$instanceId (Main-only)")
+            LogKeeper.log(context, TAG, "FLOATING_SESSION_END id=$instanceId reason=sleep")
+            return
+        }
+
+        val connectionManager = HeavyProcessConnectionManager.getInstance(context)
 
         // Step 1: Request non-destructive snapshot from Heavy via Binder while consumer is STILL ACQUIRED
         LogKeeper.log(context, TAG, "SNAPSHOT_REQUEST id=$instanceId target=Heavy")
@@ -258,6 +303,27 @@ class FloatingMiniAppBridge private constructor(private val context: Context) {
     fun closeMiniApp(instanceId: String, deleteDurable: Boolean = false) {
         LogKeeper.log(context, TAG, "CLOSE_REQUEST id=$instanceId deleteDurable=$deleteDurable")
 
+        val window = windowManager.getWindow(instanceId) as? FloatingMiniAppWindow
+        val appType = window?.appType
+            ?: durableStore.loadSnapshot(instanceId)?.appType
+            ?: "generic"
+
+        if (isMainOnlyMiniApp(appType)) {
+            LogKeeper.log(context, TAG, "CLOSE_MAIN_ONLY id=$instanceId type=$appType (skipping Heavy)")
+            dismissLauncherBubble(instanceId)
+            windowManager.unregisterWindow(instanceId)
+            if (deleteDurable) {
+                durableStore.deleteSnapshot(instanceId)
+                LogKeeper.log(context, TAG, "RECOVERY_DELETED id=$instanceId")
+            } else {
+                durableStore.updateState(instanceId, MiniAppState.CLOSED)
+                LogKeeper.log(context, TAG, "RECOVERY_RETAINED id=$instanceId state=CLOSED")
+            }
+            LogKeeper.log(context, TAG, "INSTANCE_CLOSED id=$instanceId")
+            LogKeeper.log(context, TAG, "FLOATING_SESSION_END id=$instanceId reason=close")
+            return
+        }
+
         // 1. Dismiss launcher bubble first if present
         dismissLauncherBubble(instanceId)
 
@@ -301,30 +367,34 @@ class FloatingMiniAppBridge private constructor(private val context: Context) {
     }
 
     /**
-     * Toggles a mini-app based on appType from Sidebar or element clicks.
+     * Toggles a mini-app based on appType from Sidebar or element clicks, with optional specific targetInstanceId.
      */
-    fun toggleMiniApp(appType: String) {
+    fun toggleMiniApp(appType: String, targetInstanceId: String? = null) {
         val caller = Throwable().stackTrace.getOrNull(1)?.let { "${it.className}.${it.methodName}:${it.lineNumber}" } ?: "unknown"
         LogKeeper.log(
             context,
             "MiniAppLaunchRouting",
-            "ROUTING_DIAG: BRIDGE_TOGGLE_MINI_APP type=$appType caller=$caller"
+            "ROUTING_DIAG: BRIDGE_TOGGLE_MINI_APP type=$appType targetId=$targetInstanceId caller=$caller"
         )
-        val existingSnapshot = durableStore.getAllSnapshots().firstOrNull { it.appType == appType }
-        val instanceId = existingSnapshot?.instanceId ?: "miniapp_$appType"
+        val instanceId = targetInstanceId
+            ?: durableStore.getAllSnapshots().firstOrNull { it.appType == appType }?.instanceId
+            ?: "miniapp_$appType"
 
         val activeWindow = windowManager.getWindow(instanceId) as? FloatingMiniAppWindow
         val isBubbleActive = activeBubbles.containsKey(instanceId)
+        val snapshot = durableStore.loadSnapshot(instanceId)
 
         if (activeWindow != null && activeWindow.isVisible) {
-            if (activeWindow.isFocused) {
+            val topWindow = windowManager.getTopVisibleWindow()
+            if (activeWindow.isFocused || topWindow?.windowId == instanceId) {
                 // Already focused & on top -> toggle to sleep
                 sleepMiniApp(instanceId)
             } else {
                 // Obscured -> bring to front
                 windowManager.bringToFront(instanceId)
+                windowManager.setFocus(instanceId)
             }
-        } else if (isBubbleActive || existingSnapshot?.state == MiniAppState.SLEEPING) {
+        } else if (isBubbleActive || snapshot?.state == MiniAppState.SLEEPING) {
             wakeMiniApp(instanceId)
         } else {
             openMiniApp(instanceId, appType)

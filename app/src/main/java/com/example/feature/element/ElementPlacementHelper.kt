@@ -15,6 +15,14 @@ object ElementPlacementHelper {
 
     private const val TAG = "ElementPlacementHelper"
 
+    fun assignInstanceIfNote(id: String): String {
+        return if (id == "system:test_notes") {
+            "system:test_notes:note_${System.currentTimeMillis() % 1000000}_${java.util.UUID.randomUUID().toString().take(4)}"
+        } else {
+            id
+        }
+    }
+
     fun addElementToHybridGrid(
         context: Context,
         pageId: String,
@@ -23,6 +31,7 @@ object ElementPlacementHelper {
         rows: Int = 1,
         containerId: String = "sidebar"
     ): Boolean {
+        val targetElementId = assignInstanceIfNote(elementId)
         return try {
             val prefs = context.getSharedPreferences("FloatingReaderPrefs", Context.MODE_PRIVATE)
             val parsedItems = loadHybridLocalItems(prefs, pageId, containerId).toMutableList()
@@ -56,7 +65,7 @@ object ElementPlacementHelper {
 
             parsedItems.add(
                 GridWidgetItem(
-                    id = elementId,
+                    id = targetElementId,
                     cols = effectiveCols,
                     rows = rows,
                     x = targetX,

@@ -329,14 +329,15 @@ class AddElementActivity : ComponentActivity() {
     }
     
     private fun finishWithId(id: String) {
+        val targetId = com.example.feature.element.ElementPlacementHelper.assignInstanceIfNote(id)
         val containerId = intent.getStringExtra("CONTAINER_ID")
         com.example.core.LogKeeper.log(
             this,
             "MiniAppLaunchRouting",
-            "ROUTING_DIAG: FINISH_WITH_ELEMENT_ID elementId=$id containerId=$containerId"
+            "ROUTING_DIAG: FINISH_WITH_ELEMENT_ID elementId=$targetId containerId=$containerId"
         )
         val resultIntent = Intent().apply {
-            putExtra("ELEMENT_ID", id)
+            putExtra("ELEMENT_ID", targetId)
             if (containerId != null) {
                 putExtra("CONTAINER_ID", containerId)
             }

@@ -208,9 +208,14 @@ class FloatingMiniAppWindow(
         }
     }
 
+    fun isMainOnlyApp(): Boolean = (appType == "note" || appType == "test_notes")
+
     fun getImeBridgeEditTextForTesting(): EditText? = imeBridgeEditText
     fun getFallbackEditTextForTesting(): EditText? = noteEditText
     fun getAuthoritativeNoteText(): String = currentNoteText
+    fun setNoteTextForTesting(text: String) {
+        updateNoteEditorText(text)
+    }
     fun getEditPopoverForTesting(): View? = editPopoverView
 
     fun getContentViewportHeight(windowHeight: Int): Int {
@@ -832,6 +837,10 @@ class FloatingMiniAppWindow(
         selEnd: Int,
         sessionId: String = activeImeSessionId
     ) {
+        if (isMainOnlyApp()) {
+            // Main is 100% authoritative for Note content; zero Heavy communication
+            return
+        }
         LogKeeper.log(
             context,
             "TestNotesImeDebug",
@@ -2092,6 +2101,10 @@ class FloatingMiniAppWindow(
 
     private fun dispatchFormatCommand() {
         applyFormattingToNoteEditor()
+        if (isMainOnlyApp()) {
+            // Note formatting is 100% locally authoritative in Main
+            return
+        }
         val params = mapOf(
             "font_size" to currentFontSizeSp.toString(),
             "font_style" to currentFontStyle,
@@ -2102,6 +2115,10 @@ class FloatingMiniAppWindow(
     }
 
     private fun sendNoteCommand(action: String, params: Map<String, String> = emptyMap()) {
+        if (isMainOnlyApp()) {
+            applyNoteCommandLocally(action, params)
+            return
+        }
         val connectionManager = HeavyProcessConnectionManager.getInstance(context)
         val cmd = HeavyCommand(
             commandId = UUID.randomUUID().toString(),
@@ -2689,6 +2706,10 @@ class FloatingMiniAppWindow(
 
     override fun onShow() {
         super.onShow()
+        if (isMainOnlyApp()) {
+            LogKeeper.log(context, "FloatingMiniAppWindow", "ON_SHOW_MAIN_ONLY id=$instanceId appType=$appType (skipping Heavy)")
+            return
+        }
         val connectionManager = HeavyProcessConnectionManager.getInstance(context)
         val snapshot = durableStore.loadSnapshot(instanceId)
 
@@ -2732,6 +2753,10 @@ class FloatingMiniAppWindow(
     override fun onHide() {
         super.onHide()
         deactivateEmbeddedEditorIme()
+        if (isMainOnlyApp()) {
+            LogKeeper.log(context, "FloatingMiniAppWindow", "ON_HIDE_MAIN_ONLY id=$instanceId appType=$appType (skipping Heavy)")
+            return
+        }
         val connectionManager = HeavyProcessConnectionManager.getInstance(context)
         val cmd = HeavyCommand(
             commandId = UUID.randomUUID().toString(),
@@ -2752,18 +2777,24 @@ class FloatingMiniAppWindow(
 
     override fun onAttach(wm: WindowManager) {
         super.onAttach(wm)
-        HeavyProcessConnectionManager.getInstance(context).addListener(connectionListener)
+        if (!isMainOnlyApp()) {
+            HeavyProcessConnectionManager.getInstance(context).addListener(connectionListener)
+        }
     }
 
     override fun onDetach(wm: WindowManager) {
         super.onDetach(wm)
-        HeavyProcessConnectionManager.getInstance(context).removeListener(connectionListener)
+        if (!isMainOnlyApp()) {
+            HeavyProcessConnectionManager.getInstance(context).removeListener(connectionListener)
+        }
     }
 
     override fun onDestroy() {
         super.onDestroy()
         deactivateEmbeddedEditorIme()
-        HeavyProcessConnectionManager.getInstance(context).removeListener(connectionListener)
+        if (!isMainOnlyApp()) {
+            HeavyProcessConnectionManager.getInstance(context).removeListener(connectionListener)
+        }
         globalLayoutListener?.let {
             getView()?.viewTreeObserver?.removeOnGlobalLayoutListener(it)
         }
@@ -2782,13 +2813,15 @@ class FloatingMiniAppWindow(
         noteEditText = null
         imeBridgeEditText = null
 
-        try {
-            (currentSurfacePackage as? SurfaceControlViewHost.SurfacePackage)?.release()
-        } catch (_: Throwable) {}
-        currentSurfacePackage = null
-        embeddedSurfaceView = null
+        if (!isMainOnlyApp()) {
+            try {
+                (currentSurfacePackage as? SurfaceControlViewHost.SurfacePackage)?.release()
+            } catch (_: Throwable) {}
+            currentSurfacePackage = null
+            embeddedSurfaceView = null
 
-        LogKeeper.log(context, "FloatingMiniAppWindow", "SURFACE_DETACHED id=$instanceId")
+            LogKeeper.log(context, "FloatingMiniAppWindow", "SURFACE_DETACHED id=$instanceId")
+        }
         contentContainer?.removeAllViews()
         contentContainer = null
         LogKeeper.log(context, "FloatingMiniAppWindow", "CONTENT_RELEASED id=$instanceId")

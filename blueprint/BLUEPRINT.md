@@ -459,6 +459,21 @@
   - **Non-Note Mini-App Preservation**: `SurfaceView` and `SurfaceControlViewHost` continue to serve other embedded mini-apps (Reader, Speed Monitor, future PWAs) as designed.
   - **Testing**: All 43 tests in `FloatingMiniAppFrameworkTest` passing 100%. Compile succeeded.
 
+- [x] **Phase 14.3: Main-Only Multi-Instance Note Mini-App Architecture (`ElementPlacementHelper.kt`, `ElementIdParser.kt`, `ElementActionDispatcher.kt`, `MiniAppManager.kt`, `FloatingMiniAppBridge.kt`, `FloatingMiniAppWindow.kt`)**:
+  - **Zero Heavy Dependency**: Note mini-app never acquires, starts, communicates with, or depends on `:heavy`. All IPC command sending (`sync_live_text`, `note_format`, `note_undo`, `START_OPERATION`, `PAUSE_OPERATION`, `STOP_OPERATION`), Heavy consumer acquisition (`acquireConsumer("miniapp_$instanceId")`), and `SurfaceView` / `SurfaceControlViewHost` dependencies are completely bypassed for `"note"` and `"test_notes"`. Result: 0 MB memory in `:heavy`, 0 IPC latency, 0 cross-process crash risk.
+  - **Multi-Instance Support Driven by Placement Identity**:
+    - Each placed Note element receives a stable unique identity: `system:test_notes:note_${timestamp}_${uuid}` generated at placement time via `ElementPlacementHelper.assignInstanceIfNote`.
+    - `ElementIdParser.parseSystemAction` parses `baseAction` (`test_notes`) while preserving full action ID (`test_notes:note_...`) on `SidebarItem.SystemAction`.
+    - `ElementActionDispatcher` and `MiniAppManager` route the placement's `instanceId` directly to `FloatingMiniAppBridge.toggleMiniApp(pageType, instanceId)`.
+    - Different Note elements open separate independent floating Note windows simultaneously.
+    - Tapping an existing Note element brings its window forward or wakes its folded bubble without creating duplicate instances.
+    - Each Note instance owns independent text, formatting (Font size, style, word wrap, line spacing), window bounds, folded launcher bubble, undo/redo stack, and snapshot in `DurableMiniAppStore`.
+    - Closing one Note instance deletes only its own snapshot, leaving all other open or sleeping Note windows intact.
+    - Legacy Note preservation: Clicking or restoring legacy `system:test_notes` without an instance ID seamlessly routes to `miniapp_test_notes` without data loss or crash.
+  - **Direct Native Input in Main**: Native multiline `EditText` hosted in `contentContainer` with direct Android IME and Gboard bindings under `TYPE_APPLICATION_OVERLAY`.
+  - **Shared Floating Shell Integrity**: Preserves `FloatingWindowManager`, `FloatingMiniAppWindow`, `FloatingMiniAppBridge`, `FloatingMiniAppLauncherBubble`, top-bar drag, maximize/restore, bottom-right sticker controls `[ ×  —  ↘ ]`, and `DurableMiniAppStore`.
+  - **Testing**: All 47 tests in `FloatingMiniAppFrameworkTest` passing 100%. Compile succeeded.
+
 ---
 
 ## Phase 14: PWA Engine & External AI App Integration (Tier 5 - Highest Complexity)

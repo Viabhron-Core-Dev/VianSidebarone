@@ -119,5 +119,47 @@ Capped at 500 lines per file.
 * Any deviation from what was requested, and why: None.
 * Any known issue or follow-up needed: Physical on-device verification of Note editor typing, word suggestions, formatting popover, sleep/wake persistence, and discard on close.
 
+---
+
+### Receipt 105 — Main-Only Multi-Instance Note Mini-App Architecture
+* Timestamp: 2026-11-09T03:17:00-08:00
+* One-line summary of what was requested: Complete decoupling of Note mini-app from Heavy process and implementation of placement-identity driven multi-instance Note support.
+* Exact files touched:
+  - `app/src/main/java/com/example/feature/element/ElementPlacementHelper.kt`
+  - `app/src/main/java/com/example/feature/element/ElementIdParser.kt`
+  - `app/src/main/java/com/example/feature/settings/AddElementActivity.kt`
+  - `app/src/main/java/com/example/feature/settings/ActionPickerActivity.kt`
+  - `app/src/main/java/com/example/feature/element/ElementActionDispatcher.kt`
+  - `app/src/main/java/com/example/feature/miniapps/MiniAppManager.kt`
+  - `app/src/main/java/com/example/feature/floating/FloatingMiniAppBridge.kt`
+  - `app/src/main/java/com/example/feature/floating/FloatingMiniAppWindow.kt`
+  - `app/src/main/java/com/example/core/ipc/HeavyProcessConnectionManager.kt`
+  - `app/src/test/java/com/example/feature/floating/FloatingMiniAppFrameworkTest.kt`
+  - `blueprint/BLUEPRINT.md`
+  - `receipts/RECEIPTS_100.md`
+* What was actually done — factual, not persuasive:
+  - Placement-Identity Driven Multi-Instance Note Architecture:
+    1. In `ElementPlacementHelper.kt`: Added `assignInstanceIfNote(id)` generating a unique, stable instance token (`system:test_notes:note_${timestamp}_${uuid}`) whenever a Note element is placed on the hybrid grid or handle layout.
+    2. In `ElementIdParser.kt`: Updated `parseSystemAction` to match on `baseAction` (`test_notes`) while preserving the full action ID with instance token on `SidebarItem.SystemAction`.
+    3. In `AddElementActivity.kt` and `ActionPickerActivity.kt`: Applied `assignInstanceIfNote` to return unique instance IDs on selection.
+    4. In `ElementActionDispatcher.kt`: Intercepted Note actions (`test_notes` or `test_notes:<instanceId>`) and `PageWindow` actions to extract the placement `instanceId` and forward it to `MiniAppManager.toggleApp`.
+    5. In `MiniAppManager.kt`: Added `instanceId: String? = null` parameter to `toggleApp`, delegating directly to `FloatingMiniAppBridge.toggleMiniApp(pageType, instanceId)`.
+  - Zero Heavy Process Dependency for Note Mini-App:
+    1. In `FloatingMiniAppBridge.kt`: Added `isMainOnlyMiniApp(appType)` returning true for `"note"` and `"test_notes"`.
+    2. In `openMiniApp`: Bypasses `connectionManager.acquireConsumer` completely when `isMainOnlyMiniApp(appType)` is true.
+    3. In `sleepMiniApp`: Skips Heavy snapshot request, IPC commands, and Heavy consumer release. Gathers snapshot from Main window (`getCurrentPayload()`), commits snapshot to `DurableMiniAppStore`, unregisters window, and displays launcher bubble.
+    4. In `closeMiniApp`: Skips Heavy stop command and consumer release. Unregisters window and deletes/updates snapshot in Main.
+    5. In `toggleMiniApp`: Supports `targetInstanceId`. When passed, finds the specific instance window/bubble/snapshot. Brings to front if already open but obscured; sleeps if focused; wakes if sleeping; opens if closed. Falls back to default `miniapp_test_notes` if no ID specified, preserving 100% backward compatibility for legacy Note placements.
+    6. In `FloatingMiniAppWindow.kt`: Added `isMainOnlyApp()` helper. In `syncLiveTextToHeavy`, `sendNoteCommand`, `onShow`, and `onHide`, returns immediately without contacting Heavy. In `onAttach` and `onDetach`, avoids registering Heavy connection listener. In `onDestroy`, skips SurfaceView/package release and saves authoritative text directly to `DurableMiniAppStore`. Added `setNoteTextForTesting` helper.
+    7. In `HeavyProcessConnectionManager.kt`: Added `getActiveConsumers(): Set<String>` method.
+  - Test Suite & Verification:
+    1. In `FloatingMiniAppFrameworkTest.kt`: Added `testMultiInstanceNoteIndependentWindowsAndPersistence`, `testMultiInstanceToggleRoutingAndFocusManagement`, `testZeroHeavyDependencyForNoteOperations`, and `testLegacyNoteRecoveryWithoutInstanceId`.
+    2. Updated existing Heavy lifecycle tests (`testCloseReleasesInstanceAndSurfaceBeforeFinalConsumerDisconnect`, `testFoldPersistsSuccessfullyBeforeReleasingHeavy`) to use `appType = "reader"` to continue verifying the Heavy process fold/close contract for Heavy-hosted mini-apps.
+    3. Executed `./gradlew :app:testDebugUnitTest --tests com.example.feature.floating.FloatingMiniAppFrameworkTest`: 47/47 tests passed (0 failures).
+    4. Executed `compile_applet`: Succeeded cleanly.
+* How it was verified: local build and JVM test suite only (`compile_applet` passed, 47/47 tests in `FloatingMiniAppFrameworkTest` passed) — on-device claim only / not tested on physical hardware. Physical on-device execution required to verify multiple simultaneous Note windows on screen, typing in both, folding one to a bubble, and tapping grid elements.
+* Any deviation from what was requested, and why: None.
+* Any known issue or follow-up needed: Physical on-device testing following the On-Device Verification Guide below.
+
 
 

@@ -128,7 +128,9 @@ object ElementActionDispatcher {
                         "MiniAppLaunchRouting",
                         "ROUTING_DIAG: ELEMENT_ACTION_PAGE_WINDOW item=${item.id} pageType=${item.pageType}"
                     )
-                    MiniAppManager.toggleApp(context, item.pageType)
+                    val instanceId = if (item.pageType.contains(":")) item.pageType.substringAfter(":") else if (item.pageType == "test_notes") "miniapp_test_notes" else null
+                    val baseType = item.pageType.substringBefore(":")
+                    MiniAppManager.toggleApp(context, baseType, instanceId)
                     true
                 }
 
@@ -161,6 +163,16 @@ object ElementActionDispatcher {
 
     internal fun handleSystemAction(context: Context, action: String, containerId: String = "sidebar"): Boolean {
         LogKeeper.log(context, TAG, "Handling system action: $action (container=$containerId)")
+        if (action == "test_notes" || action.startsWith("test_notes:") || action == "note" || action.startsWith("note:")) {
+            val instanceId = if (action.contains(":")) action.substringAfter(":") else "miniapp_test_notes"
+            LogKeeper.log(
+                context,
+                "MiniAppLaunchRouting",
+                "ROUTING_DIAG: ELEMENT_ACTION_SYSTEM_ACTION action=$action instanceId=$instanceId containerId=$containerId"
+            )
+            MiniAppManager.toggleApp(context, "test_notes", instanceId)
+            return true
+        }
         return when (action) {
             "force_stop_running_apps" -> {
                 if (LogKeeper.getProcessName(context).endsWith(":heavy")) {
@@ -200,15 +212,6 @@ object ElementActionDispatcher {
             }
             "work_notes" -> {
                 MiniAppManager.toggleApp(context, "work_notes")
-                true
-            }
-            "test_notes" -> {
-                LogKeeper.log(
-                    context,
-                    "MiniAppLaunchRouting",
-                    "ROUTING_DIAG: ELEMENT_ACTION_SYSTEM_ACTION action=test_notes containerId=$containerId"
-                )
-                MiniAppManager.toggleApp(context, "test_notes")
                 true
             }
             "ebook_reader" -> {

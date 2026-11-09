@@ -105,8 +105,9 @@ class ActionPickerActivity : ComponentActivity() {
                         )
                         android.widget.Toast.makeText(this@ActionPickerActivity, "Added: ${item.label}", android.widget.Toast.LENGTH_SHORT).show()
                     } else {
+                        val targetId = com.example.feature.element.ElementPlacementHelper.assignInstanceIfNote(id)
                         val resultIntent = Intent().apply {
-                            putExtra("ELEMENT_ID", id)
+                            putExtra("ELEMENT_ID", targetId)
                             putExtra("CONTAINER_ID", containerId)
                         }
                         setResult(Activity.RESULT_OK, resultIntent)

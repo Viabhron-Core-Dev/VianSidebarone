@@ -9,13 +9,13 @@ import com.example.feature.floating.FloatingMiniAppBridge
  * from Sidebar elements, Hybrid Grid items, Apps grid items, and gesture handlers.
  */
 object MiniAppManager {
-    fun toggleApp(context: Context, pageType: String) {
+    fun toggleApp(context: Context, pageType: String, instanceId: String? = null) {
         val caller = Throwable().stackTrace.getOrNull(1)?.let { "${it.className}.${it.methodName}:${it.lineNumber}" } ?: "unknown"
         LogKeeper.log(
             context,
             "MiniAppLaunchRouting",
-            "ROUTING_DIAG: MINI_APP_MANAGER_TOGGLE pageType=$pageType caller=$caller"
+            "ROUTING_DIAG: MINI_APP_MANAGER_TOGGLE pageType=$pageType instanceId=$instanceId caller=$caller"
         )
-        FloatingMiniAppBridge.getInstance(context).toggleMiniApp(pageType)
+        FloatingMiniAppBridge.getInstance(context).toggleMiniApp(pageType, instanceId)
     }
 }

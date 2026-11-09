@@ -305,6 +305,7 @@ class HeavyProcessConnectionManager internal constructor(
     }
 
     fun getActiveConsumerCount(): Int = synchronized(lock) { activeConsumers.size }
+    fun getActiveConsumers(): Set<String> = synchronized(lock) { activeConsumers.toSet() }
 
     /**
      * Forces a clean disconnect and reconnect sequence.

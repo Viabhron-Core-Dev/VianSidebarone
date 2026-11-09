@@ -660,7 +660,7 @@ class FloatingMiniAppFrameworkTest {
         val instanceId = "close_order_test"
         val snapshot = MiniAppRecoverySnapshot(
             instanceId = instanceId,
-            appType = "test_notes",
+            appType = "reader",
             state = MiniAppState.ACTIVE,
             windowBounds = WindowBounds(100, 100, 500, 600)
         )
@@ -680,7 +680,7 @@ class FloatingMiniAppFrameworkTest {
         connManager.setMockProxyForTesting(mockProxy, ConnectionState.CONNECTED)
         connManager.acquireConsumer("miniapp_$instanceId", reason = "test")
 
-        val window = FloatingMiniAppWindow(instanceId, testContext, "test_notes")
+        val window = FloatingMiniAppWindow(instanceId, testContext, "reader")
         wm.registerWindow(window)
         assertNotNull(wm.getWindow(instanceId))
 
@@ -768,7 +768,7 @@ class FloatingMiniAppFrameworkTest {
         val instanceId = "fold_persist_test"
         val initialSnapshot = MiniAppRecoverySnapshot(
             instanceId = instanceId,
-            appType = "test_notes",
+            appType = "reader",
             state = MiniAppState.ACTIVE,
             windowBounds = WindowBounds(150, 180, 520, 620),
             payload = mutableMapOf("text" to "Durable Note to Fold")
@@ -789,7 +789,7 @@ class FloatingMiniAppFrameworkTest {
         connManager.setMockProxyForTesting(mockProxy, ConnectionState.CONNECTED)
         connManager.acquireConsumer("miniapp_$instanceId", reason = "fold_test")
 
-        val window = FloatingMiniAppWindow(instanceId, testContext, "test_notes")
+        val window = FloatingMiniAppWindow(instanceId, testContext, "reader")
         com.example.core.FloatingWindowManager.getInstance(testContext).registerWindow(window)
 
         // Execute sleep / fold
@@ -1070,45 +1070,37 @@ class FloatingMiniAppFrameworkTest {
 
         val window = FloatingMiniAppWindow(instanceId, testContext, "test_notes")
         window.setWindowBounds(initialBounds)
+        window.createContentView(testContext)
+        window.setNoteTextForTesting(furtherEditedText)
         wm.registerWindow(window)
 
-        // 4. Fold (sleepMiniApp): must capture live EditText text from Heavy, persist durably, and release Heavy instance
+        // 4. Fold (sleepMiniApp): captures live text, persists durably in Main without contacting Heavy
         bridge.sleepMiniApp(instanceId)
-        assertEquals("Heavy instance must be released after fold", 0, host.getActiveInstanceCount())
 
         val persistedSnapshot = store.loadSnapshot(instanceId)
         assertNotNull("Durable snapshot must exist after fold", persistedSnapshot)
         assertEquals(MiniAppState.SLEEPING, persistedSnapshot!!.state)
-        assertEquals(
-            "Persisted note_text must match edited text",
-            furtherEditedText,
-            persistedSnapshot.payload[TestNotesMiniAppInstance.KEY_TEXT]
-        )
         assertEquals(
             "Persisted text key must also match edited text",
             furtherEditedText,
             persistedSnapshot.payload["text"]
         )
 
-        // 5. Wake: reconstruct a fresh TestNotesMiniAppInstance from the durable snapshot and mount its EditText
-        val wokenInstance = host.startInstance(instanceId, "test_notes", persistedSnapshot.windowBounds, persistedSnapshot.payload) as? TestNotesMiniAppInstance
-        assertNotNull(wokenInstance)
-        val wokenView = wokenInstance!!.createContentView(testContext)
-        val wokenEditText = wokenView.findViewById<android.widget.EditText>(android.R.id.edit) ?: wokenInstance.getEditTextForTesting()
-        assertNotNull(wokenEditText)
-        val actualWokenText = wokenEditText!!.text?.toString() ?: (wokenEditText as? EmbeddedNoteEditText)?.getMirroredText() ?: wokenInstance.noteText
+        // 5. Wake: reconstructs FloatingMiniAppWindow from the durable snapshot in Main
+        bridge.wakeMiniApp(instanceId)
+        val wokenWindow = wm.getWindow(instanceId) as? FloatingMiniAppWindow
+        assertNotNull("Woken window must exist", wokenWindow)
+        wokenWindow?.createContentView(testContext)
         assertEquals(
-            "Woken EditText must restore the exact edited text from snapshot",
+            "Woken window must restore the exact edited text from snapshot",
             furtherEditedText,
-            actualWokenText
+            wokenWindow?.getAuthoritativeNoteText()
         )
 
         // 6. Close with discard (deleteDurable = true): unsaved edits and durable snapshot must be discarded
-        wokenEditText.setText("Temporary unsaved text before close", android.widget.TextView.BufferType.EDITABLE)
         bridge.closeMiniApp(instanceId, deleteDurable = true)
 
         assertNull("Durable snapshot must be deleted on close with deleteDurable=true", store.loadSnapshot(instanceId))
-        assertEquals("Active instance in Heavy must be destroyed on close", 0, host.getActiveInstanceCount())
     }
 
     @Test
@@ -1679,6 +1671,158 @@ class FloatingMiniAppFrameworkTest {
 
         // Reset to default
         FloatingMiniAppWindow.EXPERIMENT_HEAVY_NATIVE_IME = defaultVal
+    }
+
+    @Test
+    fun testMultiInstanceNoteIndependentWindowsAndPersistence() {
+        val bridge = FloatingMiniAppBridge.getInstance(testContext)
+        val durableStore = DurableMiniAppStore.getInstance(testContext)
+        val wm = com.example.core.FloatingWindowManager.getInstance(testContext)
+
+        // 1. Open two separate Note instances simultaneously
+        val win1 = bridge.openMiniApp("note_alpha", "test_notes")
+        win1.createContentView(testContext)
+        val win2 = bridge.openMiniApp("note_beta", "test_notes")
+        win2.createContentView(testContext)
+
+        assertNotNull("Window 1 must be registered", wm.getWindow("note_alpha"))
+        assertNotNull("Window 2 must be registered", wm.getWindow("note_beta"))
+        assertNotSame("Windows must be distinct instances", win1, win2)
+
+        // 2. Set independent text in each editor
+        win1.setNoteTextForTesting("Alpha Note Content")
+        win2.setNoteTextForTesting("Beta Note Content")
+
+        // 3. Fold / Sleep win1 only
+        bridge.sleepMiniApp("note_alpha")
+
+        // Win1 should be unregistered from active windows and folded into a bubble
+        assertNull("Win1 should be unregistered after sleep", wm.getWindow("note_alpha"))
+        assertNotNull("Win2 must remain registered and active", wm.getWindow("note_beta"))
+
+        // Verify win1 snapshot stored durably with correct text
+        val snap1 = durableStore.loadSnapshot("note_alpha")
+        assertNotNull(snap1)
+        assertEquals(MiniAppState.SLEEPING, snap1?.state)
+        assertEquals("Alpha Note Content", snap1?.payload?.get("text"))
+
+        // Verify win2 remains ACTIVE with independent text
+        val snap2 = durableStore.loadSnapshot("note_beta")
+        assertNotNull(snap2)
+        assertEquals(MiniAppState.ACTIVE, snap2?.state)
+
+        // 4. Close win1 with deleteDurable = true
+        bridge.closeMiniApp("note_alpha", deleteDurable = true)
+        assertNull("Win1 snapshot must be deleted", durableStore.loadSnapshot("note_alpha"))
+        assertNotNull("Win2 snapshot must remain intact", durableStore.loadSnapshot("note_beta"))
+
+        // Clean up win2
+        bridge.closeMiniApp("note_beta", deleteDurable = true)
+        assertNull(durableStore.loadSnapshot("note_beta"))
+    }
+
+    @Test
+    fun testMultiInstanceToggleRoutingAndFocusManagement() {
+        val bridge = FloatingMiniAppBridge.getInstance(testContext)
+        val wm = com.example.core.FloatingWindowManager.getInstance(testContext)
+
+        // 1. Toggle Note 1 -> opens note_inst_1
+        bridge.toggleMiniApp("test_notes", "note_inst_1")
+        val win1 = wm.getWindow("note_inst_1") as? FloatingMiniAppWindow
+        assertNotNull("Note 1 must open", win1)
+        win1?.createContentView(testContext)
+
+        // 2. Toggle Note 2 -> opens note_inst_2 simultaneously
+        bridge.toggleMiniApp("test_notes", "note_inst_2")
+        val win2 = wm.getWindow("note_inst_2") as? FloatingMiniAppWindow
+        assertNotNull("Note 2 must open", win2)
+        win2?.createContentView(testContext)
+
+        // Current top window is note_inst_2
+        assertEquals("note_inst_2", wm.getTopVisibleWindow()?.windowId)
+
+        // 3. Toggle Note 1 again -> brings Note 1 to front (does NOT sleep yet because it wasn't on top/focused)
+        bridge.toggleMiniApp("test_notes", "note_inst_1")
+        assertEquals("note_inst_1", wm.getTopVisibleWindow()?.windowId)
+        assertTrue("Note 1 must remain visible", win1?.isVisible == true)
+
+        // 4. Toggle Note 1 while it is top & focused -> folds to sleep
+        bridge.toggleMiniApp("test_notes", "note_inst_1")
+        assertNull("Note 1 should fold to sleep", wm.getWindow("note_inst_1"))
+        assertNotNull("Note 2 must remain open", wm.getWindow("note_inst_2"))
+
+        // 5. Toggle Note 1 while sleeping -> wakes it back up
+        bridge.toggleMiniApp("test_notes", "note_inst_1")
+        assertNotNull("Note 1 must wake from sleep", wm.getWindow("note_inst_1"))
+
+        // Cleanup
+        bridge.closeMiniApp("note_inst_1", deleteDurable = true)
+        bridge.closeMiniApp("note_inst_2", deleteDurable = true)
+    }
+
+    @Test
+    fun testZeroHeavyDependencyForNoteOperations() {
+        val bridge = FloatingMiniAppBridge.getInstance(testContext)
+        val connectionManager = HeavyProcessConnectionManager.getInstance(testContext)
+
+        // Confirm bridge recognizes Note as Main-only
+        assertTrue(bridge.isMainOnlyMiniApp("test_notes"))
+        assertTrue(bridge.isMainOnlyMiniApp("note"))
+        assertFalse(bridge.isMainOnlyMiniApp("reader"))
+        assertFalse(bridge.isMainOnlyMiniApp("speed_monitor"))
+
+        // Open Note window
+        val noteWindow = bridge.openMiniApp("note_zero_heavy", "test_notes")
+        noteWindow.createContentView(testContext)
+
+        // Verify zero Heavy consumer acquired for this Note
+        assertFalse(
+            "Heavy must not acquire consumer for Note mini-app",
+            connectionManager.getActiveConsumers().contains("miniapp_note_zero_heavy")
+        )
+
+        // Verify lifecycle skips Heavy
+        noteWindow.onShow()
+        noteWindow.onHide()
+
+        // Fold and close Note
+        bridge.sleepMiniApp("note_zero_heavy")
+        bridge.wakeMiniApp("note_zero_heavy")
+        bridge.closeMiniApp("note_zero_heavy", deleteDurable = true)
+
+        // Heavy consumer must remain empty
+        assertFalse(connectionManager.getActiveConsumers().contains("miniapp_note_zero_heavy"))
+    }
+
+    @Test
+    fun testLegacyNoteRecoveryWithoutInstanceId() {
+        val bridge = FloatingMiniAppBridge.getInstance(testContext)
+        val durableStore = DurableMiniAppStore.getInstance(testContext)
+
+        // Seed a legacy snapshot saved with legacy instanceId "miniapp_test_notes"
+        val legacySnapshot = MiniAppRecoverySnapshot(
+            instanceId = "miniapp_test_notes",
+            appType = "test_notes",
+            state = MiniAppState.SLEEPING,
+            payload = mutableMapOf(
+                "text" to "Preserved Legacy Note Text",
+                "font_size" to "16.0"
+            )
+        )
+        durableStore.saveSnapshot(legacySnapshot)
+
+        // Calling toggleMiniApp with targetInstanceId = null should discover legacy snapshot
+        bridge.toggleMiniApp("test_notes", null)
+
+        val wm = com.example.core.FloatingWindowManager.getInstance(testContext)
+        val restoredWindow = wm.getWindow("miniapp_test_notes") as? FloatingMiniAppWindow
+        assertNotNull("Legacy window must restore without crash", restoredWindow)
+        restoredWindow?.createContentView(testContext)
+
+        assertEquals("Preserved Legacy Note Text", restoredWindow?.getAuthoritativeNoteText())
+
+        // Cleanup
+        bridge.closeMiniApp("miniapp_test_notes", deleteDurable = true)
     }
 }
 

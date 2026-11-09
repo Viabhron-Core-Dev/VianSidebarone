@@ -114,13 +114,14 @@ object ElementIdParser {
     }
 
     private fun parseSystemAction(id: String): SidebarItem.SystemAction? {
-        val action = id.substringAfter("system:")
-        val sysAction = ALL_SYSTEM_ACTIONS.find { it.action == action }
-            ?: ALL_SCREEN_CAPTURE_ACTIONS.find { it.action == action }
-            ?: ALL_UTILITIES_ACTIONS.filterIsInstance<SidebarItem.SystemAction>().find { it.action == action }
-            ?: ALL_FLOATING_WINDOWS.find { it.action == action }
+        val fullAction = id.substringAfter("system:")
+        val baseAction = fullAction.substringBefore(":")
+        val sysAction = ALL_SYSTEM_ACTIONS.find { it.action == baseAction || it.action == fullAction }
+            ?: ALL_SCREEN_CAPTURE_ACTIONS.find { it.action == baseAction || it.action == fullAction }
+            ?: ALL_UTILITIES_ACTIONS.filterIsInstance<SidebarItem.SystemAction>().find { it.action == baseAction || it.action == fullAction }
+            ?: ALL_FLOATING_WINDOWS.find { it.action == baseAction || it.action == fullAction }
             ?: return null
-        return SidebarItem.SystemAction(action, sysAction.label, sysAction.iconResId)
+        return SidebarItem.SystemAction(fullAction, sysAction.label, sysAction.iconResId)
     }
 
     private fun parsePageWindow(id: String): SidebarItem.PageWindow {
