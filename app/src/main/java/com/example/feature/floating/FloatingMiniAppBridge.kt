@@ -127,7 +127,8 @@ class FloatingMiniAppBridge private constructor(private val context: Context) {
 
         if (isMainOnlyMiniApp(appType)) {
             LogKeeper.log(context, TAG, "SLEEP_MAIN_ONLY id=$instanceId type=$appType (skipping Heavy)")
-            val finalPayload = editedPayload
+            window?.flushPendingSave()
+            val finalPayload = window?.getCurrentPayload() ?: editedPayload
             val textLength = (finalPayload[TestNotesMiniAppInstance.KEY_TEXT]
                 ?: finalPayload["text"])?.length ?: 0
 
@@ -310,6 +311,9 @@ class FloatingMiniAppBridge private constructor(private val context: Context) {
 
         if (isMainOnlyMiniApp(appType)) {
             LogKeeper.log(context, TAG, "CLOSE_MAIN_ONLY id=$instanceId type=$appType (skipping Heavy)")
+            if (!deleteDurable) {
+                window?.flushPendingSave()
+            }
             dismissLauncherBubble(instanceId)
             windowManager.unregisterWindow(instanceId)
             if (deleteDurable) {

@@ -472,7 +472,20 @@
     - Legacy Note preservation: Clicking or restoring legacy `system:test_notes` without an instance ID seamlessly routes to `miniapp_test_notes` without data loss or crash.
   - **Direct Native Input in Main**: Native multiline `EditText` hosted in `contentContainer` with direct Android IME and Gboard bindings under `TYPE_APPLICATION_OVERLAY`.
   - **Shared Floating Shell Integrity**: Preserves `FloatingWindowManager`, `FloatingMiniAppWindow`, `FloatingMiniAppBridge`, `FloatingMiniAppLauncherBubble`, top-bar drag, maximize/restore, bottom-right sticker controls `[ ×  —  ↘ ]`, and `DurableMiniAppStore`.
-  - **Testing**: All 47 tests in `FloatingMiniAppFrameworkTest` passing 100%. Compile succeeded.
+- [x] **Phase 14.4: Note Persistence Reliability & Undo/Redo Restoration (`NotePersistenceCoordinator.kt`, `FloatingMiniAppWindow.kt`, `FloatingMiniAppBridge.kt`)**:
+  - **Continuous Debounced Persistence**:
+    - Implemented `NotePersistenceCoordinator` encapsulating continuous saving for typing edits and formatting updates through `DurableMiniAppStore`.
+    - Safe 400ms debounce (`scheduleDebouncedSave(400L)`) eliminates disk I/O thrashing during fast typing.
+    - Single-threaded background executor (`NotePersistenceWorker`) offloads snapshot encoding and disk I/O off the main UI thread.
+    - Synchronous flush (`flushPendingSave()`) executed immediately before fold (`sleepMiniApp`), close (`closeMiniApp`), window hide (`onHide`), and window teardown (`onDestroy`), guaranteeing zero lost keystrokes.
+    - Monotonic sequence numbers (`saveSequence` vs `latestCommittedSequence`) prevent delayed background write tasks from overwriting newer flushes.
+  - **Undo / Redo History Persistence**:
+    - Bounded history limit (max 50 states) serialized cleanly into `undo_history` and `redo_history` as JSON arrays inside the durable snapshot payload.
+    - Full restoration of undo/redo stacks when reopening or waking Note from sleep.
+    - Strict editing behavior: editing after undo clears redo history; clear is undoable (pushes pre-clear text to undo stack); programmatic state restoration (`isRestoringState` flag) does not generate duplicate undo entries.
+    - Multiline text, double quotes, formatting characters, and emojis safely preserved via `JSONArray` escaping.
+    - Graceful fallback: legacy snapshots without history keys load with empty undo/redo stacks with zero migration crashes.
+  - **Testing**: 52/52 tests in `FloatingMiniAppFrameworkTest` passing 100%. `compile_applet` succeeded cleanly.
 
 ---
 

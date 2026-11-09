@@ -11,6 +11,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import java.util.ArrayDeque
 import android.text.Editable
 import android.text.InputType
 import android.text.TextWatcher
@@ -147,10 +148,11 @@ class FloatingMiniAppWindow(
     var isCardClippedToOutline: Boolean = true
         private set
 
-    private val undoStack = ArrayDeque<String>()
-    private val redoStack = ArrayDeque<String>()
-    @Volatile
-    private var isPerformingUndoRedo: Boolean = false
+    val notePersistence = NotePersistenceCoordinator(instanceId, context, durableStore)
+    val undoStack: ArrayDeque<String>
+        get() = notePersistence.undoStack
+    val redoStack: ArrayDeque<String>
+        get() = notePersistence.redoStack
 
     // Diagnostic Mode (Test A: Isolated Main-Process IME Test)
     var isDiagnosticMode: Boolean = false
@@ -1126,10 +1128,21 @@ class FloatingMiniAppWindow(
         savedSnapshot?.payload?.get("word_wrap")?.toBooleanStrictOrNull()?.let { currentWordWrap = it }
         savedSnapshot?.payload?.get("line_spacing")?.toFloatOrNull()?.let { currentLineSpacingMult = it }
 
+        // Restore undo/redo history from snapshot
+        notePersistence.restoreHistoryFromSnapshot(savedSnapshot)
+        notePersistence.updateStateSnapshot(
+            text = currentNoteText,
+            fontSize = currentFontSizeSp,
+            fontStyle = currentFontStyle,
+            wordWrap = currentWordWrap,
+            lineSpacing = currentLineSpacingMult,
+            bounds = bounds
+        )
+
         LogKeeper.log(
             context,
             "FloatingMiniAppWindow",
-            "CONTENT_CREATED id=$instanceId mode=main_native_editor textLength=${currentNoteText.length}"
+            "CONTENT_CREATED id=$instanceId mode=main_native_editor textLength=${currentNoteText.length} undoCount=${notePersistence.undoStack.size} redoCount=${notePersistence.redoStack.size}"
         )
 
         val cardCornerRadius = 16 * density
@@ -1256,22 +1269,36 @@ class FloatingMiniAppWindow(
                 FrameLayout.LayoutParams.MATCH_PARENT
             )
 
-            setText(currentNoteText)
+            notePersistence.isRestoringState = true
             try {
-                setSelection(currentNoteText.length)
-            } catch (_: Throwable) {}
+                setText(currentNoteText)
+                try {
+                    setSelection(currentNoteText.length)
+                } catch (_: Throwable) {}
+            } finally {
+                notePersistence.isRestoringState = false
+            }
 
             addTextChangedListener(object : TextWatcher {
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
                 override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
-                    if (isSyncingImeBridge) return
+                    if (isSyncingImeBridge || notePersistence.isRestoringState) return
                     val updated = s?.toString() ?: ""
-                    if (!isPerformingUndoRedo) {
-                        pushUndoState(currentNoteText)
+                    if (!notePersistence.isPerformingUndoRedo) {
+                        notePersistence.pushUndoState(currentNoteText)
                     }
                     currentNoteText = updated
                     activeTextAuthority = TextAuthority.IME_BRIDGE
                     hasUserEditedText = true
+                    notePersistence.updateStateSnapshot(
+                        text = updated,
+                        fontSize = currentFontSizeSp,
+                        fontStyle = currentFontStyle,
+                        wordWrap = currentWordWrap,
+                        lineSpacing = currentLineSpacingMult,
+                        bounds = bounds
+                    )
+                    notePersistence.scheduleDebouncedSave()
                     syncLiveTextToHeavy(updated, selectionStart.coerceIn(0, updated.length), selectionEnd.coerceIn(0, updated.length))
                 }
                 override fun afterTextChanged(s: Editable?) {}
@@ -1299,54 +1326,54 @@ class FloatingMiniAppWindow(
     }
 
     private fun pushUndoState(text: String) {
-        if (isPerformingUndoRedo) return
-        if (undoStack.isEmpty() || undoStack.last() != text) {
-            if (undoStack.size >= 50) undoStack.removeFirst()
-            undoStack.addLast(text)
-            redoStack.clear()
-        }
+        notePersistence.pushUndoState(text)
     }
 
     private fun performNoteUndo(): Boolean {
-        if (undoStack.isEmpty()) return false
-        isPerformingUndoRedo = true
+        notePersistence.isPerformingUndoRedo = true
         try {
-            val current = currentNoteText
-            redoStack.addLast(current)
-            val prev = undoStack.removeLast()
+            val prev = notePersistence.performUndo(currentNoteText) ?: return false
             updateNoteEditorText(prev)
             sendNoteCommand("note_undo")
             return true
         } finally {
-            isPerformingUndoRedo = false
+            notePersistence.isPerformingUndoRedo = false
         }
     }
 
     private fun performNoteRedo(): Boolean {
-        if (redoStack.isEmpty()) return false
-        isPerformingUndoRedo = true
+        notePersistence.isPerformingUndoRedo = true
         try {
-            val current = currentNoteText
-            undoStack.addLast(current)
-            val next = redoStack.removeLast()
+            val next = notePersistence.performRedo(currentNoteText) ?: return false
             updateNoteEditorText(next)
             sendNoteCommand("note_redo")
             return true
         } finally {
-            isPerformingUndoRedo = false
+            notePersistence.isPerformingUndoRedo = false
         }
     }
 
     private fun clearNoteContent() {
-        pushUndoState(currentNoteText)
+        notePersistence.prepareClear(currentNoteText)
         updateNoteEditorText("")
         sendNoteCommand("note_clear")
     }
 
     private fun updateNoteEditorText(text: String) {
+        if (!notePersistence.isPerformingUndoRedo && !notePersistence.isRestoringState && currentNoteText != text) {
+            notePersistence.pushUndoState(currentNoteText)
+        }
         currentNoteText = text
         hasUserEditedText = true
         activeTextAuthority = TextAuthority.IME_BRIDGE
+        notePersistence.updateStateSnapshot(
+            text = text,
+            fontSize = currentFontSizeSp,
+            fontStyle = currentFontStyle,
+            wordWrap = currentWordWrap,
+            lineSpacing = currentLineSpacingMult,
+            bounds = bounds
+        )
         val editor = noteEditText ?: return
         isSyncingImeBridge = true
         try {
@@ -1357,6 +1384,7 @@ class FloatingMiniAppWindow(
         } finally {
             isSyncingImeBridge = false
         }
+        notePersistence.scheduleDebouncedSave()
         syncLiveTextToHeavy(text, text.length, text.length)
     }
 
@@ -2103,6 +2131,15 @@ class FloatingMiniAppWindow(
         applyFormattingToNoteEditor()
         if (isMainOnlyApp()) {
             // Note formatting is 100% locally authoritative in Main
+            notePersistence.updateStateSnapshot(
+                text = currentNoteText,
+                fontSize = currentFontSizeSp,
+                fontStyle = currentFontStyle,
+                wordWrap = currentWordWrap,
+                lineSpacing = currentLineSpacingMult,
+                bounds = bounds
+            )
+            notePersistence.scheduleDebouncedSave()
             return
         }
         val params = mapOf(
@@ -2684,7 +2721,7 @@ class FloatingMiniAppWindow(
         currentNoteText = authoritativeText
 
         return if (hasUserEditedText || activeTextAuthority != TextAuthority.NONE || noteEditText != null || imeBridgeEditText != null) {
-            mapOf(
+            val baseMap = mutableMapOf(
                 TestNotesMiniAppInstance.KEY_TEXT to currentNoteText,
                 "text" to currentNoteText,
                 "font_size" to currentFontSizeSp.toString(),
@@ -2699,10 +2736,38 @@ class FloatingMiniAppWindow(
                     TextAuthority.NONE -> "default"
                 }
             )
+            if (isMainOnlyApp()) {
+                baseMap[NotePersistenceCoordinator.KEY_UNDO_HISTORY] = notePersistence.serializeHistory(notePersistence.undoStack)
+                baseMap[NotePersistenceCoordinator.KEY_REDO_HISTORY] = notePersistence.serializeHistory(notePersistence.redoStack)
+            }
+            baseMap
         } else {
             emptyMap()
         }
     }
+
+    fun flushPendingSave(): Boolean {
+        return if (isMainOnlyApp()) {
+            notePersistence.updateStateSnapshot(
+                text = currentNoteText,
+                fontSize = currentFontSizeSp,
+                fontStyle = currentFontStyle,
+                wordWrap = currentWordWrap,
+                lineSpacing = currentLineSpacingMult,
+                bounds = bounds
+            )
+            notePersistence.flushPendingSave()
+        } else {
+            false
+        }
+    }
+
+    fun getUndoStackForTesting(): ArrayDeque<String> = notePersistence.undoStack
+    fun getRedoStackForTesting(): ArrayDeque<String> = notePersistence.redoStack
+    fun performUndoForTesting(): Boolean = performNoteUndo()
+    fun performRedoForTesting(): Boolean = performNoteRedo()
+    fun clearContentForTesting() = clearNoteContent()
+    fun flushPendingSaveForTesting(): Boolean = flushPendingSave()
 
     override fun onShow() {
         super.onShow()
@@ -2754,6 +2819,7 @@ class FloatingMiniAppWindow(
         super.onHide()
         deactivateEmbeddedEditorIme()
         if (isMainOnlyApp()) {
+            flushPendingSave()
             LogKeeper.log(context, "FloatingMiniAppWindow", "ON_HIDE_MAIN_ONLY id=$instanceId appType=$appType (skipping Heavy)")
             return
         }
@@ -2792,6 +2858,9 @@ class FloatingMiniAppWindow(
     override fun onDestroy() {
         super.onDestroy()
         deactivateEmbeddedEditorIme()
+        if (isMainOnlyApp()) {
+            flushPendingSave()
+        }
         if (!isMainOnlyApp()) {
             HeavyProcessConnectionManager.getInstance(context).removeListener(connectionListener)
         }
@@ -2804,10 +2873,7 @@ class FloatingMiniAppWindow(
         if (payload.isNotEmpty()) {
             durableStore.updatePayload(
                 instanceId,
-                mapOf(
-                    TestNotesMiniAppInstance.KEY_TEXT to currentNoteText,
-                    "text" to currentNoteText
-                )
+                payload
             )
         }
         noteEditText = null

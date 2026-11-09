@@ -1824,6 +1824,204 @@ class FloatingMiniAppFrameworkTest {
         // Cleanup
         bridge.closeMiniApp("miniapp_test_notes", deleteDurable = true)
     }
+
+    @Test
+    fun testNoteDebouncedPersistenceAndFlushing() {
+        NotePersistenceCoordinator.TEST_DISPATCH_IMMEDIATELY = false
+        val bridge = FloatingMiniAppBridge.getInstance(testContext)
+        val durableStore = DurableMiniAppStore.getInstance(testContext)
+        val wm = com.example.core.FloatingWindowManager.getInstance(testContext)
+
+        val noteId = "note_persistence_test_1"
+        bridge.openMiniApp(noteId, "test_notes")
+
+        val window = wm.getWindow(noteId) as? FloatingMiniAppWindow
+        assertNotNull("Window should be created", window)
+        window!!.createContentView(testContext)
+
+        // Type text into editor
+        window.setNoteTextForTesting("First line of notes")
+        // Before flush/timer, snapshot hasn't committed "First line of notes" yet
+        // Now invoke synchronous flush
+        val flushResult = window.flushPendingSaveForTesting()
+        assertTrue("Flush should succeed", flushResult)
+
+        // Verify committed snapshot in DurableMiniAppStore
+        val snapshot = durableStore.loadSnapshot(noteId)
+        assertNotNull(snapshot)
+        assertEquals("First line of notes", snapshot!!.payload[TestNotesMiniAppInstance.KEY_TEXT])
+
+        // Type more text and sleep window - sleepMiniApp must trigger flushPendingSave
+        window.setNoteTextForTesting("First line of notes\nSecond line after debounce")
+        bridge.sleepMiniApp(noteId)
+
+        val sleepingSnapshot = durableStore.loadSnapshot(noteId)
+        assertNotNull(sleepingSnapshot)
+        assertEquals(MiniAppState.SLEEPING, sleepingSnapshot!!.state)
+        assertEquals(
+            "First line of notes\nSecond line after debounce",
+            sleepingSnapshot.payload[TestNotesMiniAppInstance.KEY_TEXT]
+        )
+
+        // Wake and verify content matches
+        bridge.wakeMiniApp(noteId)
+        val wokenWindow = wm.getWindow(noteId) as? FloatingMiniAppWindow
+        assertNotNull(wokenWindow)
+        wokenWindow!!.createContentView(testContext)
+        assertEquals(
+            "First line of notes\nSecond line after debounce",
+            wokenWindow.getAuthoritativeNoteText()
+        )
+
+        bridge.closeMiniApp(noteId, deleteDurable = true)
+        NotePersistenceCoordinator.TEST_DISPATCH_IMMEDIATELY = true
+    }
+
+    @Test
+    fun testNoteUndoRedoHistoryRestoration() {
+        NotePersistenceCoordinator.TEST_DISPATCH_IMMEDIATELY = true
+        val bridge = FloatingMiniAppBridge.getInstance(testContext)
+        val durableStore = DurableMiniAppStore.getInstance(testContext)
+        val wm = com.example.core.FloatingWindowManager.getInstance(testContext)
+
+        val noteId = "note_undo_history_test"
+        bridge.openMiniApp(noteId, "test_notes")
+
+        val window = wm.getWindow(noteId) as? FloatingMiniAppWindow
+        assertNotNull(window)
+        window!!.createContentView(testContext)
+
+        // Simulate typing sequence: State A -> State B -> State C
+        window.setNoteTextForTesting("State A")
+        window.setNoteTextForTesting("State B")
+        window.setNoteTextForTesting("State C")
+
+        assertTrue("Undo stack should contain prior states", window.getUndoStackForTesting().isNotEmpty())
+        assertEquals(0, window.getRedoStackForTesting().size)
+
+        // Perform undo: goes to State B, pushes State C to redo
+        val undoSuccess = window.performUndoForTesting()
+        assertTrue("Undo should succeed", undoSuccess)
+        assertEquals("State B", window.getAuthoritativeNoteText())
+        assertEquals(1, window.getRedoStackForTesting().size)
+
+        // Sleep (fold) the Note mini-app
+        bridge.sleepMiniApp(noteId)
+
+        // Verify history JSON serialized into durable snapshot
+        val sleepingSnapshot = durableStore.loadSnapshot(noteId)
+        assertNotNull(sleepingSnapshot)
+        val undoJson = sleepingSnapshot!!.payload[NotePersistenceCoordinator.KEY_UNDO_HISTORY]
+        val redoJson = sleepingSnapshot.payload[NotePersistenceCoordinator.KEY_REDO_HISTORY]
+        assertNotNull(undoJson)
+        assertNotNull(redoJson)
+        assertTrue(undoJson!!.contains("State A"))
+        assertTrue(redoJson!!.contains("State C"))
+
+        // Wake Note mini-app into a reconstructed window
+        bridge.wakeMiniApp(noteId)
+        val wokenWindow = wm.getWindow(noteId) as? FloatingMiniAppWindow
+        assertNotNull(wokenWindow)
+        wokenWindow!!.createContentView(testContext)
+
+        // Verify current text is State B and history is restored
+        assertEquals("State B", wokenWindow.getAuthoritativeNoteText())
+        assertEquals(1, wokenWindow.getRedoStackForTesting().size)
+
+        // Perform redo in woken window: should restore State C
+        val redoSuccess = wokenWindow.performRedoForTesting()
+        assertTrue("Redo should succeed after wake", redoSuccess)
+        assertEquals("State C", wokenWindow.getAuthoritativeNoteText())
+
+        bridge.closeMiniApp(noteId, deleteDurable = true)
+    }
+
+    @Test
+    fun testNoteMultilineAndSpecialCharactersHistorySerialization() {
+        NotePersistenceCoordinator.TEST_DISPATCH_IMMEDIATELY = true
+        val coordinator = NotePersistenceCoordinator(
+            instanceId = "test_special_chars",
+            context = testContext,
+            durableStore = DurableMiniAppStore.getInstance(testContext)
+        )
+
+        val complexText1 = "First line\nSecond line with \"quotes\" & symbols: \uD83D\uDCDD \t\r"
+        val complexText2 = "State 2: JSON-like {\"key\": \"value\", \"arr\": [1,2,3]}"
+
+        coordinator.pushUndoState(complexText1)
+        coordinator.pushUndoState(complexText2)
+
+        val serialized = coordinator.serializeHistory(coordinator.undoStack)
+        val deserialized = coordinator.deserializeHistory(serialized)
+
+        assertEquals(2, deserialized.size)
+        assertEquals(complexText1, deserialized.removeFirst())
+        assertEquals(complexText2, deserialized.removeFirst())
+    }
+
+    @Test
+    fun testNoteStaleWriteProtection() {
+        val store = DurableMiniAppStore.getInstance(testContext)
+        val coordinator = NotePersistenceCoordinator(
+            instanceId = "test_stale_writes",
+            context = testContext,
+            durableStore = store
+        )
+
+        coordinator.updateStateSnapshot("State 1", 15f, "regular", true, 1.2f)
+        val seq1 = 1L
+        val seq2 = 2L
+
+        // Commit seq2 first (representing a newer synchronous flush)
+        val payload2 = mapOf("text" to "Newer State", TestNotesMiniAppInstance.KEY_TEXT to "Newer State")
+        val commit2 = coordinator.javaClass.getDeclaredMethod(
+            "commitSave",
+            Long::class.javaPrimitiveType,
+            Map::class.java,
+            WindowBounds::class.java
+        ).apply { isAccessible = true }
+
+        val res2 = commit2.invoke(coordinator, seq2, payload2, null) as Boolean
+        assertTrue("Seq2 commit should succeed", res2)
+
+        // Now attempt committing stale seq1 (representing delayed background runnable)
+        val payload1 = mapOf("text" to "Stale State", TestNotesMiniAppInstance.KEY_TEXT to "Stale State")
+        val res1 = commit2.invoke(coordinator, seq1, payload1, null) as Boolean
+        assertFalse("Stale seq1 commit must be rejected", res1)
+
+        val snapshot = store.loadSnapshot("test_stale_writes")
+        assertEquals("Newer State", snapshot?.payload?.get("text"))
+        store.deleteSnapshot("test_stale_writes")
+    }
+
+    @Test
+    fun testNoteLegacySnapshotWithoutHistoryLoadsGracefully() {
+        val store = DurableMiniAppStore.getInstance(testContext)
+        val legacyId = "test_legacy_no_history"
+
+        // Snapshot without KEY_UNDO_HISTORY or KEY_REDO_HISTORY
+        val legacy = MiniAppRecoverySnapshot(
+            instanceId = legacyId,
+            appType = "test_notes",
+            payload = mutableMapOf(
+                TestNotesMiniAppInstance.KEY_TEXT to "Legacy Content",
+                "font_size" to "14.0"
+            )
+        )
+        store.saveSnapshot(legacy)
+
+        val coordinator = NotePersistenceCoordinator(
+            instanceId = legacyId,
+            context = testContext,
+            durableStore = store
+        )
+
+        coordinator.restoreHistoryFromSnapshot(legacy)
+        assertTrue("Undo stack must be empty for legacy snapshot", coordinator.undoStack.isEmpty())
+        assertTrue("Redo stack must be empty for legacy snapshot", coordinator.redoStack.isEmpty())
+
+        store.deleteSnapshot(legacyId)
+    }
 }
 
 

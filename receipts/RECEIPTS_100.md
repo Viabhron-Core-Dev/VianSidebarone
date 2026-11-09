@@ -161,5 +161,51 @@ Capped at 500 lines per file.
 * Any deviation from what was requested, and why: None.
 * Any known issue or follow-up needed: Physical on-device testing following the On-Device Verification Guide below.
 
+---
+
+### Receipt 106 — Note Persistence Reliability Follow-up & Undo/Redo Restoration
+* Timestamp: 2026-11-09T10:24:00-08:00
+* One-line summary of what was requested: Implement continuous debounced persistence, fold/close synchronous flushing, stale-write protection, and persistent undo/redo history restoration for the Main-only multi-instance Note mini-app.
+* Exact files touched:
+  - `app/src/main/java/com/example/feature/floating/NotePersistenceCoordinator.kt`
+  - `app/src/main/java/com/example/feature/floating/FloatingMiniAppWindow.kt`
+  - `app/src/main/java/com/example/feature/floating/FloatingMiniAppBridge.kt`
+  - `app/src/test/java/com/example/feature/floating/FloatingMiniAppFrameworkTest.kt`
+  - `blueprint/BLUEPRINT.md`
+  - `receipts/RECEIPTS_100.md`
+* What was actually done — factual, not persuasive:
+  - Created `NotePersistenceCoordinator.kt`:
+    1. Encapsulated continuous saving, debouncing, undo/redo history, and lifecycle flushing for each Note instance (`instanceId`).
+    2. Scheduled 400ms debounce (`scheduleDebouncedSave`) using `Handler` posting to a single-threaded background executor (`NotePersistenceWorker`) to offload JSON encoding and file write operations from the UI thread.
+    3. Implemented synchronous immediate flush (`flushPendingSave`) for lifecycle transitions.
+    4. Implemented monotonic sequence counter (`saveSequence: AtomicLong` and `latestCommittedSequence: AtomicLong`) ensuring stale background write runnables are skipped if a newer sequence has already committed.
+    5. Implemented bounded undo/redo stacks (`MAX_HISTORY = 50`) with `serializeHistory` and `deserializeHistory` using `JSONArray`.
+    6. Protected undo stack during programmatic state restoration (`isRestoringState`) and during undo/redo actions (`isPerformingUndoRedo`).
+  - Integrated into `FloatingMiniAppWindow.kt`:
+    1. Replaced local history stacks with delegation to `notePersistence`.
+    2. In `setupNoteContentView`: Restored undo and redo stacks from `savedSnapshot` via `notePersistence.restoreHistoryFromSnapshot()`, updated initial state snapshot, and guarded `setText` with `isRestoringState`.
+    3. In `TextWatcher.onTextChanged`: Protected against programmatic restoration, pushed undo state, updated snapshot, and called `scheduleDebouncedSave()`.
+    4. In `updateNoteEditorText`: Pushed undo state when called as a direct edit, updated snapshot, and scheduled debounced save.
+    5. In `dispatchFormatCommand`: Updated snapshot and scheduled debounced save on font size/style/wrap/spacing changes.
+    6. In `getCurrentPayload()`: Included `KEY_UNDO_HISTORY` and `KEY_REDO_HISTORY` in the payload map for Main-only apps.
+    7. In `flushPendingSave()`: Updated snapshot and synchronously committed state.
+    8. In `onHide()` and `onDestroy()`: Called `flushPendingSave()` before window teardown.
+    9. Added testing helpers (`getUndoStackForTesting()`, `getRedoStackForTesting()`, `performUndoForTesting()`, `performRedoForTesting()`, `clearContentForTesting()`, `flushPendingSaveForTesting()`).
+  - Integrated into `FloatingMiniAppBridge.kt`:
+    1. In `sleepMiniApp`: Called `window?.flushPendingSave()` before taking the snapshot and unregistering the window.
+    2. In `closeMiniApp`: If `!deleteDurable`, called `window?.flushPendingSave()` before marking the state closed.
+  - Tested in `FloatingMiniAppFrameworkTest.kt`:
+    1. Added `testNoteDebouncedPersistenceAndFlushing()` verifying typing, flushing, sleep flush, and wake restoration.
+    2. Added `testNoteUndoRedoHistoryRestoration()` verifying multi-state typing, undo, sleep/wake serialization across window reconstruction, and redo in the woken window.
+    3. Added `testNoteMultilineAndSpecialCharactersHistorySerialization()` verifying complex multiline, quotes, JSON, and unicode emoji escaping.
+    4. Added `testNoteStaleWriteProtection()` verifying stale sequence rejection.
+    5. Added `testNoteLegacySnapshotWithoutHistoryLoadsGracefully()` verifying zero-crash backward compatibility.
+    6. Executed JVM tests: 52/52 tests in `FloatingMiniAppFrameworkTest` passed cleanly.
+  - Verification:
+    - `compile_applet` succeeded cleanly.
+* How it was verified: local build and JVM unit test suite only (`compile_applet` passed, 52/52 tests in `FloatingMiniAppFrameworkTest` passed) — on-device claim only / not tested on physical hardware. Physical on-device execution required to verify real-time debounced file writes and undo/redo across fold/wake cycles.
+* Any deviation from what was requested, and why: None.
+* Any known issue or follow-up needed: Physical on-device testing following the On-Device Verification Guide below.
+
 
 
