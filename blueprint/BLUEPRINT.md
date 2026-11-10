@@ -498,9 +498,10 @@
   - **Clear Interaction Optimization**:
     - Removed redundant synchronous flush from `prepareClear()`. Clear pushes pre-clear state to undo stack, empties latest text, and schedules debounced save through the normal async persistence path.
   - **Testing**: 59/59 tests in `FloatingMiniAppFrameworkTest` passing 100%. `compile_applet` succeeded cleanly.
-- [x] **Phase 14.6: Authoritative, Non-Blocking Note Lifecycle Flush (`NotePersistenceCoordinator.kt`, `FloatingMiniAppWindow.kt`, `FloatingMiniAppBridge.kt`)**:
+- [x] **Phase 14.6: Authoritative, Non-Blocking Note Lifecycle Flush & Teardown Idempotency (`NotePersistenceCoordinator.kt`, `FloatingMiniAppWindow.kt`, `FloatingMiniAppBridge.kt`, `DurableMiniAppStore.kt`)**:
   - **Authoritative Single-Coordinator Persistence**:
     - Removed duplicate persistence paths: deleted secondary `durableStore.saveSnapshot()` in `FloatingMiniAppBridge.sleepMiniApp` and skipped redundant `durableStore.updatePayload()` in `FloatingMiniAppWindow.onDestroy()` for Main-only apps.
+    - Eliminated duplicate synchronous `flushPendingSave()` from `FloatingMiniAppWindow.onHide()` and `onDestroy()`. Replaced with idempotent `if (notePersistence.hasPendingEdits()) scheduleDebouncedSave(0L)`. Guarantees zero main-thread disk I/O during window teardown.
     - `NotePersistenceCoordinator` is the sole authority for Note content, formatting, history, bounds, and lifecycle state (`MiniAppState.ACTIVE`, `SLEEPING`, `CLOSED`).
     - Merged target lifecycle state into the atomic commit transaction so snapshots are persisted consistently in one atomic disk operation.
   - **Non-Blocking Asynchronous UI Lifecycle Flush**:
@@ -508,12 +509,16 @@
     - Lifecycle transitions (`sleepMiniApp`, `closeMiniApp`) no longer block the Android UI/main thread. Dispatches disk I/O on background thread pool and invokes completion callback on `Looper.getMainLooper()`.
     - Window teardown and launcher bubble display happen strictly after confirmed successful write.
     - Failed or timed-out flushes abort the fold/close transaction, keeping the active Note window visible and recoverable with zero data loss.
-    - Guarded against stale late completions: background tasks that finish after timeout are safely ignored.
+  - **Operation Generation Authorization & Race-Safety**:
+    - Implemented operation generation (`currentOperationGeneration`, `activeOperationGeneration`) tracking.
+    - Timed-out or aborted flushes invalidate `activeOperationGeneration`, preventing late background workers from committing target states (`SLEEPING` or `CLOSED`).
+    - Snapshot content (text and formatting) is preserved safely without corrupting lifecycle state.
+    - Backed timeouts by daemon `ScheduledExecutorService` (`timeoutScheduler`) for deterministic timeout triggers across Android devices and test environments.
   - **Multi-Instance Thread Pool Isolation**:
     - Replaced single-thread executor with `Executors.newCachedThreadPool` using daemon worker threads.
     - Independent Note instances never head-of-line block each other's persistence or lifecycle flushes.
     - Strict per-instance serialization preserved via `getInstanceLock(instanceId)`.
-  - **Testing**: 71/71 tests in `FloatingMiniAppFrameworkTest` passing 100%. `compile_applet` succeeded cleanly.
+  - **Testing**: 71/71 tests in `FloatingMiniAppFrameworkTest` passing 100% with genuine asynchronous multi-threaded verification. `compile_applet` succeeded cleanly.
 
 ---
 

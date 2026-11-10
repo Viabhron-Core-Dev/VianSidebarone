@@ -2259,6 +2259,7 @@ class FloatingMiniAppFrameworkTest {
 
     @Test
     fun testPhase146NonBlockingFoldTransactionCompletesOnSuccess() {
+        NotePersistenceCoordinator.TEST_DISPATCH_IMMEDIATELY = false
         val bridge = FloatingMiniAppBridge.getInstance(testContext)
         val store = DurableMiniAppStore.getInstance(testContext)
         val wm = com.example.core.FloatingWindowManager.getInstance(testContext)
@@ -2270,14 +2271,14 @@ class FloatingMiniAppFrameworkTest {
         win!!.createContentView(testContext)
         win.setNoteTextForTesting("Phase 14.6 Fold Content")
 
-        var completed = false
+        val latch = java.util.concurrent.CountDownLatch(1)
         var resultSuccess = false
         bridge.sleepMiniApp(noteId) { ok ->
-            completed = true
             resultSuccess = ok
+            latch.countDown()
         }
 
-        assertTrue("Fold callback must complete", completed)
+        assertTrue("Fold latch must count down asynchronously", latch.await(3, java.util.concurrent.TimeUnit.SECONDS))
         assertTrue("Fold callback must report success", resultSuccess)
         assertNull("Window must be unregistered on successful fold", wm.getWindow(noteId))
 
@@ -2287,32 +2288,35 @@ class FloatingMiniAppFrameworkTest {
         assertEquals("Phase 14.6 Fold Content", snap.payload[TestNotesMiniAppInstance.KEY_TEXT])
 
         bridge.closeMiniApp(noteId, deleteDurable = true)
+        NotePersistenceCoordinator.TEST_DISPATCH_IMMEDIATELY = true
     }
 
     @Test
     fun testPhase146FoldAbortsAndKeepsWindowOnFailedFlush() {
+        NotePersistenceCoordinator.TEST_DISPATCH_IMMEDIATELY = false
         val failingStore = object : DurableMiniAppStore(testContext) {
             override fun saveSnapshot(snapshot: MiniAppRecoverySnapshot): Boolean = false
         }
-        val wm = com.example.core.FloatingWindowManager.getInstance(testContext)
         val noteId = "p146_fold_fail"
 
         val coordinator = NotePersistenceCoordinator(noteId, testContext, failingStore)
         coordinator.updateStateSnapshot("Unsaved notes", 15f, "regular", true, 1.2f)
 
-        var completed = false
+        val latch = java.util.concurrent.CountDownLatch(1)
         var resultSuccess = true
         coordinator.flushPendingSaveAsync(timeoutMs = 1000L, targetState = MiniAppState.SLEEPING) { success ->
-            completed = true
             resultSuccess = success
+            latch.countDown()
         }
 
-        assertTrue("Async flush callback must be invoked", completed)
+        assertTrue("Async flush callback must be invoked", latch.await(3, java.util.concurrent.TimeUnit.SECONDS))
         assertFalse("Async flush callback must report failure", resultSuccess)
+        NotePersistenceCoordinator.TEST_DISPATCH_IMMEDIATELY = true
     }
 
     @Test
     fun testPhase146NonBlockingCloseRetainsStateOnSuccess() {
+        NotePersistenceCoordinator.TEST_DISPATCH_IMMEDIATELY = false
         val bridge = FloatingMiniAppBridge.getInstance(testContext)
         val store = DurableMiniAppStore.getInstance(testContext)
         val wm = com.example.core.FloatingWindowManager.getInstance(testContext)
@@ -2324,14 +2328,14 @@ class FloatingMiniAppFrameworkTest {
         win!!.createContentView(testContext)
         win.setNoteTextForTesting("Close Retained Note")
 
-        var closeDone = false
+        val latch = java.util.concurrent.CountDownLatch(1)
         var closeSuccess = false
         bridge.closeMiniApp(noteId, deleteDurable = false) { ok ->
-            closeDone = true
             closeSuccess = ok
+            latch.countDown()
         }
 
-        assertTrue("Close callback must complete", closeDone)
+        assertTrue("Close latch must count down asynchronously", latch.await(3, java.util.concurrent.TimeUnit.SECONDS))
         assertTrue("Close callback must report success", closeSuccess)
         assertNull("Window must be unregistered", wm.getWindow(noteId))
 
@@ -2341,10 +2345,12 @@ class FloatingMiniAppFrameworkTest {
         assertEquals("Close Retained Note", snap.payload[TestNotesMiniAppInstance.KEY_TEXT])
 
         bridge.closeMiniApp(noteId, deleteDurable = true)
+        NotePersistenceCoordinator.TEST_DISPATCH_IMMEDIATELY = true
     }
 
     @Test
     fun testPhase146CloseWithDeleteDurablePurgesImmediately() {
+        NotePersistenceCoordinator.TEST_DISPATCH_IMMEDIATELY = false
         val bridge = FloatingMiniAppBridge.getInstance(testContext)
         val store = DurableMiniAppStore.getInstance(testContext)
         val wm = com.example.core.FloatingWindowManager.getInstance(testContext)
@@ -2363,10 +2369,12 @@ class FloatingMiniAppFrameworkTest {
         assertTrue("Purge callback must succeed", purged)
         assertNull("Window must be unregistered", wm.getWindow(noteId))
         assertNull("Snapshot must be completely deleted from durableStore", store.loadSnapshot(noteId))
+        NotePersistenceCoordinator.TEST_DISPATCH_IMMEDIATELY = true
     }
 
     @Test
     fun testPhase146SingleAuthorityCoordinatorEliminatesDuplicateWrites() {
+        NotePersistenceCoordinator.TEST_DISPATCH_IMMEDIATELY = false
         var saveCallCount = 0
         val trackingStore = object : DurableMiniAppStore(testContext) {
             override fun saveSnapshot(snapshot: MiniAppRecoverySnapshot): Boolean {
@@ -2379,12 +2387,14 @@ class FloatingMiniAppFrameworkTest {
         val coordinator = NotePersistenceCoordinator(noteId, testContext, trackingStore)
         coordinator.updateStateSnapshot("Single Authority Text", 15f, "regular", true, 1.2f)
 
-        // Single asynchronous flush to SLEEPING
+        val latch = java.util.concurrent.CountDownLatch(1)
         var flushDone = false
         coordinator.flushPendingSaveAsync(timeoutMs = 1000L, targetState = MiniAppState.SLEEPING) { success ->
             flushDone = success
+            latch.countDown()
         }
 
+        assertTrue(latch.await(3, java.util.concurrent.TimeUnit.SECONDS))
         assertTrue(flushDone)
         assertEquals("Exactly one saveSnapshot call must occur during flush without duplicate writes", 1, saveCallCount)
 
@@ -2392,25 +2402,68 @@ class FloatingMiniAppFrameworkTest {
         assertNotNull(snap)
         assertEquals(MiniAppState.SLEEPING, snap!!.state)
         assertEquals("Single Authority Text", snap.payload[TestNotesMiniAppInstance.KEY_TEXT])
+        NotePersistenceCoordinator.TEST_DISPATCH_IMMEDIATELY = true
     }
 
     @Test
-    fun testPhase146LateCompletionAfterTimeoutIgnored() {
-        val store = DurableMiniAppStore.getInstance(testContext)
-        val noteId = "p146_timeout_ignore"
-        val coordinator = NotePersistenceCoordinator(noteId, testContext, store)
-
-        val completedCount = java.util.concurrent.atomic.AtomicInteger(0)
-        // With timeoutMs = 0L, timeout triggers immediately
-        coordinator.flushPendingSaveAsync(timeoutMs = 0L, targetState = MiniAppState.SLEEPING) { success ->
-            completedCount.incrementAndGet()
+    fun testPhase146LateCompletionAfterTimeoutCannotCommitTargetState() {
+        NotePersistenceCoordinator.TEST_DISPATCH_IMMEDIATELY = false
+        val workerHoldLatch = java.util.concurrent.CountDownLatch(1)
+        val loadEnteredLatch = java.util.concurrent.CountDownLatch(1)
+        val delayedStore = object : DurableMiniAppStore(testContext) {
+            override fun loadSnapshot(instanceId: String): MiniAppRecoverySnapshot? {
+                if (instanceId == "p146_timeout_late_state") {
+                    loadEnteredLatch.countDown()
+                    // Pause worker during snapshot loading so timeout occurs before this save commits target state
+                    workerHoldLatch.await(5, java.util.concurrent.TimeUnit.SECONDS)
+                }
+                return super.loadSnapshot(instanceId)
+            }
         }
 
-        assertEquals("Callback should be invoked once on timeout", 1, completedCount.get())
+        val noteId = "p146_timeout_late_state"
+        // Seed initial snapshot with ACTIVE
+        delayedStore.saveSnapshot(
+            MiniAppRecoverySnapshot(
+                instanceId = noteId,
+                appType = "test_notes",
+                state = MiniAppState.ACTIVE
+            )
+        )
+
+        val coordinator = NotePersistenceCoordinator(noteId, testContext, delayedStore)
+        coordinator.updateStateSnapshot("Unfinished save text", 15f, "regular", true, 1.2f)
+
+        val callbackLatch = java.util.concurrent.CountDownLatch(1)
+        var callbackResult: Boolean? = null
+
+        // Trigger async flush with very short timeout (50ms)
+        coordinator.flushPendingSaveAsync(timeoutMs = 50L, targetState = MiniAppState.SLEEPING) { success ->
+            callbackResult = success
+            callbackLatch.countDown()
+        }
+
+        // Wait for timeout to report failure
+        assertTrue("Timeout callback must fire promptly", callbackLatch.await(1, java.util.concurrent.TimeUnit.SECONDS))
+        assertEquals(false, callbackResult)
+
+        // Now release background worker
+        workerHoldLatch.countDown()
+        Thread.sleep(200)
+
+        // Verify the durable snapshot did NOT get updated to SLEEPING because the operation was invalidated
+        val finalSnap = delayedStore.loadSnapshot(noteId)
+        assertNotNull(finalSnap)
+        assertFalse("Late completion after timeout must NOT commit target state SLEEPING", finalSnap!!.state == MiniAppState.SLEEPING)
+        assertEquals("State must remain ACTIVE or unaffected", MiniAppState.ACTIVE, finalSnap.state)
+
+        delayedStore.deleteSnapshot(noteId)
+        NotePersistenceCoordinator.TEST_DISPATCH_IMMEDIATELY = true
     }
 
     @Test
     fun testPhase146MultiInstanceThreadPoolIsolation() {
+        NotePersistenceCoordinator.TEST_DISPATCH_IMMEDIATELY = false
         val store = DurableMiniAppStore.getInstance(testContext)
         val note1 = "p146_iso_1"
         val note2 = "p146_iso_2"
@@ -2421,12 +2474,20 @@ class FloatingMiniAppFrameworkTest {
         coord1.updateStateSnapshot("Note 1 Text", 15f, "regular", true, 1.2f)
         coord2.updateStateSnapshot("Note 2 Text", 18f, "bold", false, 1.5f)
 
+        val latch = java.util.concurrent.CountDownLatch(2)
         var done1 = false
         var done2 = false
 
-        coord1.flushPendingSaveAsync(1000L, MiniAppState.SLEEPING) { done1 = it }
-        coord2.flushPendingSaveAsync(1000L, MiniAppState.SLEEPING) { done2 = it }
+        coord1.flushPendingSaveAsync(2000L, MiniAppState.SLEEPING) {
+            done1 = it
+            latch.countDown()
+        }
+        coord2.flushPendingSaveAsync(2000L, MiniAppState.SLEEPING) {
+            done2 = it
+            latch.countDown()
+        }
 
+        assertTrue("Both notes must persist asynchronously without deadlocking each other", latch.await(4, java.util.concurrent.TimeUnit.SECONDS))
         assertTrue(done1)
         assertTrue(done2)
 
@@ -2439,10 +2500,12 @@ class FloatingMiniAppFrameworkTest {
 
         store.deleteSnapshot(note1)
         store.deleteSnapshot(note2)
+        NotePersistenceCoordinator.TEST_DISPATCH_IMMEDIATELY = true
     }
 
     @Test
     fun testPhase146PreservesUndoRedoHistoryAcrossAsyncFlush() {
+        NotePersistenceCoordinator.TEST_DISPATCH_IMMEDIATELY = false
         val store = DurableMiniAppStore.getInstance(testContext)
         val noteId = "p146_undo_flush"
         val coordinator = NotePersistenceCoordinator(noteId, testContext, store)
@@ -2451,11 +2514,14 @@ class FloatingMiniAppFrameworkTest {
         coordinator.pushUndoState("Draft 2")
         coordinator.updateStateSnapshot("Draft 3", 15f, "regular", true, 1.2f)
 
+        val latch = java.util.concurrent.CountDownLatch(1)
         var flushSuccess = false
-        coordinator.flushPendingSaveAsync(1000L, MiniAppState.SLEEPING) { success ->
+        coordinator.flushPendingSaveAsync(2000L, MiniAppState.SLEEPING) { success ->
             flushSuccess = success
+            latch.countDown()
         }
 
+        assertTrue(latch.await(3, java.util.concurrent.TimeUnit.SECONDS))
         assertTrue(flushSuccess)
         val snapshot = store.loadSnapshot(noteId)
         assertNotNull(snapshot)
@@ -2468,10 +2534,12 @@ class FloatingMiniAppFrameworkTest {
         assertEquals("Draft 2", restoredCoordinator.undoStack.last)
 
         store.deleteSnapshot(noteId)
+        NotePersistenceCoordinator.TEST_DISPATCH_IMMEDIATELY = true
     }
 
     @Test
     fun testPhase146PreservesBoundsAcrossLifecycleTransitions() {
+        NotePersistenceCoordinator.TEST_DISPATCH_IMMEDIATELY = false
         val store = DurableMiniAppStore.getInstance(testContext)
         val noteId = "p146_bounds_persist"
         val coordinator = NotePersistenceCoordinator(noteId, testContext, store)
@@ -2479,11 +2547,14 @@ class FloatingMiniAppFrameworkTest {
         val customBounds = WindowBounds(200, 300, 700, 900)
         coordinator.updateStateSnapshot("Bounded note", 15f, "regular", true, 1.2f, customBounds)
 
+        val latch = java.util.concurrent.CountDownLatch(1)
         var flushSuccess = false
-        coordinator.flushPendingSaveAsync(1000L, MiniAppState.SLEEPING) { success ->
+        coordinator.flushPendingSaveAsync(2000L, MiniAppState.SLEEPING) { success ->
             flushSuccess = success
+            latch.countDown()
         }
 
+        assertTrue(latch.await(3, java.util.concurrent.TimeUnit.SECONDS))
         assertTrue(flushSuccess)
         val snap = store.loadSnapshot(noteId)
         assertNotNull(snap)
@@ -2493,6 +2564,7 @@ class FloatingMiniAppFrameworkTest {
         assertEquals(900, snap.windowBounds.height)
 
         store.deleteSnapshot(noteId)
+        NotePersistenceCoordinator.TEST_DISPATCH_IMMEDIATELY = true
     }
 
     @Test
@@ -2521,6 +2593,7 @@ class FloatingMiniAppFrameworkTest {
 
     @Test
     fun testPhase146StaleSequenceSupersededDuringAsyncFlush() {
+        NotePersistenceCoordinator.TEST_DISPATCH_IMMEDIATELY = false
         val store = DurableMiniAppStore.getInstance(testContext)
         val noteId = "p146_stale_seq"
         val coordinator = NotePersistenceCoordinator(noteId, testContext, store)
@@ -2529,14 +2602,20 @@ class FloatingMiniAppFrameworkTest {
         coordinator.flushPendingSave(1000L) // seq 1
 
         coordinator.updateStateSnapshot("Latest Flush Version", 15f, "regular", true, 1.2f)
+        val latch = java.util.concurrent.CountDownLatch(1)
         var flushDone = false
-        coordinator.flushPendingSaveAsync(1000L, MiniAppState.SLEEPING) { flushDone = it }
+        coordinator.flushPendingSaveAsync(2000L, MiniAppState.SLEEPING) {
+            flushDone = it
+            latch.countDown()
+        }
+        assertTrue(latch.await(3, java.util.concurrent.TimeUnit.SECONDS))
         assertTrue(flushDone)
 
         val snap = store.loadSnapshot(noteId)
         assertEquals("Latest Flush Version", snap?.payload?.get("text"))
 
         store.deleteSnapshot(noteId)
+        NotePersistenceCoordinator.TEST_DISPATCH_IMMEDIATELY = true
     }
 
     @Test

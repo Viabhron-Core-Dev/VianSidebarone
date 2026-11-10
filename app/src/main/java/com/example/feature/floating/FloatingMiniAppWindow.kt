@@ -2853,7 +2853,9 @@ class FloatingMiniAppWindow(
         super.onHide()
         deactivateEmbeddedEditorIme()
         if (isMainOnlyApp()) {
-            flushPendingSave()
+            if (notePersistence.hasPendingEdits()) {
+                notePersistence.scheduleDebouncedSave(0L)
+            }
             LogKeeper.log(context, "FloatingMiniAppWindow", "ON_HIDE_MAIN_ONLY id=$instanceId appType=$appType (skipping Heavy)")
             return
         }
@@ -2893,7 +2895,10 @@ class FloatingMiniAppWindow(
         super.onDestroy()
         deactivateEmbeddedEditorIme()
         if (isMainOnlyApp()) {
-            flushPendingSave()
+            // Teardown is idempotent: only schedule write if there are uncommitted pending edits
+            if (notePersistence.hasPendingEdits()) {
+                notePersistence.scheduleDebouncedSave(0L)
+            }
         }
         if (!isMainOnlyApp()) {
             HeavyProcessConnectionManager.getInstance(context).removeListener(connectionListener)

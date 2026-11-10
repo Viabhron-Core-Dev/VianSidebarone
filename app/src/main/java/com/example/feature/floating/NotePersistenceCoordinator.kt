@@ -12,6 +12,7 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.Future
+import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.AtomicLong
@@ -176,11 +177,13 @@ class NotePersistenceCoordinator(
         }
     }
 
-    /**
-     * Flushes any pending write safely without performing disk I/O on the Android main/UI thread.
-     * Guaranteed to persist the latest state before fold, close, or window teardown.
-     * Uses a bounded timeout (2000ms) to ensure the UI thread cannot deadlock.
-     */
+    private val currentOperationGeneration = AtomicLong(0L)
+    private val activeOperationGeneration = AtomicLong(0L)
+
+    fun hasPendingEdits(): Boolean {
+        return saveSequence.get() > latestCommittedSequence.get() || pendingSaveRunnable != null
+    }
+
     /**
      * Flushes any pending write safely without performing disk I/O on the Android main/UI thread.
      * Guaranteed to persist the latest state before fold, close, or window teardown.
@@ -197,25 +200,36 @@ class NotePersistenceCoordinator(
             }
         }
         val seq = saveSequence.incrementAndGet()
+        val opGen = if (targetState != null) currentOperationGeneration.incrementAndGet() else 0L
+        if (targetState != null) {
+            activeOperationGeneration.set(opGen)
+        }
         val snapshotPayload = createPayloadMap()
         val boundsCopy = latestBounds?.copyBounds()
 
         val isMainThread = Looper.myLooper() == Looper.getMainLooper()
         if (TEST_DISPATCH_IMMEDIATELY || (!isMainThread && timeoutMs <= 0)) {
-            return commitSave(seq, snapshotPayload, boundsCopy, targetState)
+            return commitSave(seq, snapshotPayload, boundsCopy, targetState, opGen)
         }
 
         // Offload disk I/O to backgroundExecutor and safely wait up to timeoutMs
         val future: Future<Boolean> = backgroundExecutor.submit(Callable {
-            commitSave(seq, snapshotPayload, boundsCopy, targetState)
+            commitSave(seq, snapshotPayload, boundsCopy, targetState, opGen)
         })
 
         return try {
             future.get(timeoutMs, TimeUnit.MILLISECONDS)
         } catch (e: TimeoutException) {
-            LogKeeper.log(context, TAG, "NOTE_PERSIST_FLUSH_TIMEOUT id=$instanceId seq=$seq timeoutMs=$timeoutMs")
+            if (targetState != null) {
+                // Invalidate this lifecycle transition operation generation so background worker cannot commit targetState later
+                activeOperationGeneration.compareAndSet(opGen, 0L)
+            }
+            LogKeeper.log(context, TAG, "NOTE_PERSIST_FLUSH_TIMEOUT id=$instanceId seq=$seq opGen=$opGen timeoutMs=$timeoutMs")
             false
         } catch (t: Throwable) {
+            if (targetState != null) {
+                activeOperationGeneration.compareAndSet(opGen, 0L)
+            }
             LogKeeper.logError(context, TAG, "Error waiting for flush save on instance: $instanceId", t)
             false
         }
@@ -225,7 +239,7 @@ class NotePersistenceCoordinator(
      * Authoritative, non-blocking asynchronous flush for Android UI lifecycle transitions.
      * Dispatches disk I/O on background executor without blocking the caller thread.
      * Guarantees callback is dispatched on the Android main thread.
-     * Prevents stale completions if timed out.
+     * Prevents stale completions or unauthorized lifecycle commits if timed out or aborted.
      */
     fun flushPendingSaveAsync(
         timeoutMs: Long = DEFAULT_FLUSH_TIMEOUT_MS,
@@ -239,41 +253,59 @@ class NotePersistenceCoordinator(
             }
         }
         val seq = saveSequence.incrementAndGet()
+        val opGen = if (targetState != null) currentOperationGeneration.incrementAndGet() else 0L
+        if (targetState != null) {
+            activeOperationGeneration.set(opGen)
+        }
         val snapshotPayload = createPayloadMap()
         val boundsCopy = latestBounds?.copyBounds()
 
         if (TEST_DISPATCH_IMMEDIATELY) {
-            val res = commitSave(seq, snapshotPayload, boundsCopy, targetState)
+            val res = commitSave(seq, snapshotPayload, boundsCopy, targetState, opGen)
             onComplete(res)
             return
         }
 
         val completed = java.util.concurrent.atomic.AtomicBoolean(false)
 
-        val timeoutRunnable = Runnable {
-            if (completed.compareAndSet(false, true)) {
-                LogKeeper.log(context, TAG, "NOTE_PERSIST_FLUSH_ASYNC_TIMEOUT id=$instanceId seq=$seq timeoutMs=$timeoutMs")
-                onComplete(false)
-            }
-        }
-        mainHandler.postDelayed(timeoutRunnable, timeoutMs)
+        val timeoutFuture: java.util.concurrent.ScheduledFuture<*>? = if (timeoutMs > 0) {
+            timeoutScheduler.schedule({
+                if (completed.compareAndSet(false, true)) {
+                    if (targetState != null) {
+                        // Invalidate this lifecycle transition so worker cannot commit targetState later
+                        activeOperationGeneration.compareAndSet(opGen, 0L)
+                    }
+                    LogKeeper.log(context, TAG, "NOTE_PERSIST_FLUSH_ASYNC_TIMEOUT id=$instanceId seq=$seq opGen=$opGen timeoutMs=$timeoutMs")
+                    dispatchCallback { onComplete(false) }
+                }
+            }, timeoutMs, TimeUnit.MILLISECONDS)
+        } else null
 
         backgroundExecutor.execute {
             val success = try {
-                commitSave(seq, snapshotPayload, boundsCopy, targetState)
+                commitSave(seq, snapshotPayload, boundsCopy, targetState, opGen)
             } catch (t: Throwable) {
                 LogKeeper.logError(context, TAG, "Error in flushPendingSaveAsync on instance: $instanceId", t)
                 false
             }
 
-            mainHandler.post {
-                mainHandler.removeCallbacks(timeoutRunnable)
-                if (completed.compareAndSet(false, true)) {
-                    onComplete(success)
-                } else {
-                    LogKeeper.log(context, TAG, "NOTE_PERSIST_FLUSH_ASYNC_IGNORED_LATE id=$instanceId seq=$seq success=$success")
-                }
+            timeoutFuture?.cancel(false)
+            if (completed.compareAndSet(false, true)) {
+                dispatchCallback { onComplete(success) }
+            } else {
+                LogKeeper.log(context, TAG, "NOTE_PERSIST_FLUSH_ASYNC_IGNORED_LATE id=$instanceId seq=$seq opGen=$opGen success=$success")
             }
+        }
+    }
+
+    private fun dispatchCallback(action: () -> Unit) {
+        if (Looper.getMainLooper() != null && Looper.myLooper() != Looper.getMainLooper()) {
+            val posted = mainHandler.post(action)
+            if (!posted) {
+                action()
+            }
+        } else {
+            action()
         }
     }
 
@@ -281,13 +313,21 @@ class NotePersistenceCoordinator(
         seq: Long,
         payloadMap: Map<String, String>,
         bounds: WindowBounds?
-    ): Boolean = commitSave(seq, payloadMap, bounds, null)
+    ): Boolean = commitSave(seq, payloadMap, bounds, null, 0L)
 
     private fun commitSave(
         seq: Long,
         payloadMap: Map<String, String>,
         bounds: WindowBounds?,
         targetState: MiniAppState?
+    ): Boolean = commitSave(seq, payloadMap, bounds, targetState, 0L)
+
+    private fun commitSave(
+        seq: Long,
+        payloadMap: Map<String, String>,
+        bounds: WindowBounds?,
+        targetState: MiniAppState?,
+        opGen: Long
     ): Boolean {
         synchronized(instanceCommitLock) {
             if (seq < latestCommittedSequence.get()) {
@@ -298,15 +338,29 @@ class NotePersistenceCoordinator(
 
             return try {
                 val existing = durableStore.loadSnapshot(instanceId)
+
+                // Verify lifecycle operation authorization after loading snapshot
+                // to guard against timeouts that occurred during snapshot loading or thread scheduling
+                val effectiveTargetState: MiniAppState? = if (targetState != null) {
+                    if (opGen == 0L || activeOperationGeneration.get() != opGen) {
+                        LogKeeper.log(context, TAG, "NOTE_PERSIST_LIFECYCLE_UNAUTHORIZED id=$instanceId opGen=$opGen active=${activeOperationGeneration.get()} - target state ignored")
+                        null // Save content only, do NOT commit unauthorized lifecycle state
+                    } else {
+                        targetState
+                    }
+                } else {
+                    null
+                }
+
                 val snapshotToSave = existing ?: MiniAppRecoverySnapshot(
                     instanceId = instanceId,
                     appType = "test_notes",
-                    state = targetState ?: MiniAppState.ACTIVE,
+                    state = effectiveTargetState ?: MiniAppState.ACTIVE,
                     windowBounds = bounds?.copyBounds() ?: WindowBounds(120, 150, 650, 850)
                 )
 
-                if (targetState != null) {
-                    snapshotToSave.state = targetState
+                if (effectiveTargetState != null) {
+                    snapshotToSave.state = effectiveTargetState
                 }
                 if (bounds != null) {
                     snapshotToSave.windowBounds = bounds.copyBounds()
@@ -407,6 +461,14 @@ class NotePersistenceCoordinator(
         private val defaultExecutor: ExecutorService by lazy {
             Executors.newCachedThreadPool { runnable ->
                 Thread(runnable, "NotePersistenceWorker").apply {
+                    isDaemon = true
+                }
+            }
+        }
+
+        private val timeoutScheduler: ScheduledExecutorService by lazy {
+            Executors.newScheduledThreadPool(1) { runnable ->
+                Thread(runnable, "NoteFlushTimeout").apply {
                     isDaemon = true
                 }
             }

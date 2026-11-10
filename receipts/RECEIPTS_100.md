@@ -290,3 +290,40 @@ Capped at 500 lines per file.
 * How it was verified: local build and JVM unit test suite only (`compile_applet` passed, 71/71 tests in `FloatingMiniAppFrameworkTest` passed) — on-device claim only / not tested on physical hardware. Physical on-device execution required to observe smooth, non-blocking folding and closing animations under load.
 * Any deviation from what was requested, and why: None.
 * Any known issue or follow-up needed: Physical on-device testing following the On-Device Verification Guide below.
+
+---
+
+### Receipt 109 — Phase 14.6 Correction: Note Lifecycle Persistence & Teardown Idempotency
+* Timestamp: 2026-11-10T12:12:00-08:00
+* One-line summary of what was requested: Remove duplicate synchronous persistence during window teardown, implement operation generation authorization against late-commit races, make timeout handling deterministic via ScheduledExecutorService, and verify genuine asynchronous execution across 71 unit tests.
+* Exact files touched:
+  - `app/src/main/java/com/example/feature/floating/NotePersistenceCoordinator.kt`
+  - `app/src/main/java/com/example/feature/floating/FloatingMiniAppWindow.kt`
+  - `app/src/main/java/com/example/feature/floating/DurableMiniAppStore.kt`
+  - `app/src/test/java/com/example/feature/floating/FloatingMiniAppFrameworkTest.kt`
+  - `blueprint/BLUEPRINT.md`
+  - `receipts/RECEIPTS_100.md`
+* What was actually done — factual, not persuasive:
+  - Teardown Idempotency & Duplicate Elimination:
+    1. In `FloatingMiniAppWindow.kt`: Removed duplicate synchronous `flushPendingSave()` calls from `onHide()` and `onDestroy()`.
+    2. Replaced with idempotent check: `if (notePersistence.hasPendingEdits()) { notePersistence.scheduleDebouncedSave(0L) }`.
+    3. Guarantees zero main-thread disk I/O and non-blocking teardown during window dismiss or activity teardown.
+  - Operation Generation Authorization (`opGen`):
+    1. In `NotePersistenceCoordinator.kt`: Added `currentOperationGeneration` (`AtomicLong`) and `activeOperationGeneration` (`AtomicLong`).
+    2. Each lifecycle flush assigns a unique generation counter (`opGen`) to the target state transition (`SLEEPING` or `CLOSED`).
+    3. On timeout or failure, `activeOperationGeneration.compareAndSet(opGen, 0L)` invalidates authorization.
+    4. Evaluated authorization in `commitSave` right after snapshot loading and prior to state mutation. If invalidated, target state transition is discarded while updated text/formatting is safely preserved.
+  - Deterministic Timeout Handling:
+    1. In `NotePersistenceCoordinator.kt`: Replaced `mainHandler.postDelayed` with a daemon `ScheduledExecutorService` (`timeoutScheduler`).
+    2. Guarantees deterministic timeout firing regardless of Android UI looper queuing states or JVM unit test threading.
+    3. Added `dispatchCallback` to invoke callbacks on the Android UI thread (`Looper.getMainLooper()`) when present.
+  - Store Interceptability:
+    1. In `DurableMiniAppStore.kt`: Marked `open fun loadSnapshot(instanceId: String): MiniAppRecoverySnapshot?` to support test interceptors and subclass isolation alongside existing `open fun saveSnapshot`.
+  - Genuine Asynchronous Concurrency Verification:
+    1. In `FloatingMiniAppFrameworkTest.kt`: Converted Phase 14.6 test suite from synchronous test mode to real multi-threaded execution (`TEST_DISPATCH_IMMEDIATELY = false`).
+    2. Verified timeout invalidation using `CountDownLatch`, simulated load latency, and latch synchronization.
+    3. Ran `./gradlew :app:testDebugUnitTest --tests com.example.feature.floating.FloatingMiniAppFrameworkTest`: 71/71 tests passed (0 failures).
+    4. Ran `compile_applet`: Succeeded cleanly.
+* How it was verified: local build and JVM unit test suite only (`compile_applet` passed, 71/71 tests in `FloatingMiniAppFrameworkTest` passed) — on-device claim only / not tested on physical hardware. Physical on-device execution required to observe smooth folding and closing transitions without ANRs.
+* Any deviation from what was requested, and why: None.
+* Any known issue or follow-up needed: Physical on-device testing following the On-Device Verification Guide below.

@@ -108,7 +108,7 @@ open class DurableMiniAppStore internal constructor(context: Context) {
     /**
      * Loads the durable recovery snapshot for a given instanceId.
      */
-    fun loadSnapshot(instanceId: String): MiniAppRecoverySnapshot? {
+    open fun loadSnapshot(instanceId: String): MiniAppRecoverySnapshot? {
         synchronized(lock) {
             val file = getFileForInstance(instanceId)
             if (!file.exists() || !file.isFile) return null
