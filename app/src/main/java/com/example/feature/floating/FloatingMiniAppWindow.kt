@@ -2746,19 +2746,53 @@ class FloatingMiniAppWindow(
         }
     }
 
-    fun flushPendingSave(): Boolean {
+    fun flushPendingSave(targetState: MiniAppState? = null): Boolean {
         return if (isMainOnlyApp()) {
+            val normalBoundsToSave = if (!isMaximized) {
+                normalFloatingBounds.copyBounds()
+            } else {
+                maximizeRestoreBounds?.copyBounds() ?: normalFloatingBounds.copyBounds()
+            }
             notePersistence.updateStateSnapshot(
                 text = currentNoteText,
                 fontSize = currentFontSizeSp,
                 fontStyle = currentFontStyle,
                 wordWrap = currentWordWrap,
                 lineSpacing = currentLineSpacingMult,
-                bounds = bounds
+                bounds = normalBoundsToSave
             )
-            notePersistence.flushPendingSave()
+            notePersistence.flushPendingSave(targetState = targetState)
         } else {
             false
+        }
+    }
+
+    /**
+     * Non-blocking asynchronous flush delegating directly to NotePersistenceCoordinator.
+     * Guarantees callback is dispatched on the Android main thread.
+     */
+    fun flushPendingSaveAsync(
+        timeoutMs: Long = NotePersistenceCoordinator.DEFAULT_FLUSH_TIMEOUT_MS,
+        targetState: MiniAppState? = null,
+        onComplete: (Boolean) -> Unit
+    ) {
+        if (isMainOnlyApp()) {
+            val normalBoundsToSave = if (!isMaximized) {
+                normalFloatingBounds.copyBounds()
+            } else {
+                maximizeRestoreBounds?.copyBounds() ?: normalFloatingBounds.copyBounds()
+            }
+            notePersistence.updateStateSnapshot(
+                text = currentNoteText,
+                fontSize = currentFontSizeSp,
+                fontStyle = currentFontStyle,
+                wordWrap = currentWordWrap,
+                lineSpacing = currentLineSpacingMult,
+                bounds = normalBoundsToSave
+            )
+            notePersistence.flushPendingSaveAsync(timeoutMs, targetState, onComplete)
+        } else {
+            onComplete(false)
         }
     }
 
@@ -2869,12 +2903,15 @@ class FloatingMiniAppWindow(
         }
         globalLayoutListener = null
 
-        val payload = getCurrentPayload()
-        if (payload.isNotEmpty()) {
-            durableStore.updatePayload(
-                instanceId,
-                payload
-            )
+        // For non-Main apps only: Main-only apps are authoritatively persisted by NotePersistenceCoordinator
+        if (!isMainOnlyApp()) {
+            val payload = getCurrentPayload()
+            if (payload.isNotEmpty()) {
+                durableStore.updatePayload(
+                    instanceId,
+                    payload
+                )
+            }
         }
         noteEditText = null
         imeBridgeEditText = null

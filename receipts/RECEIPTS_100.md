@@ -246,5 +246,47 @@ Capped at 500 lines per file.
 * Any deviation from what was requested, and why: None.
 * Any known issue or follow-up needed: Physical on-device testing following the On-Device Verification Guide below.
 
+---
 
-
+### Receipt 108 — Phase 14.6 Authoritative, Non-Blocking Note Lifecycle Flush
+* Timestamp: 2026-11-10T09:32:00-08:00
+* One-line summary of what was requested: Make Note persistence coordinator flush authoritative and non-blocking, eliminate duplicate persistence paths in bridge and window destroy, isolate Note instances via cached thread pool, and add 12 deterministic unit tests.
+* Exact files touched:
+  - `app/src/main/java/com/example/feature/floating/NotePersistenceCoordinator.kt`
+  - `app/src/main/java/com/example/feature/floating/FloatingMiniAppWindow.kt`
+  - `app/src/main/java/com/example/feature/floating/FloatingMiniAppBridge.kt`
+  - `app/src/test/java/com/example/feature/floating/FloatingMiniAppFrameworkTest.kt`
+  - `blueprint/BLUEPRINT.md`
+  - `receipts/RECEIPTS_100.md`
+* What was actually done — factual, not persuasive:
+  - Lifecycle Flush Authority & Duplicate Elimination:
+    1. In `FloatingMiniAppBridge.kt`: Removed secondary `durableStore.saveSnapshot()` write from `sleepMiniApp`. In Main-only apps, `NotePersistenceCoordinator` is the single authority for state and content persistence.
+    2. In `FloatingMiniAppWindow.kt`: Prevented duplicate `durableStore.updatePayload(...)` in `onDestroy()` for Main-only apps (`!isMainOnlyApp()`), eliminating uncoordinated disk overwrites on window tear-down.
+    3. In `NotePersistenceCoordinator.kt`: Added `targetState: MiniAppState?` parameter to `flushPendingSave` and `flushPendingSaveAsync`. Transitions to `MiniAppState.SLEEPING` and `MiniAppState.CLOSED` commit in one atomic snapshot write.
+  - Non-Blocking Asynchronous UI Lifecycle Flush:
+    1. In `NotePersistenceCoordinator.kt`: Added `flushPendingSaveAsync(timeoutMs = DEFAULT_FLUSH_TIMEOUT_MS, targetState = null, onComplete: (Boolean) -> Unit)`. Offloads disk writes completely to `backgroundExecutor`, posts completion to `mainHandler` on the Android UI thread, and sets a timeout callback that cancels late completions.
+    2. In `FloatingMiniAppWindow.kt`: Added `flushPendingSaveAsync(timeoutMs, targetState, onComplete)`.
+    3. In `FloatingMiniAppBridge.kt`: Updated `sleepMiniApp(instanceId, onComplete)` to use `window.flushPendingSaveAsync(targetState = MiniAppState.SLEEPING)`. If successful: unregisters window, displays launcher bubble, and logs `FOLD_TRANSACTION_COMPLETE`. If failed: keeps window active and logs `FOLD_TRANSACTION_ABORTED`.
+    4. In `FloatingMiniAppBridge.kt`: Updated `closeMiniApp(instanceId, deleteDurable, onComplete)` to use `window.flushPendingSaveAsync(targetState = MiniAppState.CLOSED)` when `!deleteDurable`. If `deleteDurable`: deletes snapshot immediately and unregisters window.
+  - Thread Pool Isolation Across Multiple Note Instances:
+    1. In `NotePersistenceCoordinator.kt`: Replaced single-thread executor with `Executors.newCachedThreadPool` using daemon worker threads (`NotePersistenceWorker`).
+    2. Maintained strict per-instance commit serialization via `synchronized(getInstanceLock(instanceId))` so distinct Note instances do not head-of-line block each other during debounced or lifecycle writes.
+  - Deterministic Test Suite (12 Scenarios):
+    1. `testPhase146NonBlockingFoldTransactionCompletesOnSuccess()`
+    2. `testPhase146FoldAbortsAndKeepsWindowOnFailedFlush()`
+    3. `testPhase146NonBlockingCloseRetainsStateOnSuccess()`
+    4. `testPhase146CloseWithDeleteDurablePurgesImmediately()`
+    5. `testPhase146SingleAuthorityCoordinatorEliminatesDuplicateWrites()`
+    6. `testPhase146LateCompletionAfterTimeoutIgnored()`
+    7. `testPhase146MultiInstanceThreadPoolIsolation()`
+    8. `testPhase146PreservesUndoRedoHistoryAcrossAsyncFlush()`
+    9. `testPhase146PreservesBoundsAcrossLifecycleTransitions()`
+    10. `testPhase146ZeroHeavyInteractionDuringAsyncFlush()`
+    11. `testPhase146StaleSequenceSupersededDuringAsyncFlush()`
+    12. `testPhase146WindowOnDestroyDoesNotOverwriteAuthoritativeSnapshot()`
+  - Verification:
+    - Executed `./gradlew :app:testDebugUnitTest --tests com.example.feature.floating.FloatingMiniAppFrameworkTest`: 71/71 tests passed (0 failures).
+    - Executed `compile_applet`: Succeeded cleanly.
+* How it was verified: local build and JVM unit test suite only (`compile_applet` passed, 71/71 tests in `FloatingMiniAppFrameworkTest` passed) — on-device claim only / not tested on physical hardware. Physical on-device execution required to observe smooth, non-blocking folding and closing animations under load.
+* Any deviation from what was requested, and why: None.
+* Any known issue or follow-up needed: Physical on-device testing following the On-Device Verification Guide below.

@@ -498,6 +498,22 @@
   - **Clear Interaction Optimization**:
     - Removed redundant synchronous flush from `prepareClear()`. Clear pushes pre-clear state to undo stack, empties latest text, and schedules debounced save through the normal async persistence path.
   - **Testing**: 59/59 tests in `FloatingMiniAppFrameworkTest` passing 100%. `compile_applet` succeeded cleanly.
+- [x] **Phase 14.6: Authoritative, Non-Blocking Note Lifecycle Flush (`NotePersistenceCoordinator.kt`, `FloatingMiniAppWindow.kt`, `FloatingMiniAppBridge.kt`)**:
+  - **Authoritative Single-Coordinator Persistence**:
+    - Removed duplicate persistence paths: deleted secondary `durableStore.saveSnapshot()` in `FloatingMiniAppBridge.sleepMiniApp` and skipped redundant `durableStore.updatePayload()` in `FloatingMiniAppWindow.onDestroy()` for Main-only apps.
+    - `NotePersistenceCoordinator` is the sole authority for Note content, formatting, history, bounds, and lifecycle state (`MiniAppState.ACTIVE`, `SLEEPING`, `CLOSED`).
+    - Merged target lifecycle state into the atomic commit transaction so snapshots are persisted consistently in one atomic disk operation.
+  - **Non-Blocking Asynchronous UI Lifecycle Flush**:
+    - Added `flushPendingSaveAsync(timeoutMs, targetState, onComplete: (Boolean) -> Unit)` to `NotePersistenceCoordinator` and `FloatingMiniAppWindow`.
+    - Lifecycle transitions (`sleepMiniApp`, `closeMiniApp`) no longer block the Android UI/main thread. Dispatches disk I/O on background thread pool and invokes completion callback on `Looper.getMainLooper()`.
+    - Window teardown and launcher bubble display happen strictly after confirmed successful write.
+    - Failed or timed-out flushes abort the fold/close transaction, keeping the active Note window visible and recoverable with zero data loss.
+    - Guarded against stale late completions: background tasks that finish after timeout are safely ignored.
+  - **Multi-Instance Thread Pool Isolation**:
+    - Replaced single-thread executor with `Executors.newCachedThreadPool` using daemon worker threads.
+    - Independent Note instances never head-of-line block each other's persistence or lifecycle flushes.
+    - Strict per-instance serialization preserved via `getInstanceLock(instanceId)`.
+  - **Testing**: 71/71 tests in `FloatingMiniAppFrameworkTest` passing 100%. `compile_applet` succeeded cleanly.
 
 ---
 

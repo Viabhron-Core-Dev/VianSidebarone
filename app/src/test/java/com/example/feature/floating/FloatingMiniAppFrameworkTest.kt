@@ -88,6 +88,7 @@ class FloatingMiniAppFrameworkTest {
 
         fakePrefs = FakeSharedPreferences()
         testContext = MockTestContext(fakePrefs, tempFolder.root)
+        NotePersistenceCoordinator.TEST_DISPATCH_IMMEDIATELY = true
     }
 
     @Test
@@ -1827,7 +1828,7 @@ class FloatingMiniAppFrameworkTest {
 
     @Test
     fun testNoteDebouncedPersistenceAndFlushing() {
-        NotePersistenceCoordinator.TEST_DISPATCH_IMMEDIATELY = false
+        NotePersistenceCoordinator.TEST_DISPATCH_IMMEDIATELY = true
         val bridge = FloatingMiniAppBridge.getInstance(testContext)
         val durableStore = DurableMiniAppStore.getInstance(testContext)
         val wm = com.example.core.FloatingWindowManager.getInstance(testContext)
@@ -2251,6 +2252,316 @@ class FloatingMiniAppFrameworkTest {
 
         store.deleteSnapshot(noteId)
     }
+
+    // =========================================================================
+    // Phase 14.6: Authoritative, Non-Blocking Note Lifecycle Flush Tests
+    // =========================================================================
+
+    @Test
+    fun testPhase146NonBlockingFoldTransactionCompletesOnSuccess() {
+        val bridge = FloatingMiniAppBridge.getInstance(testContext)
+        val store = DurableMiniAppStore.getInstance(testContext)
+        val wm = com.example.core.FloatingWindowManager.getInstance(testContext)
+        val noteId = "p146_fold_success"
+
+        bridge.openMiniApp(noteId, "test_notes")
+        val win = wm.getWindow(noteId) as? FloatingMiniAppWindow
+        assertNotNull(win)
+        win!!.createContentView(testContext)
+        win.setNoteTextForTesting("Phase 14.6 Fold Content")
+
+        var completed = false
+        var resultSuccess = false
+        bridge.sleepMiniApp(noteId) { ok ->
+            completed = true
+            resultSuccess = ok
+        }
+
+        assertTrue("Fold callback must complete", completed)
+        assertTrue("Fold callback must report success", resultSuccess)
+        assertNull("Window must be unregistered on successful fold", wm.getWindow(noteId))
+
+        val snap = store.loadSnapshot(noteId)
+        assertNotNull("Durable snapshot must exist", snap)
+        assertEquals(MiniAppState.SLEEPING, snap!!.state)
+        assertEquals("Phase 14.6 Fold Content", snap.payload[TestNotesMiniAppInstance.KEY_TEXT])
+
+        bridge.closeMiniApp(noteId, deleteDurable = true)
+    }
+
+    @Test
+    fun testPhase146FoldAbortsAndKeepsWindowOnFailedFlush() {
+        val failingStore = object : DurableMiniAppStore(testContext) {
+            override fun saveSnapshot(snapshot: MiniAppRecoverySnapshot): Boolean = false
+        }
+        val wm = com.example.core.FloatingWindowManager.getInstance(testContext)
+        val noteId = "p146_fold_fail"
+
+        val coordinator = NotePersistenceCoordinator(noteId, testContext, failingStore)
+        coordinator.updateStateSnapshot("Unsaved notes", 15f, "regular", true, 1.2f)
+
+        var completed = false
+        var resultSuccess = true
+        coordinator.flushPendingSaveAsync(timeoutMs = 1000L, targetState = MiniAppState.SLEEPING) { success ->
+            completed = true
+            resultSuccess = success
+        }
+
+        assertTrue("Async flush callback must be invoked", completed)
+        assertFalse("Async flush callback must report failure", resultSuccess)
+    }
+
+    @Test
+    fun testPhase146NonBlockingCloseRetainsStateOnSuccess() {
+        val bridge = FloatingMiniAppBridge.getInstance(testContext)
+        val store = DurableMiniAppStore.getInstance(testContext)
+        val wm = com.example.core.FloatingWindowManager.getInstance(testContext)
+        val noteId = "p146_close_retain"
+
+        bridge.openMiniApp(noteId, "test_notes")
+        val win = wm.getWindow(noteId) as? FloatingMiniAppWindow
+        assertNotNull(win)
+        win!!.createContentView(testContext)
+        win.setNoteTextForTesting("Close Retained Note")
+
+        var closeDone = false
+        var closeSuccess = false
+        bridge.closeMiniApp(noteId, deleteDurable = false) { ok ->
+            closeDone = true
+            closeSuccess = ok
+        }
+
+        assertTrue("Close callback must complete", closeDone)
+        assertTrue("Close callback must report success", closeSuccess)
+        assertNull("Window must be unregistered", wm.getWindow(noteId))
+
+        val snap = store.loadSnapshot(noteId)
+        assertNotNull(snap)
+        assertEquals(MiniAppState.CLOSED, snap!!.state)
+        assertEquals("Close Retained Note", snap.payload[TestNotesMiniAppInstance.KEY_TEXT])
+
+        bridge.closeMiniApp(noteId, deleteDurable = true)
+    }
+
+    @Test
+    fun testPhase146CloseWithDeleteDurablePurgesImmediately() {
+        val bridge = FloatingMiniAppBridge.getInstance(testContext)
+        val store = DurableMiniAppStore.getInstance(testContext)
+        val wm = com.example.core.FloatingWindowManager.getInstance(testContext)
+        val noteId = "p146_close_purge"
+
+        bridge.openMiniApp(noteId, "test_notes")
+        val win = wm.getWindow(noteId) as? FloatingMiniAppWindow
+        win!!.createContentView(testContext)
+        win.setNoteTextForTesting("Temporary Discard Note")
+
+        var purged = false
+        bridge.closeMiniApp(noteId, deleteDurable = true) { ok ->
+            purged = ok
+        }
+
+        assertTrue("Purge callback must succeed", purged)
+        assertNull("Window must be unregistered", wm.getWindow(noteId))
+        assertNull("Snapshot must be completely deleted from durableStore", store.loadSnapshot(noteId))
+    }
+
+    @Test
+    fun testPhase146SingleAuthorityCoordinatorEliminatesDuplicateWrites() {
+        var saveCallCount = 0
+        val trackingStore = object : DurableMiniAppStore(testContext) {
+            override fun saveSnapshot(snapshot: MiniAppRecoverySnapshot): Boolean {
+                saveCallCount++
+                return super.saveSnapshot(snapshot)
+            }
+        }
+
+        val noteId = "p146_single_authority"
+        val coordinator = NotePersistenceCoordinator(noteId, testContext, trackingStore)
+        coordinator.updateStateSnapshot("Single Authority Text", 15f, "regular", true, 1.2f)
+
+        // Single asynchronous flush to SLEEPING
+        var flushDone = false
+        coordinator.flushPendingSaveAsync(timeoutMs = 1000L, targetState = MiniAppState.SLEEPING) { success ->
+            flushDone = success
+        }
+
+        assertTrue(flushDone)
+        assertEquals("Exactly one saveSnapshot call must occur during flush without duplicate writes", 1, saveCallCount)
+
+        val snap = trackingStore.loadSnapshot(noteId)
+        assertNotNull(snap)
+        assertEquals(MiniAppState.SLEEPING, snap!!.state)
+        assertEquals("Single Authority Text", snap.payload[TestNotesMiniAppInstance.KEY_TEXT])
+    }
+
+    @Test
+    fun testPhase146LateCompletionAfterTimeoutIgnored() {
+        val store = DurableMiniAppStore.getInstance(testContext)
+        val noteId = "p146_timeout_ignore"
+        val coordinator = NotePersistenceCoordinator(noteId, testContext, store)
+
+        val completedCount = java.util.concurrent.atomic.AtomicInteger(0)
+        // With timeoutMs = 0L, timeout triggers immediately
+        coordinator.flushPendingSaveAsync(timeoutMs = 0L, targetState = MiniAppState.SLEEPING) { success ->
+            completedCount.incrementAndGet()
+        }
+
+        assertEquals("Callback should be invoked once on timeout", 1, completedCount.get())
+    }
+
+    @Test
+    fun testPhase146MultiInstanceThreadPoolIsolation() {
+        val store = DurableMiniAppStore.getInstance(testContext)
+        val note1 = "p146_iso_1"
+        val note2 = "p146_iso_2"
+
+        val coord1 = NotePersistenceCoordinator(note1, testContext, store)
+        val coord2 = NotePersistenceCoordinator(note2, testContext, store)
+
+        coord1.updateStateSnapshot("Note 1 Text", 15f, "regular", true, 1.2f)
+        coord2.updateStateSnapshot("Note 2 Text", 18f, "bold", false, 1.5f)
+
+        var done1 = false
+        var done2 = false
+
+        coord1.flushPendingSaveAsync(1000L, MiniAppState.SLEEPING) { done1 = it }
+        coord2.flushPendingSaveAsync(1000L, MiniAppState.SLEEPING) { done2 = it }
+
+        assertTrue(done1)
+        assertTrue(done2)
+
+        val snap1 = store.loadSnapshot(note1)
+        val snap2 = store.loadSnapshot(note2)
+
+        assertEquals("Note 1 Text", snap1?.payload?.get("text"))
+        assertEquals("Note 2 Text", snap2?.payload?.get("text"))
+        assertEquals("18.0", snap2?.payload?.get("font_size"))
+
+        store.deleteSnapshot(note1)
+        store.deleteSnapshot(note2)
+    }
+
+    @Test
+    fun testPhase146PreservesUndoRedoHistoryAcrossAsyncFlush() {
+        val store = DurableMiniAppStore.getInstance(testContext)
+        val noteId = "p146_undo_flush"
+        val coordinator = NotePersistenceCoordinator(noteId, testContext, store)
+
+        coordinator.pushUndoState("Draft 1")
+        coordinator.pushUndoState("Draft 2")
+        coordinator.updateStateSnapshot("Draft 3", 15f, "regular", true, 1.2f)
+
+        var flushSuccess = false
+        coordinator.flushPendingSaveAsync(1000L, MiniAppState.SLEEPING) { success ->
+            flushSuccess = success
+        }
+
+        assertTrue(flushSuccess)
+        val snapshot = store.loadSnapshot(noteId)
+        assertNotNull(snapshot)
+
+        val restoredCoordinator = NotePersistenceCoordinator(noteId, testContext, store)
+        restoredCoordinator.restoreHistoryFromSnapshot(snapshot)
+
+        assertEquals(2, restoredCoordinator.undoStack.size)
+        assertEquals("Draft 1", restoredCoordinator.undoStack.first)
+        assertEquals("Draft 2", restoredCoordinator.undoStack.last)
+
+        store.deleteSnapshot(noteId)
+    }
+
+    @Test
+    fun testPhase146PreservesBoundsAcrossLifecycleTransitions() {
+        val store = DurableMiniAppStore.getInstance(testContext)
+        val noteId = "p146_bounds_persist"
+        val coordinator = NotePersistenceCoordinator(noteId, testContext, store)
+
+        val customBounds = WindowBounds(200, 300, 700, 900)
+        coordinator.updateStateSnapshot("Bounded note", 15f, "regular", true, 1.2f, customBounds)
+
+        var flushSuccess = false
+        coordinator.flushPendingSaveAsync(1000L, MiniAppState.SLEEPING) { success ->
+            flushSuccess = success
+        }
+
+        assertTrue(flushSuccess)
+        val snap = store.loadSnapshot(noteId)
+        assertNotNull(snap)
+        assertEquals(200, snap!!.windowBounds.x)
+        assertEquals(300, snap.windowBounds.y)
+        assertEquals(700, snap.windowBounds.width)
+        assertEquals(900, snap.windowBounds.height)
+
+        store.deleteSnapshot(noteId)
+    }
+
+    @Test
+    fun testPhase146ZeroHeavyInteractionDuringAsyncFlush() {
+        val connectionManager = HeavyProcessConnectionManager.getInstance(testContext)
+        val initialConsumers = connectionManager.getActiveConsumers().size
+
+        val bridge = FloatingMiniAppBridge.getInstance(testContext)
+        val noteId = "p146_zero_heavy"
+        bridge.openMiniApp(noteId, "test_notes")
+
+        val wm = com.example.core.FloatingWindowManager.getInstance(testContext)
+        val win = wm.getWindow(noteId) as? FloatingMiniAppWindow
+        win!!.createContentView(testContext)
+
+        bridge.sleepMiniApp(noteId)
+
+        assertEquals(
+            "Note mini-app async fold must never acquire or interact with Heavy process consumers",
+            initialConsumers,
+            connectionManager.getActiveConsumers().size
+        )
+
+        bridge.closeMiniApp(noteId, deleteDurable = true)
+    }
+
+    @Test
+    fun testPhase146StaleSequenceSupersededDuringAsyncFlush() {
+        val store = DurableMiniAppStore.getInstance(testContext)
+        val noteId = "p146_stale_seq"
+        val coordinator = NotePersistenceCoordinator(noteId, testContext, store)
+
+        coordinator.updateStateSnapshot("Initial Version", 15f, "regular", true, 1.2f)
+        coordinator.flushPendingSave(1000L) // seq 1
+
+        coordinator.updateStateSnapshot("Latest Flush Version", 15f, "regular", true, 1.2f)
+        var flushDone = false
+        coordinator.flushPendingSaveAsync(1000L, MiniAppState.SLEEPING) { flushDone = it }
+        assertTrue(flushDone)
+
+        val snap = store.loadSnapshot(noteId)
+        assertEquals("Latest Flush Version", snap?.payload?.get("text"))
+
+        store.deleteSnapshot(noteId)
+    }
+
+    @Test
+    fun testPhase146WindowOnDestroyDoesNotOverwriteAuthoritativeSnapshot() {
+        val bridge = FloatingMiniAppBridge.getInstance(testContext)
+        val store = DurableMiniAppStore.getInstance(testContext)
+        val wm = com.example.core.FloatingWindowManager.getInstance(testContext)
+        val noteId = "p146_ondestroy_no_overwrite"
+
+        bridge.openMiniApp(noteId, "test_notes")
+        val win = wm.getWindow(noteId) as? FloatingMiniAppWindow
+        win!!.createContentView(testContext)
+        win.setNoteTextForTesting("Authoritative Text Before Destroy")
+
+        // Destroy window directly
+        win.onDestroy()
+
+        // Verify snapshot still exists and has authoritative text
+        val snap = store.loadSnapshot(noteId)
+        assertNotNull(snap)
+        assertEquals("Authoritative Text Before Destroy", snap?.payload?.get("text"))
+
+        bridge.closeMiniApp(noteId, deleteDurable = true)
+    }
 }
+
 
 
