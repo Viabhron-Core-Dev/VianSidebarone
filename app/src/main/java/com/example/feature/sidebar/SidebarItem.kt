@@ -292,7 +292,45 @@ val ALL_SETTINGS_SHORTCUTS = listOf(
     SidebarItem.SettingsShortcut("apps", "Apps", android.R.drawable.ic_menu_preferences),
     SidebarItem.SettingsShortcut("security", "Security", android.R.drawable.ic_menu_preferences),
     SidebarItem.SettingsShortcut("battery", "Battery", android.R.drawable.ic_menu_preferences),
-    SidebarItem.SettingsShortcut("date", "Date & Time", android.R.drawable.ic_menu_preferences)
+    SidebarItem.SettingsShortcut("date", "Date & Time", android.R.drawable.ic_menu_preferences),
+    // Network & Wireless
+    SidebarItem.SettingsShortcut("network_provider", "Mobile Network & SIMs", android.R.drawable.ic_menu_preferences),
+    SidebarItem.SettingsShortcut("data_usage", "Data Usage", android.R.drawable.ic_menu_preferences),
+    SidebarItem.SettingsShortcut("hotspot", "Hotspot & Tethering", android.R.drawable.ic_menu_preferences),
+    SidebarItem.SettingsShortcut("airplane", "Airplane Mode", android.R.drawable.ic_dialog_alert),
+    SidebarItem.SettingsShortcut("vpn", "VPN Settings", android.R.drawable.ic_menu_preferences),
+    SidebarItem.SettingsShortcut("nfc", "NFC Settings", android.R.drawable.ic_menu_preferences),
+    // Connected Devices & Cast
+    SidebarItem.SettingsShortcut("cast", "Cast & Screen Mirroring", android.R.drawable.ic_menu_preferences),
+    // Display & Look
+    SidebarItem.SettingsShortcut("night_display", "Night Light & Eye Comfort", android.R.drawable.ic_menu_preferences),
+    SidebarItem.SettingsShortcut("wallpaper", "Wallpaper", android.R.drawable.ic_menu_gallery),
+    // Sound & Notifications
+    SidebarItem.SettingsShortcut("do_not_disturb", "Do Not Disturb", android.R.drawable.ic_lock_silent_mode),
+    SidebarItem.SettingsShortcut("notifications", "Notifications", android.R.drawable.ic_menu_info_details),
+    SidebarItem.SettingsShortcut("notification_history", "Notification History", android.R.drawable.ic_menu_recent_history),
+    // Apps & Management
+    SidebarItem.SettingsShortcut("all_apps", "Manage All Apps", android.R.drawable.ic_menu_manage),
+    SidebarItem.SettingsShortcut("default_apps", "Default Apps", android.R.drawable.ic_menu_preferences),
+    SidebarItem.SettingsShortcut("permissions", "Permission Manager", android.R.drawable.ic_menu_preferences),
+    // Battery & Storage
+    SidebarItem.SettingsShortcut("battery_saver", "Battery Saver", android.R.drawable.ic_lock_idle_low_battery),
+    SidebarItem.SettingsShortcut("storage", "Storage", android.R.drawable.ic_menu_save),
+    // Privacy & Security
+    SidebarItem.SettingsShortcut("privacy", "Privacy", android.R.drawable.ic_menu_preferences),
+    SidebarItem.SettingsShortcut("biometrics", "Biometrics & Screen Lock", android.R.drawable.ic_lock_power_off),
+    // Accounts, Language & Input
+    SidebarItem.SettingsShortcut("accounts", "Accounts & Sync", android.R.drawable.ic_menu_share),
+    SidebarItem.SettingsShortcut("language", "Languages", android.R.drawable.ic_menu_preferences),
+    SidebarItem.SettingsShortcut("keyboard", "Keyboard & Input Methods", android.R.drawable.ic_menu_edit),
+    SidebarItem.SettingsShortcut("backup", "Backup & Reset", android.R.drawable.ic_menu_save),
+    // Accessibility
+    SidebarItem.SettingsShortcut("accessibility", "Accessibility", android.R.drawable.ic_menu_preferences),
+    SidebarItem.SettingsShortcut("captioning", "Captions", android.R.drawable.ic_menu_info_details),
+    // Developer & System Info
+    SidebarItem.SettingsShortcut("developer_options", "Developer Options", android.R.drawable.ic_menu_manage),
+    SidebarItem.SettingsShortcut("device_info", "About Device", android.R.drawable.ic_menu_info_details),
+    SidebarItem.SettingsShortcut("system_update", "System Update", android.R.drawable.ic_popup_sync)
 )
 
 val ALL_DISPLAY_ACTIONS = listOf(

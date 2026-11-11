@@ -1590,9 +1590,14 @@ class FloatingMiniAppFrameworkTest {
             window.getAuthoritativeNoteText()
         )
 
-        // 6. Keyboard dismissed by user
+        // 6. Transient insets hidden event: does NOT deactivate active editor immediately
         window.simulateImeVisibilityInsetsForTesting(false)
-        assertFalse("IME session should deactivate on keyboard dismiss", window.isNoteEditorImeActiveForTesting())
+        assertTrue("IME session must remain active during transient insets change", window.isNoteEditorImeActiveForTesting())
+        assertTrue("Dismiss check must be debounced and pending", window.hasPendingImeDismissCheckForTesting())
+
+        // 7. Confirmed keyboard dismissal: triggering pending check deactivates editor
+        window.triggerPendingImeDismissCheckForTesting()
+        assertFalse("IME session should deactivate on verified keyboard dismiss", window.isNoteEditorImeActiveForTesting())
         assertTrue(
             "FLAG_NOT_FOCUSABLE must be restored after keyboard dismissal",
             (window.layoutParams.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE) != 0
@@ -2639,6 +2644,160 @@ class FloatingMiniAppFrameworkTest {
         assertEquals("Authoritative Text Before Destroy", snap?.payload?.get("text"))
 
         bridge.closeMiniApp(noteId, deleteDurable = true)
+    }
+
+    @Test
+    fun testTransientHiddenInsetsDoNotDeactivateEditor() {
+        val window = FloatingMiniAppWindow("transient_insets_test", testContext, "note")
+        window.createContentView(testContext)
+        window.activateEmbeddedEditorIme("Test content", 0, 0)
+        window.simulateImeVisibilityInsetsForTesting(true)
+        assertTrue("IME must be active", window.isNoteEditorImeActiveForTesting())
+
+        // Transient hidden insets event
+        window.simulateImeVisibilityInsetsForTesting(false)
+        // Must REMAIN active immediately (debounced verification)
+        assertTrue("Editor must not be deactivated by a single transient insets event", window.isNoteEditorImeActiveForTesting())
+        assertTrue("Dismiss check must be pending", window.hasPendingImeDismissCheckForTesting())
+
+        // A subsequent insets event reports visible again (keyboard finished opening)
+        window.simulateImeVisibilityInsetsForTesting(true)
+        assertFalse("Pending dismiss check must be cancelled when visible insets arrives", window.hasPendingImeDismissCheckForTesting())
+        assertTrue("Editor must remain active", window.isNoteEditorImeActiveForTesting())
+    }
+
+    @Test
+    fun testGenuineKeyboardDismissalDeactivatesEditor() {
+        val window = FloatingMiniAppWindow("genuine_dismiss_test", testContext, "note")
+        window.createContentView(testContext)
+        window.activateEmbeddedEditorIme("Test content", 0, 0)
+        window.simulateImeVisibilityInsetsForTesting(true)
+        assertTrue("IME must be active", window.isNoteEditorImeActiveForTesting())
+
+        // Insets reports hidden
+        window.simulateImeVisibilityInsetsForTesting(false)
+        assertTrue("Dismiss check pending", window.hasPendingImeDismissCheckForTesting())
+
+        // Trigger the debounced check to simulate timer expiration
+        window.triggerPendingImeDismissCheckForTesting()
+        assertFalse("Editor must be deactivated after confirmed dismissal", window.isNoteEditorImeActiveForTesting())
+        assertTrue(
+            "FLAG_NOT_FOCUSABLE must be restored",
+            (window.layoutParams.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE) != 0
+        )
+    }
+
+    @Test
+    fun testGeometryOnlyChangesDoNotDeactivateEditor() {
+        val window = FloatingMiniAppWindow("geometry_change_test", testContext, "note")
+        window.createContentView(testContext)
+        window.activateEmbeddedEditorIme("Test content", 0, 0)
+        window.simulateImeVisibilityInsetsForTesting(true)
+        assertTrue("IME must be active", window.isNoteEditorImeActiveForTesting())
+
+        // Window resize begins
+        window.isResizing = true
+        // Layout change reports keyboard not detected
+        window.simulateImeVisibilityForTesting(isKeyboardOpen = false, keypadHeight = 0, displayBottom = 1800)
+        assertTrue("Resizing window must NOT deactivate editor", window.isNoteEditorImeActiveForTesting())
+        window.isResizing = false
+
+        // Window drag begins
+        window.isDraggingWindow = true
+        window.simulateImeVisibilityForTesting(isKeyboardOpen = false, keypadHeight = 0, displayBottom = 1800)
+        assertTrue("Dragging window must NOT deactivate editor", window.isNoteEditorImeActiveForTesting())
+        window.isDraggingWindow = false
+    }
+
+    @Test
+    fun testStaleCallbacksFromPreviousSessionIgnored() {
+        val window = FloatingMiniAppWindow("stale_session_test", testContext, "note")
+        window.createContentView(testContext)
+        window.activateEmbeddedEditorIme("Old session content", 0, 0, "session_1")
+        window.simulateImeVisibilityInsetsForTesting(true)
+
+        // Schedule dismiss check
+        window.simulateImeVisibilityInsetsForTesting(false)
+        assertTrue(window.hasPendingImeDismissCheckForTesting())
+
+        // New editor activation starts session 2
+        window.activateEmbeddedEditorIme("New session content", 0, 0, "session_2")
+        window.simulateImeVisibilityInsetsForTesting(true)
+
+        // Old check must have been invalidated
+        assertFalse("Old dismiss check must be cancelled on new session", window.hasPendingImeDismissCheckForTesting())
+        assertTrue("Editor must remain active in new session", window.isNoteEditorImeActiveForTesting())
+    }
+
+    @Test
+    fun testAllExpandedSettingsShortcutsParseAndDispatch() {
+        val shortcuts = com.example.feature.sidebar.ALL_SETTINGS_SHORTCUTS
+        assertTrue("Settings shortcuts catalogue must contain at least 25 entries", shortcuts.size >= 25)
+
+        // Every shortcut must have a unique non-empty action
+        val actions = shortcuts.map { it.action }
+        assertEquals("All actions must be unique", actions.toSet().size, actions.size)
+
+        // Every shortcut must parse correctly via ElementIdParser
+        for (sc in shortcuts) {
+            val elementId = "settings_shortcut:${sc.action}"
+            val parsed = com.example.feature.element.ElementIdParser.parse(testContext, elementId)
+            assertNotNull("ElementIdParser must parse $elementId", parsed)
+            assertTrue(parsed is com.example.feature.sidebar.SidebarItem.SettingsShortcut)
+            assertEquals(sc.action, (parsed as com.example.feature.sidebar.SidebarItem.SettingsShortcut).action)
+            assertEquals(sc.label, parsed.label)
+
+            // Must dispatch without crash
+            val dispatched = com.example.feature.element.ElementActionDispatcher.execute(testContext, parsed)
+            assertTrue("Dispatch of settings shortcut ${sc.action} must succeed", dispatched)
+        }
+    }
+
+    @Test
+    fun testDailyDataUsageManualCorrectionAndAccumulation() {
+        val helper = com.example.core.DailyDataUsageHelper
+        helper.clearDailyDataUsageCorrection(testContext)
+
+        // User sets manual correction to 500 MB
+        val desiredMb = 500.0
+        val desiredBytes = helper.convertToBytes(desiredMb, "MB")
+        assertEquals(500L * 1024L * 1024L, desiredBytes)
+
+        val setOk = helper.setDailyDataUsageCorrection(testContext, desiredBytes, desiredMb, "MB")
+        assertTrue("setDailyDataUsageCorrection must succeed", setOk)
+
+        val info = helper.getCorrectionInfo(testContext)
+        assertNotNull(info)
+        assertTrue(info!!.isActive)
+        assertEquals("MB", info.desiredUnit)
+        assertEquals(desiredMb, info.desiredValue, 0.001)
+
+        val correctedTotal = helper.getTodayDataUsageBytes(testContext)
+        assertNotNull(correctedTotal)
+        assertEquals(desiredBytes, correctedTotal)
+
+        // Clear correction
+        helper.clearDailyDataUsageCorrection(testContext)
+        val clearedInfo = helper.getCorrectionInfo(testContext)
+        assertNull(clearedInfo)
+    }
+
+    @Test
+    fun testDailyDataUsageUnitConversionsAndValidation() {
+        val helper = com.example.core.DailyDataUsageHelper
+        assertEquals(100L, helper.convertToBytes(100.0, "B"))
+        assertEquals(2048L, helper.convertToBytes(2.0, "KB"))
+        assertEquals(10L * 1024L * 1024L, helper.convertToBytes(10.0, "MB"))
+        assertEquals(1L * 1024L * 1024L * 1024L, helper.convertToBytes(1.0, "GB"))
+        assertEquals(0L, helper.convertToBytes(-50.0, "MB"))
+
+        // Formatting
+        assertEquals("0 B", helper.formatDataBytes(0L))
+        assertEquals("100 B", helper.formatDataBytes(100L))
+        assertEquals("1.00 KiB", helper.formatDataBytes(1024L))
+        assertEquals("1.00 MiB", helper.formatDataBytes(1024L * 1024L))
+        assertEquals("1.00 GiB", helper.formatDataBytes(1024L * 1024L * 1024L))
+        assertEquals("--", helper.formatDataBytes(null))
     }
 }
 

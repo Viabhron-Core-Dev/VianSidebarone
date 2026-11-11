@@ -520,6 +520,24 @@
     - Strict per-instance serialization preserved via `getInstanceLock(instanceId)`.
   - **Testing**: 71/71 tests in `FloatingMiniAppFrameworkTest` passing 100% with genuine asynchronous multi-threaded verification. `compile_applet` succeeded cleanly.
 
+### Phase 14.7: Sidebar Three Combined Updates (COMPLETED)
+- **1. Note Floating-Window Keyboard Dismissal Stabilization**:
+  - Prevented premature editor deactivation caused by transient layout passes or insets updates during initial keyboard display.
+  - Implemented `scheduleDebouncedImeDismissCheck(source: String)` with `IME_DISMISS_DEBOUNCE_MS = 250L`.
+  - Added session tracking with `imeSessionToken: Long` to invalidate stale dismiss callbacks across new editor activations.
+  - Double verification of insets (`ViewCompat.getRootWindowInsets`) and display frame visible geometry (`getWindowVisibleDisplayFrame`) before confirming keyboard dismissal.
+  - Protected window resizing (`isResizing`) and window dragging (`isDraggingWindow`) from falsely terminating IME sessions.
+- **2. Android Settings Shortcuts Catalogue Expansion**:
+  - Expanded `ALL_SETTINGS_SHORTCUTS` in `SidebarItem.kt` from 11 items to 39 items covering all primary Android Settings categories: Wi-Fi, Bluetooth, Mobile Network, Data Usage, Hotspot, Airplane Mode, VPN, NFC, Cast, Display, Night Light, Wallpaper, Sound, DND, Notifications, All Apps, Default Apps, Permission Manager, Battery, Battery Saver, Storage, Security, Privacy, Biometrics, Accounts, Languages, Keyboard/Input, Backup, Accessibility, Captions, Developer Options, Device Info, and System Update.
+  - Handled all actions in `ElementActionDispatcher.kt` with explicit fallback to `Settings.ACTION_SETTINGS` in a `catch` block for OEM resilience.
+  - Added a search bar with real-time text matching and synonym keywords in `ActionPickerActivity.kt`.
+- **3. Internet Speed Monitor Daily Total Manual Correction**:
+  - Enhanced `DailyDataUsageHelper.kt` with `DailyCorrectionInfo`, offset accumulation (`rawBytes + offset`), and `convertToBytes` supporting B, KB, MB, and GB.
+  - Added persistent daily adjustment state with automatic midnight expiration (`yyyy-MM-dd`).
+  - Added "Overall Daily Data Total" control in `NetSpeedSettingsScreen.kt` with Material 3 adjustment dialog, unit selector, validation, and reset button.
+  - `HandleService.kt` notification displays corrected daily totals automatically.
+- **Testing**: 78/78 tests in `FloatingMiniAppFrameworkTest` passing 100%.
+
 ---
 
 ## Phase 14: PWA Engine & External AI App Integration (Tier 5 - Highest Complexity)

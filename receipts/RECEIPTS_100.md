@@ -327,3 +327,42 @@ Capped at 500 lines per file.
 * How it was verified: local build and JVM unit test suite only (`compile_applet` passed, 71/71 tests in `FloatingMiniAppFrameworkTest` passed) — on-device claim only / not tested on physical hardware. Physical on-device execution required to observe smooth folding and closing transitions without ANRs.
 * Any deviation from what was requested, and why: None.
 * Any known issue or follow-up needed: Physical on-device testing following the On-Device Verification Guide below.
+
+
+---
+
+### Receipt 110
+* Timestamp: 2026-11-11 18:48 UTC
+* One-line summary of what was requested: Sidebar three combined updates: Fix Note floating-window keyboard dismissal, expand Android Settings shortcuts catalogue with search, and allow manual correction of Internet Speed Monitor daily data total.
+* Exact files touched:
+  - `app/src/main/java/com/example/feature/floating/FloatingMiniAppWindow.kt`
+  - `app/src/main/java/com/example/feature/sidebar/SidebarItem.kt`
+  - `app/src/main/java/com/example/feature/element/ElementActionDispatcher.kt`
+  - `app/src/main/java/com/example/feature/settings/ActionPickerActivity.kt`
+  - `app/src/main/java/com/example/core/DailyDataUsageHelper.kt`
+  - `app/src/main/java/com/example/feature/settings/NetSpeedSettingsScreen.kt`
+  - `app/src/test/java/com/example/feature/floating/FloatingMiniAppFrameworkTest.kt`
+  - `blueprint/BLUEPRINT.md`
+  - `receipts/RECEIPTS_100.md`
+* What was actually done — factual, not persuasive:
+  1. Fix Note Floating-Window Keyboard Dismissal:
+     - In `FloatingMiniAppWindow.kt`: Prevented transient layout/insets passes from prematurely deactivating the Note editor. Added `imeSessionToken: Long` session tracking to invalidate stale callbacks across activations.
+     - Implemented `scheduleDebouncedImeDismissCheck(source: String)` with `IME_DISMISS_DEBOUNCE_MS = 250L`.
+     - Inside the debounced runnable, performed double verification of insets (`ViewCompat.getRootWindowInsets`) and display frame visible geometry (`getWindowVisibleDisplayFrame`). If keyboard is still visible, the dismiss is rejected as transient.
+     - In `cancelPendingImeDismissCheck()`: Clears pending callbacks from both `mainHandler` and `targetView`.
+     - In `activateEmbeddedEditorIme()` and `onTouchEvent()`: Advances `imeSessionToken++` and cancels pending dismiss checks.
+     - Added `isDraggingWindow` state protection to ensure window dragging or resizing cannot falsely deactivate the IME session.
+  2. Expand Android Settings Shortcuts Catalogue:
+     - In `SidebarItem.kt`: Expanded `ALL_SETTINGS_SHORTCUTS` from 11 to 39 items covering all system settings categories (Network/Wi-Fi, Bluetooth, Mobile Network, Data Usage, Hotspot, Airplane Mode, VPN, NFC, Cast, Display, Night Light, Wallpaper, Sound, DND, Notifications, Apps, Default Apps, Permission Manager, Battery, Storage, Security, Privacy, Biometrics, Accounts, Languages, Keyboard/Input, Backup, Accessibility, Developer Options, Device Info, System Update, etc.). Preserved original 11 action IDs with zero breaking changes.
+     - In `ElementActionDispatcher.kt`: Implemented explicit and intent-based mappings with API level checks and a safe fallback to `Settings.ACTION_SETTINGS` in a `catch` block to guarantee zero crashes across OEM skins.
+     - In `ActionPickerActivity.kt`: Added a search bar with real-time text filter and keyword synonym matching (e.g., searching "internet" matches Wi-Fi/Mobile Data, "volume" matches Sound/DND).
+  3. Internet Speed Monitor Daily Total Manual Correction:
+     - In `DailyDataUsageHelper.kt`: Added `DailyCorrectionInfo`, `getTodayDataUsageBytes(context)` with transparent offset accumulation (`rawBytes + offset`), `setDailyDataUsageCorrection()`, `clearDailyDataUsageCorrection()`, `getCorrectionInfo()`, and `convertToBytes(value, unit)` supporting B, KB, MB, and GB. Ensured automatic expiration/reset across calendar day boundaries (`yyyy-MM-dd`).
+     - In `NetSpeedSettingsScreen.kt`: Added "Overall Daily Data Total" section displaying current calculated daily total and manual adjustment badge. Provided an "Adjust" action opening a Material 3 dialog with numeric input, unit chips (B, KB, MB, GB), input validation, and a "Reset to Measured" button.
+  4. Test Suite and Build Validation:
+     - In `FloatingMiniAppFrameworkTest.kt`: Added 7 comprehensive regression tests covering transient insets rejection, confirmed keyboard dismissal, geometry change safety, stale callback invalidation, all 39 settings shortcuts parsing and dispatching, daily data usage manual correction/accumulation, and unit conversion/validation.
+     - Ran Gradle unit tests: 78/78 tests passed in `FloatingMiniAppFrameworkTest`.
+     - Ran `compile_applet`: Build succeeded cleanly.
+* How it was verified: Local JVM unit test suite (78/78 tests passed in `FloatingMiniAppFrameworkTest`) and clean `compile_applet` compilation — on-device claim only / not tested on physical hardware. Physical on-device execution required to observe soft keyboard behavior with real Android IMEs and Settings intent dispatching across OEM ROMs.
+* Any deviation from what was requested, and why: None.
+* Any known issue or follow-up needed: Physical on-device verification of soft keyboard interactions and Settings intent launches.

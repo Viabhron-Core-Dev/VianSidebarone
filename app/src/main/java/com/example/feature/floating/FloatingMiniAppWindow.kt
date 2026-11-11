@@ -98,6 +98,97 @@ class FloatingMiniAppWindow(
     var isAwaitingImeVisibility: Boolean = false
         private set
 
+    // Debounced IME dismissal verification state
+    private var imeSessionToken: Long = 0L
+    private var imeDismissCheckRunnable: Runnable? = null
+    var isDraggingWindow: Boolean = false
+        internal set
+
+    /**
+     * Schedules a debounced check to verify genuine keyboard dismissal.
+     * Prevents transient insets changes, layout passes, or geometry shifts from falsely deactivating the editor.
+     */
+    private fun scheduleDebouncedImeDismissCheck(source: String) {
+        if (!isNoteEditorImeActive || isAwaitingImeVisibility || isResizing || isDraggingWindow) {
+            return
+        }
+        val currentToken = imeSessionToken
+
+        // If a dismiss check is already scheduled for this token, allow it to continue
+        if (imeDismissCheckRunnable != null) {
+            return
+        }
+
+        val runnable = Runnable {
+            imeDismissCheckRunnable = null
+            // 1. Stale callback verification
+            if (currentToken != imeSessionToken || !isNoteEditorImeActive || isAwaitingImeVisibility) {
+                LogKeeper.log(context, "TestNotesImeDebug", "IME_DISMISS_CHECK_CANCELLED stale or deactivated token=$currentToken activeToken=$imeSessionToken")
+                return@Runnable
+            }
+
+            // 2. Geometry check: if currently resizing or dragging, do not dismiss
+            if (isResizing || isDraggingWindow) {
+                LogKeeper.log(context, "TestNotesImeDebug", "IME_DISMISS_CHECK_CANCELLED resizing=$isResizing dragging=$isDraggingWindow")
+                return@Runnable
+            }
+
+            // 3. Double-verify keyboard visibility: check both insets and visible display frame
+            val targetView = getView() ?: rootCardView
+            val insets = targetView?.let { ViewCompat.getRootWindowInsets(it) }
+            val insetsVisible = insets?.isVisible(WindowInsetsCompat.Type.ime()) == true
+            val displayFrameVisible = if (targetView != null) {
+                val r = Rect()
+                targetView.getWindowVisibleDisplayFrame(r)
+                val wm = manager ?: FloatingWindowManager.getInstance(context)
+                val screenH = wm.screenHeight
+                if (screenH > 0 && r.bottom > 0) {
+                    val keypadHeight = screenH - r.bottom
+                    keypadHeight > screenH * 0.15
+                } else false
+            } else false
+
+            if (insetsVisible || displayFrameVisible) {
+                // Keyboard is still visible! Transient false alarm.
+                LogKeeper.log(context, "TestNotesImeDebug", "IME_DISMISS_TRANSIENT_REJECTED insetsVisible=$insetsVisible frameVisible=$displayFrameVisible source=$source")
+                isImeVisibleInInsets = true
+                return@Runnable
+            }
+
+            // 4. Confirmed genuine dismissal
+            LogKeeper.log(context, "TestNotesImeDebug", "IME_GENUINELY_DISMISSED source=$source token=$currentToken")
+            isImeVisibleInInsets = false
+            deactivateEmbeddedEditorIme()
+        }
+
+        imeDismissCheckRunnable = runnable
+        mainHandler.postDelayed(runnable, IME_DISMISS_DEBOUNCE_MS)
+        val targetView = getView() ?: rootCardView
+        targetView?.postDelayed(runnable, IME_DISMISS_DEBOUNCE_MS)
+    }
+
+    fun cancelPendingImeDismissCheck() {
+        val targetView = getView() ?: rootCardView
+        imeDismissCheckRunnable?.let {
+            mainHandler.removeCallbacks(it)
+            targetView?.removeCallbacks(it)
+            imeDismissCheckRunnable = null
+        }
+    }
+
+    fun hasPendingImeDismissCheckForTesting(): Boolean = imeDismissCheckRunnable != null
+
+    fun triggerPendingImeDismissCheckForTesting() {
+        val runnable = imeDismissCheckRunnable
+        val targetView = getView() ?: rootCardView
+        if (runnable != null) {
+            mainHandler.removeCallbacks(runnable)
+            targetView?.removeCallbacks(runnable)
+            imeDismissCheckRunnable = null
+            runnable.run()
+        }
+    }
+
     // Resize state
     var isResizing: Boolean = false
         internal set
@@ -191,17 +282,24 @@ class FloatingMiniAppWindow(
     fun deactivateEmbeddedEditorImeForTesting() {
         deactivateEmbeddedEditorIme()
     }
-    fun simulateImeVisibilityInsetsForTesting(visible: Boolean) {
+    fun simulateImeVisibilityInsetsForTesting(visible: Boolean, confirmedDismissal: Boolean = false) {
         if (visible) {
+            cancelPendingImeDismissCheck()
             isImeVisibleInInsets = true
             isAwaitingImeVisibility = false
         } else {
             if (isImeVisibleInInsets && isNoteEditorImeActive) {
-                deactivateEmbeddedEditorIme()
+                if (confirmedDismissal) {
+                    cancelPendingImeDismissCheck()
+                    isImeVisibleInInsets = false
+                    deactivateEmbeddedEditorIme()
+                } else {
+                    scheduleDebouncedImeDismissCheck("test_insets")
+                }
             } else if (!isAwaitingImeVisibility && !isAwaitingWindowFocusForIme && !isDiagnosticAwaitingWindowFocus) {
                 val isDiagActive = isDiagnosticMode && (diagnosticEditText?.hasFocus() == true)
                 if (!isNoteEditorImeActive && !isDiagActive) {
-                    if ((layoutParams.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE) == 0 && !isResizing) {
+                    if ((layoutParams.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE) == 0 && !isResizing && !isDraggingWindow) {
                         layoutParams.flags = layoutParams.flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
                         applyLayoutUpdate()
                     }
@@ -490,16 +588,16 @@ class FloatingMiniAppWindow(
             )
 
             if (imeVisible) {
+                cancelPendingImeDismissCheck()
                 isImeVisibleInInsets = true
                 isAwaitingImeVisibility = false
             } else {
                 if (isImeVisibleInInsets && isNoteEditorImeActive) {
-                    LogKeeper.log(context, "TestNotesImeDebug", "IME_DISMISSED_BY_USER insets")
-                    deactivateEmbeddedEditorIme()
+                    scheduleDebouncedImeDismissCheck("insets")
                 } else if (!isAwaitingImeVisibility && !isAwaitingWindowFocusForIme && !isDiagnosticAwaitingWindowFocus) {
                     val isDiagActive = isDiagnosticMode && (diagnosticEditText?.hasFocus() == true)
                     if (!isNoteEditorImeActive && !isDiagActive) {
-                        if ((layoutParams.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE) == 0 && !isResizing) {
+                        if ((layoutParams.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE) == 0 && !isResizing && !isDraggingWindow) {
                             layoutParams.flags = layoutParams.flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
                             applyLayoutUpdate()
                         }
@@ -620,6 +718,8 @@ class FloatingMiniAppWindow(
         sessionId: String = "ime_${System.currentTimeMillis() % 100000}"
     ) {
         activeImeSessionId = sessionId
+        imeSessionToken++
+        cancelPendingImeDismissCheck()
         isNoteEditorImeActive = true
         isAwaitingImeVisibility = true
         manager?.setFocus(windowId)
@@ -755,6 +855,8 @@ class FloatingMiniAppWindow(
      * Safely ends the embedded Note editor IME session, clearing focus and re-arming FLAG_NOT_FOCUSABLE.
      */
     fun deactivateEmbeddedEditorIme() {
+        cancelPendingImeDismissCheck()
+        imeSessionToken++
         if (!isNoteEditorImeActive && !isAwaitingWindowFocusForIme && !isAwaitingImeVisibility) return
         val wasActive = isNoteEditorImeActive
         isNoteEditorImeActive = false
@@ -1191,6 +1293,8 @@ class FloatingMiniAppWindow(
                     if (manager?.getTopVisibleWindow()?.windowId != this@FloatingMiniAppWindow.windowId) {
                         manager?.bringToFront(this@FloatingMiniAppWindow.windowId)
                     }
+                    imeSessionToken++
+                    cancelPendingImeDismissCheck()
                     isNoteEditorImeActive = true
                     isAwaitingImeVisibility = true
                     post {
@@ -2251,6 +2355,7 @@ class FloatingMiniAppWindow(
                     initialBoundsY = bounds.y
                     cachedDragSafeBounds = getSafeDisplayBounds(context)
                     isDragging = false
+                    isDraggingWindow = false
                     LogKeeper.log(context, "FloatingMiniAppWindow", "TOPBAR_DOWN id=$instanceId rawX=${event.rawX} rawY=${event.rawY} bounds=$bounds")
 
                     manager?.setFocus(windowId)
@@ -2268,6 +2373,7 @@ class FloatingMiniAppWindow(
 
                     if (!isDragging && (abs(dx) > touchSlop || abs(dy) > touchSlop)) {
                         isDragging = true
+                        isDraggingWindow = true
                         LogKeeper.log(context, "FloatingMiniAppWindow", "MOVE_START id=$instanceId initialBounds=($initialBoundsX,$initialBoundsY)")
                     }
 
@@ -2293,6 +2399,7 @@ class FloatingMiniAppWindow(
                     cachedDragSafeBounds = null
                     if (isDragging) {
                         isDragging = false
+                        isDraggingWindow = false
                         LogKeeper.log(context, "FloatingMiniAppWindow", "MOVE_END id=$instanceId finalBounds=$bounds")
                         // Commit normal floating bounds exclusively
                         normalFloatingBounds = bounds.copyBounds()
@@ -2306,6 +2413,7 @@ class FloatingMiniAppWindow(
                     cachedDragSafeBounds = null
                     if (isDragging) {
                         isDragging = false
+                        isDraggingWindow = false
                         LogKeeper.log(context, "FloatingMiniAppWindow", "MOVE_CANCEL id=$instanceId bounds=$bounds")
                     }
                     true
@@ -2596,6 +2704,7 @@ class FloatingMiniAppWindow(
             val isKeyboardOpen = keypadHeight > screenH * 0.15
 
             if (isKeyboardOpen) {
+                cancelPendingImeDismissCheck()
                 isImeVisibleInInsets = true
                 isAwaitingImeVisibility = false
                 if (isMaximized) {
@@ -2632,8 +2741,7 @@ class FloatingMiniAppWindow(
                 }
             } else {
                 if (isImeVisibleInInsets && isNoteEditorImeActive) {
-                    LogKeeper.log(context, "TestNotesImeDebug", "IME_DISMISSED_BY_USER globalLayout")
-                    deactivateEmbeddedEditorIme()
+                    scheduleDebouncedImeDismissCheck("globalLayout")
                 }
                 if (isImeShifted) {
                     // Restore exact persistent normalFloatingBounds.y on keyboard dismiss
@@ -2656,9 +2764,15 @@ class FloatingMiniAppWindow(
     /**
      * Testing hook to simulate IME state changes and test window positioning without a physical display.
      */
-    fun simulateImeVisibilityForTesting(isKeyboardOpen: Boolean, keypadHeight: Int, displayBottom: Int) {
+    fun simulateImeVisibilityForTesting(
+        isKeyboardOpen: Boolean,
+        keypadHeight: Int,
+        displayBottom: Int,
+        confirmedDismissal: Boolean = false
+    ) {
         val r = Rect(0, 0, bounds.width, displayBottom)
         if (isKeyboardOpen) {
+            cancelPendingImeDismissCheck()
             isImeVisibleInInsets = true
             isAwaitingImeVisibility = false
             if (isMaximized) return
@@ -2679,7 +2793,13 @@ class FloatingMiniAppWindow(
             }
         } else {
             if (isImeVisibleInInsets && isNoteEditorImeActive) {
-                deactivateEmbeddedEditorIme()
+                if (confirmedDismissal) {
+                    cancelPendingImeDismissCheck()
+                    isImeVisibleInInsets = false
+                    deactivateEmbeddedEditorIme()
+                } else {
+                    scheduleDebouncedImeDismissCheck("test_globalLayout")
+                }
             }
             if (isImeShifted) {
                 val restoredY = normalFloatingBounds.y
@@ -2937,6 +3057,7 @@ class FloatingMiniAppWindow(
 
     companion object {
         const val TYPE_MINIAPP = "miniapp"
+        const val IME_DISMISS_DEBOUNCE_MS = 250L
 
         /**
          * Phase 14.1 Controlled Experiment toggle:

@@ -38,8 +38,9 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import android.Manifest
-import android.os.Build
-
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
+import com.example.core.DailyDataUsageHelper
 import java.util.Locale
 
 data class AppUsageInfo(
@@ -81,6 +82,108 @@ fun NetSpeedSettingsScreen(onBack: () -> Unit) {
     var searchQuery by remember { mutableStateOf(TextFieldValue("")) }
     var isLoading by remember { mutableStateOf(false) }
     val coroutineScope = rememberCoroutineScope()
+
+    var showAdjustDialog by remember { mutableStateOf(false) }
+    var refreshDailyKey by remember { mutableStateOf(0) }
+    val todayUsageBytes by remember(refreshDailyKey) {
+        derivedStateOf { DailyDataUsageHelper.getTodayDataUsageBytes(context) }
+    }
+    val activeCorrection by remember(refreshDailyKey) {
+        derivedStateOf { DailyDataUsageHelper.getCorrectionInfo(context) }
+    }
+
+    if (showAdjustDialog) {
+        var inputVal by remember { mutableStateOf(if (activeCorrection != null) activeCorrection!!.desiredValue.toString() else "") }
+        var selectedUnit by remember { mutableStateOf(if (activeCorrection != null) activeCorrection!!.desiredUnit else "MB") }
+        var inputError by remember { mutableStateOf<String?>(null) }
+
+        AlertDialog(
+            onDismissRequest = { showAdjustDialog = false },
+            title = { Text("Adjust Today's Data Total") },
+            text = {
+                Column {
+                    Text(
+                        text = "Current displayed total: ${DailyDataUsageHelper.formatDataBytes(todayUsageBytes)}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "Enter the desired displayed total. Future data usage will continue accumulating on top of this value until midnight.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    OutlinedTextField(
+                        value = inputVal,
+                        onValueChange = {
+                            inputVal = it
+                            inputError = null
+                        },
+                        label = { Text("Corrected Total") },
+                        isError = inputError != null,
+                        supportingText = inputError?.let { { Text(it) } },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Text("Unit:", style = MaterialTheme.typography.labelMedium)
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        listOf("B", "KB", "MB", "GB").forEach { unit ->
+                            FilterChip(
+                                selected = selectedUnit.equals(unit, ignoreCase = true),
+                                onClick = { selectedUnit = unit },
+                                label = { Text(unit) }
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val num = inputVal.toDoubleOrNull()
+                        if (num == null || num < 0) {
+                            inputError = "Please enter a valid positive number"
+                            return@TextButton
+                        }
+                        val bytes = DailyDataUsageHelper.convertToBytes(num, selectedUnit)
+                        DailyDataUsageHelper.setDailyDataUsageCorrection(context, bytes, num, selectedUnit)
+                        refreshDailyKey++
+                        showAdjustDialog = false
+                    }
+                ) {
+                    Text("Save")
+                }
+            },
+            dismissButton = {
+                Row {
+                    if (activeCorrection != null) {
+                        TextButton(
+                            onClick = {
+                                DailyDataUsageHelper.clearDailyDataUsageCorrection(context)
+                                refreshDailyKey++
+                                showAdjustDialog = false
+                            }
+                        ) {
+                            Text("Reset", color = MaterialTheme.colorScheme.error)
+                        }
+                    }
+                    TextButton(onClick = { showAdjustDialog = false }) {
+                        Text("Cancel")
+                    }
+                }
+            }
+        )
+    }
 
     val loadData = {
         if (hasPermission) {
@@ -126,13 +229,31 @@ fun NetSpeedSettingsScreen(onBack: () -> Unit) {
                                 com.example.core.OverlaySyncManager.syncBoolean(context, "net_speed_enabled", enabled)
                                 com.example.core.OverlaySyncManager.syncBoolean(context, "netspeed_enabled", enabled)
                                 com.example.core.OverlaySyncManager.syncBoolean(context, "speed_indicator_enabled", enabled)
-                                if (enabled && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                                if (enabled && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
                                     if (ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
                                         notifPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
                                     }
                                 }
                             }
                         )
+                    }
+                )
+                Divider()
+
+                ListItem(
+                    headlineContent = { Text("Overall Daily Data Total") },
+                    supportingContent = {
+                        val formatted = DailyDataUsageHelper.formatDataBytes(todayUsageBytes)
+                        if (activeCorrection != null && activeCorrection!!.isActive) {
+                            Text("$formatted • Manually corrected today")
+                        } else {
+                            Text(formatted)
+                        }
+                    },
+                    trailingContent = {
+                        OutlinedButton(onClick = { showAdjustDialog = true }) {
+                            Text("Adjust")
+                        }
                     }
                 )
                 Divider()

@@ -3,6 +3,7 @@ package com.example.feature.element
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.provider.Settings
 import com.example.core.LogKeeper
 import com.example.feature.miniapps.MiniAppManager
@@ -323,6 +324,124 @@ object ElementActionDispatcher {
             "security" -> Intent(Settings.ACTION_SECURITY_SETTINGS)
             "privacy" -> Intent(Settings.ACTION_PRIVACY_SETTINGS)
             "device_info" -> Intent(Settings.ACTION_DEVICE_INFO_SETTINGS)
+
+            // Extended Network & Wireless
+            "network_provider" -> {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    Intent(Settings.ACTION_NETWORK_OPERATOR_SETTINGS)
+                } else {
+                    Intent(Settings.ACTION_WIRELESS_SETTINGS)
+                }
+            }
+            "data_usage" -> Intent(Settings.ACTION_DATA_USAGE_SETTINGS)
+            "hotspot" -> {
+                Intent("android.settings.TETHER_SETTINGS").apply {
+                    if (resolveActivity(context.packageManager) == null) {
+                        this.action = Settings.ACTION_WIRELESS_SETTINGS
+                    }
+                }
+            }
+            "airplane" -> Intent(Settings.ACTION_AIRPLANE_MODE_SETTINGS)
+            "vpn" -> Intent(Settings.ACTION_VPN_SETTINGS)
+            "nfc" -> Intent(Settings.ACTION_NFC_SETTINGS)
+
+            // Connected Devices
+            "cast" -> Intent(Settings.ACTION_CAST_SETTINGS)
+
+            // Display & Themes
+            "night_display" -> {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    Intent(Settings.ACTION_NIGHT_DISPLAY_SETTINGS)
+                } else {
+                    Intent(Settings.ACTION_DISPLAY_SETTINGS)
+                }
+            }
+            "wallpaper" -> {
+                Intent(Intent.ACTION_SET_WALLPAPER).apply {
+                    if (resolveActivity(context.packageManager) == null) {
+                        this.action = Settings.ACTION_DISPLAY_SETTINGS
+                    }
+                }
+            }
+
+            // Sound & DND
+            "do_not_disturb" -> Intent(Settings.ACTION_ZEN_MODE_PRIORITY_SETTINGS)
+
+            // Notifications
+            "notifications" -> {
+                Intent("android.settings.ALL_APPS_NOTIFICATION_SETTINGS").apply {
+                    if (resolveActivity(context.packageManager) == null) {
+                        this.action = Settings.ACTION_APPLICATION_SETTINGS
+                    }
+                }
+            }
+            "notification_history" -> {
+                Intent("android.settings.NOTIFICATION_HISTORY").apply {
+                    if (resolveActivity(context.packageManager) == null) {
+                        this.action = "android.settings.ALL_APPS_NOTIFICATION_SETTINGS"
+                        if (resolveActivity(context.packageManager) == null) {
+                            this.action = Settings.ACTION_APPLICATION_SETTINGS
+                        }
+                    }
+                }
+            }
+
+            // Apps & Permissions
+            "all_apps" -> Intent(Settings.ACTION_MANAGE_ALL_APPLICATIONS_SETTINGS)
+            "default_apps" -> {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                    Intent(Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS)
+                } else {
+                    Intent(Settings.ACTION_APPLICATION_SETTINGS)
+                }
+            }
+            "permissions" -> {
+                Intent("android.intent.action.MANAGE_PERMISSIONS").apply {
+                    if (resolveActivity(context.packageManager) == null) {
+                        this.action = Settings.ACTION_APPLICATION_SETTINGS
+                    }
+                }
+            }
+
+            // Battery Saver
+            "battery_saver" -> Intent(Settings.ACTION_BATTERY_SAVER_SETTINGS)
+
+            // Biometrics & Screen Lock
+            "biometrics" -> {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    Intent(Settings.ACTION_BIOMETRIC_ENROLL)
+                } else {
+                    Intent(Settings.ACTION_SECURITY_SETTINGS)
+                }
+            }
+
+            // Accounts & Sync
+            "accounts" -> Intent(Settings.ACTION_SYNC_SETTINGS)
+
+            // Languages & Keyboard
+            "language" -> Intent(Settings.ACTION_LOCALE_SETTINGS)
+            "keyboard" -> Intent(Settings.ACTION_INPUT_METHOD_SETTINGS)
+            "backup" -> {
+                Intent(Settings.ACTION_PRIVACY_SETTINGS).apply {
+                    if (resolveActivity(context.packageManager) == null) {
+                        this.action = Settings.ACTION_SETTINGS
+                    }
+                }
+            }
+
+            // Accessibility & Captions
+            "captioning" -> Intent(Settings.ACTION_CAPTIONING_SETTINGS)
+
+            // Developer options & System update
+            "developer_options" -> Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS)
+            "system_update" -> {
+                Intent("android.settings.SYSTEM_UPDATE_SETTINGS").apply {
+                    if (resolveActivity(context.packageManager) == null) {
+                        this.action = Settings.ACTION_DEVICE_INFO_SETTINGS
+                    }
+                }
+            }
+
             else -> Intent(Settings.ACTION_SETTINGS)
         }
         settingsIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -330,8 +449,14 @@ object ElementActionDispatcher {
             context.startActivity(settingsIntent)
             true
         } catch (e: Exception) {
-            LogKeeper.logError(context, TAG, "Error opening settings shortcut: $action", e)
-            false
+            LogKeeper.logError(context, TAG, "Error opening settings shortcut: $action, attempting general settings fallback", e)
+            try {
+                context.startActivity(Intent(Settings.ACTION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                true
+            } catch (fallbackError: Exception) {
+                LogKeeper.logError(context, TAG, "Fallback to general settings also failed", fallbackError)
+                false
+            }
         }
     }
 
