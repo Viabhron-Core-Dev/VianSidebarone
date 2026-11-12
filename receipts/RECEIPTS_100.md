@@ -366,3 +366,53 @@ Capped at 500 lines per file.
 * How it was verified: Local JVM unit test suite (78/78 tests passed in `FloatingMiniAppFrameworkTest`) and clean `compile_applet` compilation — on-device claim only / not tested on physical hardware. Physical on-device execution required to observe soft keyboard behavior with real Android IMEs and Settings intent dispatching across OEM ROMs.
 * Any deviation from what was requested, and why: None.
 * Any known issue or follow-up needed: Physical on-device verification of soft keyboard interactions and Settings intent launches.
+
+
+---
+
+### Receipt 111
+* Timestamp: 2026-11-11 23:15 UTC
+* One-line summary of what was requested: Implement Sidebar eReader — Floating Reader (Part 1 Only): EPUB/TXT reader hosted in floating mini-app framework, fixing EPUB chapter ordering defect, library shelf, reading UI, and snapshot recovery.
+* Exact files touched:
+  - `app/src/main/java/com/example/data/EpubParser.kt`
+  - `app/src/main/java/com/example/data/LibraryRepository.kt`
+  - `app/src/main/java/com/example/feature/floating/HeavyFloatingHost.kt`
+  - `app/src/main/java/com/example/feature/element/ElementActionDispatcher.kt`
+  - `app/src/main/java/com/example/feature/reader/ReaderModels.kt`
+  - `app/src/main/java/com/example/feature/reader/ReaderImportActivity.kt`
+  - `app/src/main/java/com/example/feature/reader/ReaderLibraryView.kt`
+  - `app/src/main/java/com/example/feature/reader/ReaderReadingView.kt`
+  - `app/src/main/java/com/example/feature/reader/ReaderMiniAppInstance.kt`
+  - `app/src/main/java/com/example/feature/reader/ReaderMiniAppFactory.kt`
+  - `app/src/main/AndroidManifest.xml`
+  - `app/src/test/java/com/example/data/EpubParserTest.kt`
+  - `app/src/test/java/com/example/feature/reader/ReaderMiniAppTest.kt`
+  - `blueprint/BLUEPRINT.md`
+  - `receipts/RECEIPTS_100.md`
+* What was actually done — factual, not persuasive:
+  1. Fixed EPUB Chapter Ordering Defect:
+     - In `EpubParser.kt`: Replaced fragile regex-based XML parsing with robust `XmlPullParser`.
+     - Authoritative Spine Ordering: Read OPF container and spine; treated valid `<spine>` `<itemref>` sequence as authoritative.
+     - Path Normalization: Implemented `normalizeZipPath` resolving relative paths (including `..` and `.`), URL-decoding (`URLDecoder.decode`), and combining with OPF directory.
+     - Exact ZIP Lookup: Implemented `findZipEntry` with exact case-insensitive path matching, completely eliminating ambiguous `endsWith` suffix collisions across directories.
+     - Non-Reading Exclusion: Excluded navigation documents (`properties="nav"`, `toc.ncx`, `linear="no"` items).
+     - Natural Numeric Sorting: Implemented `naturalCompare` ensuring "chapter_1" < "chapter_2" < "chapter_10" as deterministic fallback when spine is absent.
+     - TOC & Chapter Metadata: Generated `toc.json` and chapter files (`chapter_X.txt`) with HTML entity unescaping, clean whitespace formatting, and heading title extraction.
+  2. Library Repository & Duplicate Prevention:
+     - In `LibraryRepository.kt`: Removed arbitrary `trimToLast10Books()` truncation. Added duplicate detection by title and file size. Added `importBookFile`, `getChapterText`, `getChapters`, `saveReadingProgress`, and `searchInBook`.
+  3. Mini-App Architecture Integration:
+     - In `HeavyFloatingHost.kt`: Replaced placeholder `DefaultMiniAppFactory` registration for `"reader"` and `"ebook_reader"` with dedicated `ReaderMiniAppFactory`.
+     - In `ElementActionDispatcher.kt`: Routed both `"ebook_reader"` and `"reader"` actions to `MiniAppManager.toggleApp(context, "reader")`.
+     - In `AndroidManifest.xml`: Declared `ReaderImportActivity` with `@android:style/Theme.Translucent.NoTitleBar` for SAF document picking.
+  4. Floating Reader Implementation:
+     - Created `ReaderLibraryView.kt`: Shelf with recent/imported books, progress bar/percentage, last opened info, title search, "+ Import" button launching `ReaderImportActivity`, delete confirmation, and bundled sample classic generator.
+     - Created `ReaderReadingView.kt`: Reading screen with selectable text, chapter navigation (Prev/Next), TOC drawer modal, in-chapter search with highlighting, in-book cross-chapter search with snippet jump, font scaling (12sp-28sp), auto-scroll with speed controls, and Text-to-Speech (TTS).
+     - Created `ReaderMiniAppInstance.kt`: Implemented `MiniAppInstance` lifecycle (`onCreate`, `onResume`, `onPause`, `onDestroy`, `prepareForSleep`, `restoreFromSnapshot`, `releaseRuntime`, `onSaveState`) seamlessly preserving reading mode, book ID, chapter, scroll position, and font size across mini-app fold, sleep, wake, and restore.
+  5. Verification:
+     - Added `EpubParserTest.kt` with 9 regression test cases covering natural sort, spine authority, nested OPF paths, URL-encoded hrefs, directory collisions, navigation exclusion, broken spine fallback, repeatable idempotence, and TXT parsing.
+     - Added `ReaderMiniAppTest.kt` covering factory registration, lifecycle states, snapshot sleep/restore recovery, and view creation.
+     - Ran unit tests: 90/90 tests passed across `FloatingMiniAppFrameworkTest`, `EpubParserTest`, and `ReaderMiniAppTest`.
+     - Ran `compile_applet`: Succeeded cleanly.
+* How it was verified: Local JVM unit test suite (90/90 tests passing in `FloatingMiniAppFrameworkTest`, `EpubParserTest`, and `ReaderMiniAppTest`) and clean `compile_applet` build — on-device claim only / not tested on physical hardware. Physical on-device execution required to observe soft input, touch gestures, and SAF picker interaction on physical Android hardware.
+* Any deviation from what was requested, and why: None. Excluded Book Tracker, Quick Notes, standalone TrackerActivity, and legacy backup migration per instructions.
+* Any known issue or follow-up needed: Physical on-device verification of eReader floating window interactions.

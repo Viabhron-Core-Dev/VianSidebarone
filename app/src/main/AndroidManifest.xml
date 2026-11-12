@@ -110,6 +110,10 @@
         <activity android:name=".feature.settings.ActionPickerActivity" android:exported="false" />
         <activity android:name=".feature.settings.LinkPickerActivity" android:exported="false" />
         <activity
+            android:name=".feature.reader.ReaderImportActivity"
+            android:exported="false"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+        <activity
             android:name=".feature.pwa.PwaListActivity"
             android:exported="false"
             android:label="Offline PWA"

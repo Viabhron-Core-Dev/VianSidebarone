@@ -538,6 +538,31 @@
   - `HandleService.kt` notification displays corrected daily totals automatically.
 - **Testing**: 78/78 tests in `FloatingMiniAppFrameworkTest` passing 100%.
 
+### Phase 14.8: Sidebar eReader — Floating Reader (Part 1 Only) (COMPLETED)
+- **1. EPUB Parser Rebuild & Authoritative Ordering Defect Fix**:
+  - Replaced regex parsing with Android `XmlPullParser` for container and OPF package manifest/spine.
+  - Authoritative OPF Spine: Follows `<spine>` `<itemref>` element sequence as strict source of truth for reading order.
+  - Path Normalization: Implemented `normalizeZipPath` resolving `.` and `..` relative directories, URL encoding, and OPF base folder.
+  - Exact Normalized ZIP Lookup: Implemented `findZipEntry` with exact case-insensitive matching; eliminated ambiguous suffix-based matches across volumes/directories.
+  - Non-Reading Exclusion: Automatically filters out navigation documents (`properties="nav"`, `toc.ncx`) and non-linear items (`linear="no"`).
+  - Natural Numeric Ordering Fallback: Implemented `naturalCompare` ensuring "chapter_1" < "chapter_2" < "chapter_10" when spine is malformed/absent.
+  - Clean HTML to Text Conversion: Unescapes HTML entities, strips `<head>`, `<style>`, `<script>`, preserves paragraphs and headings, and writes `chapter_X.txt` and `toc.json`.
+- **2. Library Shelf & SAF Import**:
+  - Created `ReaderLibraryView.kt`: Shelf listing recent and imported books with reading progress bars, percentages, last read timestamps, and search filtering.
+  - SAF Integration: Added `ReaderImportActivity.kt` declared with `@android:style/Theme.Translucent.NoTitleBar` to pick EPUB/TXT files via SAF.
+  - Managed Storage: Copies imported files into private app storage (`context.filesDir`) with duplicate detection by title and file size.
+  - Bundled Sample: Provided "Load Sample Classic" generator ("The Time Machine") for immediate zero-file verification.
+- **3. Floating Reading Experience**:
+  - Created `ReaderReadingView.kt`: Scrollable reading screen with selectable text (`setTextIsSelectable(true)`), chapter navigation (`Prev` / `Next`), Table of Contents modal drawer, in-chapter search with live highlighting, in-book search across chapters with snippet preview, font scaling (12sp-28sp), auto-scroll with speed controls, and Text-to-Speech (TTS).
+  - Debounced Progress Saving: Persists scroll position debounced during reading, and immediately upon chapter change, pause, sleep, or leaving the reading screen.
+- **4. Mini-App Lifecycle & Process Architecture**:
+  - Replaced placeholder `DefaultMiniAppFactory` registration in `HeavyFloatingHost` with `ReaderMiniAppFactory`.
+  - Implemented `ReaderMiniAppInstance.kt` managing `MiniAppInstance` lifecycle (`onCreate`, `onResume`, `onPause`, `onDestroy`, `prepareForSleep`, `restoreFromSnapshot`, `releaseRuntime`, `onSaveState`) seamlessly preserving reading mode, book ID, chapter, scroll position, and font size across mini-app fold, sleep, wake, and restore.
+- **5. Testing**:
+  - Added `EpubParserTest.kt` with 9 regression test cases covering natural numeric sort, spine authority, nested OPF paths, URL-encoded hrefs, directory collisions, navigation exclusion, broken spine fallback, repeatable idempotence, and TXT parsing.
+  - Added `ReaderMiniAppTest.kt` covering factory registration, lifecycle states, snapshot sleep/restore recovery, and view creation.
+  - 90/90 tests passing in `FloatingMiniAppFrameworkTest`, `EpubParserTest`, and `ReaderMiniAppTest`. Whole-project compilation clean.
+
 ---
 
 ## Phase 14: PWA Engine & External AI App Integration (Tier 5 - Highest Complexity)

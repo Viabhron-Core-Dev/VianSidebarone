@@ -215,7 +215,7 @@ object ElementActionDispatcher {
                 MiniAppManager.toggleApp(context, "work_notes")
                 true
             }
-            "ebook_reader" -> {
+            "ebook_reader", "reader" -> {
                 MiniAppManager.toggleApp(context, "reader")
                 true
             }

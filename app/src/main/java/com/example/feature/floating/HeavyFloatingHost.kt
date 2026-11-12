@@ -24,12 +24,14 @@ class HeavyFloatingHost private constructor(private val context: Context) {
     private val lock = Any()
     private val defaultFactory = DefaultMiniAppFactory()
     private val testNotesFactory = TestNotesMiniAppFactory()
+    private val readerFactory = com.example.feature.reader.ReaderMiniAppFactory()
 
     init {
         // Register default and test mini-app factories
         registerFactory("generic", defaultFactory)
         registerFactory("work_notes", defaultFactory)
-        registerFactory("reader", defaultFactory)
+        registerFactory("reader", readerFactory)
+        registerFactory("ebook_reader", readerFactory)
         registerFactory("dictionary", defaultFactory)
         registerFactory("translation", defaultFactory)
         registerFactory(TestNotesMiniAppInstance.APP_TYPE, testNotesFactory)
