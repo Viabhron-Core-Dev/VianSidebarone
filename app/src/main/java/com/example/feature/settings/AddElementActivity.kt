@@ -276,6 +276,9 @@ class AddElementActivity : ComponentActivity() {
         addItem(com.example.R.drawable.ic_library_books, "eBook Reader") {
             handleElementSelected("system:ebook_reader", "eBook Reader")
         }
+        addItem(android.R.drawable.ic_menu_view, "Floating PWA") {
+            handleElementSelected("system:floating_pwa", "Floating PWA")
+        }
         addItem(android.R.drawable.ic_menu_edit, "Test Notes") {
             com.example.core.LogKeeper.log(
                 this,

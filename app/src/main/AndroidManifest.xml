@@ -114,6 +114,14 @@
             android:exported="false"
             android:theme="@android:style/Theme.Translucent.NoTitleBar" />
         <activity
+            android:name=".feature.reader.ReaderFolderTreeActivity"
+            android:exported="false"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+        <activity
+            android:name=".feature.pwa.floating.FloatingPwaRelayActivity"
+            android:exported="false"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+        <activity
             android:name=".feature.pwa.PwaListActivity"
             android:exported="false"
             android:label="Offline PWA"

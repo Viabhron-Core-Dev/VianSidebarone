@@ -162,11 +162,22 @@ class FloatingWindowManager private constructor(context: Context) {
     @Synchronized
     fun bringToFront(windowId: String): Boolean {
         val window = windows[windowId] ?: return false
-        val wasAlreadyTop = zOrderedWindowIds.lastOrNull() == windowId
-
         val toElevate = LinkedHashSet<String>()
         collectDescendants(windowId, toElevate)
         toElevate.add(windowId)
+
+        val currentIdx = zOrderedWindowIds.indexOf(windowId)
+        val hasVisibleAttachedAbove = if (currentIdx >= 0) {
+            ((currentIdx + 1) until zOrderedWindowIds.size).any { idx ->
+                val otherId = zOrderedWindowIds[idx]
+                if (otherId in toElevate) return@any false
+                val other = windows[otherId]
+                other != null && other.isAttached && other.isVisible
+            }
+        } else {
+            false
+        }
+        val wasAlreadyTop = zOrderedWindowIds.lastOrNull() == windowId
 
         var orderChanged = false
         val lastIdx = zOrderedWindowIds.size - 1
@@ -185,11 +196,11 @@ class FloatingWindowManager private constructor(context: Context) {
 
         recomputeZOrders()
 
-        val refreshPerformed = orderChanged && !wasAlreadyTop
-        log("WINDOW_BRING_TO_FRONT id=$windowId alreadyTop=$wasAlreadyTop orderChanged=$orderChanged zOrder=${window.zOrder} refreshPerformed=$refreshPerformed")
+        val refreshPerformed = orderChanged && !wasAlreadyTop && hasVisibleAttachedAbove
+        log("WINDOW_BRING_TO_FRONT id=$windowId alreadyTop=$wasAlreadyTop hasVisibleAttachedAbove=$hasVisibleAttachedAbove orderChanged=$orderChanged zOrder=${window.zOrder} refreshPerformed=$refreshPerformed")
 
-        // Only refresh WindowManager view order if order actually changed and wasn't already top!
-        // Never remove and re-add if already at the top, which destroys active touch streams and flickers.
+        // Only refresh WindowManager view order when another visible attached window actually sits above this window!
+        // Never remove and re-add if already visually on top, which destroys active SurfaceViews / touch streams.
         if (refreshPerformed) {
             for (id in toElevate) {
                 val w = windows[id] ?: continue

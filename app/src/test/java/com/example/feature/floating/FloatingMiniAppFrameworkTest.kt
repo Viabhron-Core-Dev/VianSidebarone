@@ -247,7 +247,7 @@ class FloatingMiniAppFrameworkTest {
         testNotes.onCreate(null)
         testNotes.onStart()
         testNotes.onResume()
-        assertEquals(TestNotesMiniAppInstance.DEFAULT_INSTRUCTIONAL_TEXT, testNotes.noteText)
+        assertEquals("", testNotes.noteText)
 
         // Simulate user typing text
         val editedUserText = "Validation on physical device: Move, Resize, Sleep, Wake."
@@ -2798,6 +2798,141 @@ class FloatingMiniAppFrameworkTest {
         assertEquals("1.00 MiB", helper.formatDataBytes(1024L * 1024L))
         assertEquals("1.00 GiB", helper.formatDataBytes(1024L * 1024L * 1024L))
         assertEquals("--", helper.formatDataBytes(null))
+    }
+
+    @Test
+    fun testPhase1BlankNewNoteAndLegacyTemplateHandling() {
+        assertTrue(TestNotesMiniAppInstance.isLegacyDefaultTemplate(TestNotesMiniAppInstance.DEFAULT_INSTRUCTIONAL_TEXT, null))
+        assertTrue(TestNotesMiniAppInstance.isLegacyDefaultTemplate(TestNotesMiniAppInstance.DEFAULT_INSTRUCTIONAL_TEXT, "default"))
+        assertFalse(TestNotesMiniAppInstance.isLegacyDefaultTemplate("User typed note", "ime_bridge"))
+        assertFalse(TestNotesMiniAppInstance.isLegacyDefaultTemplate(TestNotesMiniAppInstance.DEFAULT_INSTRUCTIONAL_TEXT, "ime_bridge"))
+
+        val store = DurableMiniAppStore.getInstance(testContext)
+        val noteId = "p1_legacy_template_note"
+        store.saveSnapshot(
+            MiniAppRecoverySnapshot(
+                instanceId = noteId,
+                appType = "test_notes",
+                state = MiniAppState.ACTIVE,
+                payload = mutableMapOf(
+                    "text" to TestNotesMiniAppInstance.DEFAULT_INSTRUCTIONAL_TEXT,
+                    "source" to "default"
+                )
+            )
+        )
+        val window = FloatingMiniAppWindow(noteId, testContext, "test_notes")
+        assertEquals("Legacy unedited template must open blank", "", window.getAuthoritativeNoteText())
+        store.deleteSnapshot(noteId)
+    }
+
+    @Test
+    fun testPhase1MultiInstanceNoteCreationStaggeredBoundsAndCopy() {
+        val bridge = FloatingMiniAppBridge.getInstance(testContext)
+        val store = DurableMiniAppStore.getInstance(testContext)
+
+        val win1 = bridge.openNewNoteInstance("test_notes")
+        val win2 = bridge.openNewNoteInstance("test_notes")
+        val id1 = win1.instanceId
+        val id2 = win2.instanceId
+        assertTrue("Multi-instance IDs must be unique", id1 != id2)
+
+        val snap1 = store.loadSnapshot(id1)
+        val snap2 = store.loadSnapshot(id2)
+        assertNotNull(snap1)
+        assertNotNull(snap2)
+        assertTrue(
+            "Second new Note instance must have staggered bounds",
+            snap1!!.windowBounds.x != snap2!!.windowBounds.x || snap1.windowBounds.y != snap2.windowBounds.y
+        )
+
+        win1.createContentView(testContext)
+        win2.createContentView(testContext)
+        win1.setNoteTextForTesting("First Note Content")
+        win2.setNoteTextForTesting("Second Note Content")
+
+        assertTrue("Copy on populated note must succeed", win1.copyNoteContent())
+        val clipboard = testContext.getSystemService(Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
+        if (clipboard != null) {
+            assertEquals("First Note Content", clipboard.primaryClip?.getItemAt(0)?.text?.toString())
+        }
+
+        win1.setNoteTextForTesting("")
+        assertFalse("Copy on empty note must safely report empty without crash", win1.copyNoteContent())
+
+        bridge.closeMiniApp(id1, deleteDurable = true)
+        bridge.closeMiniApp(id2, deleteDurable = true)
+    }
+
+    @Test
+    fun testPhase1PerNoteAccentColorPersistenceAndBubbleTinting() {
+        val bridge = FloatingMiniAppBridge.getInstance(testContext)
+        val store = DurableMiniAppStore.getInstance(testContext)
+
+        val win1 = bridge.openNewNoteInstance("note")
+        val win2 = bridge.openNewNoteInstance("note")
+        val id1 = win1.instanceId
+        val id2 = win2.instanceId
+        win1.createContentView(testContext)
+        win2.createContentView(testContext)
+
+        win1.applyNoteAccentColor("#F38BA8", persist = true)
+        win2.applyNoteAccentColor("#A6E3A1", persist = true)
+        assertTrue(win1.flushPendingSave())
+        assertTrue(win2.flushPendingSave())
+
+        val loaded1 = store.loadSnapshot(id1)
+        val loaded2 = store.loadSnapshot(id2)
+        assertEquals("#F38BA8", loaded1?.payload?.get(NotePersistenceCoordinator.KEY_ACCENT_COLOR))
+        assertEquals("#A6E3A1", loaded2?.payload?.get(NotePersistenceCoordinator.KEY_ACCENT_COLOR))
+
+        // Verify folded bubble resolves each Note's independent accent color
+        val bubble1 = FloatingMiniAppLauncherBubble(
+            id1,
+            loaded1!!.appType,
+            testContext,
+            loaded1.buttonPosition.first,
+            loaded1.buttonPosition.second,
+            loaded1.payload[NotePersistenceCoordinator.KEY_ACCENT_COLOR]
+        ) {}
+        val bubble2 = FloatingMiniAppLauncherBubble(
+            id2,
+            loaded2!!.appType,
+            testContext,
+            loaded2.buttonPosition.first,
+            loaded2.buttonPosition.second,
+            loaded2.payload[NotePersistenceCoordinator.KEY_ACCENT_COLOR]
+        ) {}
+        assertEquals(0xFFF38BA8.toInt(), bubble1.resolvedAccentColor())
+        assertEquals(0xFFA6E3A1.toInt(), bubble2.resolvedAccentColor())
+
+        // Recreate window from snapshot and verify accent restores
+        val recreated = FloatingMiniAppWindow(id1, testContext, "note")
+        assertEquals("#F38BA8", recreated.currentAccentColorHex)
+
+        bridge.closeMiniApp(id1, deleteDurable = true)
+        bridge.closeMiniApp(id2, deleteDurable = true)
+    }
+
+    @Test
+    fun testPhase2FloatingWindowCornerRadiusTransitions() {
+        val window = FloatingMiniAppWindow("p2_corners_test", testContext, "reader")
+        val root = window.createContentView(testContext)
+        assertNotNull(root)
+        val density = testContext.resources.displayMetrics.density
+        val expectedRadius = 16 * density
+
+        assertTrue("Floating window must enable rounded outline clipping", window.isCardClippedToOutline)
+        assertEquals(expectedRadius, window.appliedCornerRadiusPx, 0.5f)
+
+        // Maximize -> 0dp square corners
+        window.toggleMaximize()
+        assertFalse("Maximized window must disable rounded clipping", window.isCardClippedToOutline)
+        assertEquals(0f, window.appliedCornerRadiusPx, 0.01f)
+
+        // Restore -> 16dp rounded corners again
+        window.toggleMaximize()
+        assertTrue("Restored floating window must re-enable rounded clipping", window.isCardClippedToOutline)
+        assertEquals(expectedRadius, window.appliedCornerRadiusPx, 0.5f)
     }
 }
 

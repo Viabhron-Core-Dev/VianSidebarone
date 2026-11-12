@@ -28,8 +28,41 @@ class FloatingMiniAppBridge private constructor(private val context: Context) {
     private val windowManager = FloatingWindowManager.getInstance(context)
     private val durableStore = DurableMiniAppStore.getInstance(context)
     private val activeBubbles = LinkedHashMap<String, FloatingMiniAppLauncherBubble>()
+    private var noteStaggerIndex = 0
 
     fun isMainOnlyMiniApp(appType: String): Boolean = (appType == "note" || appType == "test_notes")
+
+    /**
+     * Creates and opens a brand-new blank Note mini-app instance with a unique persistent instanceId
+     * and staggered initial window bounds so multiple notes remain independent and visually distinct.
+     */
+    fun openNewNoteInstance(appType: String = "test_notes"): FloatingMiniAppWindow {
+        val normalizedType = if (appType == "note") "test_notes" else appType
+        val newInstanceId = "note_${System.currentTimeMillis()}_${UUID.randomUUID().toString().take(4)}"
+        val density = context.resources.displayMetrics.density
+        val stepPx = (28 * density).toInt().coerceAtLeast(16)
+        val openNoteCount = windowManager.getAllWindows()
+            .count { it is FloatingMiniAppWindow && isMainOnlyMiniApp(it.appType) }
+        val slot = (openNoteCount + noteStaggerIndex) % 6
+        noteStaggerIndex = (noteStaggerIndex + 1) % 60
+
+        val screenW = windowManager.screenWidth.takeIf { it > 0 } ?: 1080
+        val screenH = windowManager.screenHeight.takeIf { it > 0 } ?: 1920
+        val width = minOf(650, maxOf((260 * density).toInt(), screenW - (48 * density).toInt()))
+        val height = minOf(850, maxOf((240 * density).toInt(), screenH - (160 * density).toInt()))
+        val baseX = (80 * density).toInt()
+        val baseY = (110 * density).toInt()
+        val x = (baseX + slot * stepPx).coerceIn(0, maxOf(0, screenW - width))
+        val y = (baseY + slot * stepPx).coerceIn(0, maxOf(0, screenH - height))
+        val staggeredBounds = WindowBounds(x, y, width, height)
+
+        LogKeeper.log(
+            context,
+            TAG,
+            "OPEN_NEW_NOTE_INSTANCE id=$newInstanceId type=$normalizedType slot=$slot bounds=$staggeredBounds"
+        )
+        return openMiniApp(newInstanceId, normalizedType, staggeredBounds)
+    }
 
     /**
      * Opens or brings to front a mini-app floating window.
@@ -443,12 +476,14 @@ class FloatingMiniAppBridge private constructor(private val context: Context) {
 
     private fun showLauncherBubble(snapshot: MiniAppRecoverySnapshot) {
         dismissLauncherBubble(snapshot.instanceId)
+        val accentHex = snapshot.payload[NotePersistenceCoordinator.KEY_ACCENT_COLOR]
         val bubble = FloatingMiniAppLauncherBubble(
             instanceId = snapshot.instanceId,
             appType = snapshot.appType,
             context = context,
             initialX = snapshot.buttonPosition.first,
             initialY = snapshot.buttonPosition.second,
+            accentColorHex = accentHex,
             onBubbleTapped = { id -> wakeMiniApp(id) }
         )
         activeBubbles[snapshot.instanceId] = bubble

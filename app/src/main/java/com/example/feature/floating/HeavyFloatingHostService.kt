@@ -108,9 +108,43 @@ class HeavyFloatingHostService : Service() {
                     host.updateLiveInstanceText(instanceId, liveText, selStart, selEnd, sess)
                     return@HeavyCommandHandler IpcResult.success("Synced live text for $instanceId")
                 }
+                if (action == "reader_library_changed") {
+                    com.example.feature.reader.ReaderEventManager.notifyLibraryChanged()
+                    return@HeavyCommandHandler IpcResult.success("Notified reader library changed")
+                }
+                if (action == "reader_folder_granted") {
+                    val folderUri = cmd.payload["folder_uri"]
+                    if (!folderUri.isNullOrBlank()) {
+                        com.example.feature.reader.ReaderFolderPrefs.saveFolderUri(this@HeavyFloatingHostService, folderUri)
+                    }
+                    com.example.feature.reader.ReaderEventManager.notifyFolderGranted(folderUri)
+                    return@HeavyCommandHandler IpcResult.success("Notified reader folder granted")
+                }
+                if (action == EmbeddedImeBridge.CMD_EMBEDDED_IME_BLUR) {
+                    host.dispatchEmbeddedImeBlur(instanceId)
+                    return@HeavyCommandHandler IpcResult.success("Blurred embedded IME for $instanceId")
+                }
                 if (action in listOf("note_format", "note_undo", "note_redo", "note_clear")) {
                     host.dispatchNoteCommand(instanceId, action ?: "", cmd.payload)
                     return@HeavyCommandHandler IpcResult.success("Handled $action for $instanceId")
+                }
+                if (action in listOf(
+                        com.example.feature.pwa.floating.FloatingPwaMiniAppInstance.CMD_PWA_SELECT,
+                        com.example.feature.pwa.floating.FloatingPwaMiniAppInstance.CMD_PWA_LOAD_URL,
+                        com.example.feature.pwa.floating.FloatingPwaMiniAppInstance.CMD_PWA_BACK,
+                        com.example.feature.pwa.floating.FloatingPwaMiniAppInstance.CMD_PWA_FORWARD,
+                        com.example.feature.pwa.floating.FloatingPwaMiniAppInstance.CMD_PWA_RELOAD,
+                        com.example.feature.pwa.floating.FloatingPwaMiniAppInstance.CMD_PWA_STOP,
+                        com.example.feature.pwa.floating.FloatingPwaMiniAppInstance.CMD_PWA_FILE_RESULT,
+                        com.example.feature.pwa.floating.FloatingPwaMiniAppInstance.CMD_PWA_PERMISSION_RESULT
+                    )
+                ) {
+                    val handled = host.dispatchFloatingPwaCommand(instanceId, action ?: "", cmd.payload)
+                    return@HeavyCommandHandler if (handled) {
+                        IpcResult.success("Handled $action for $instanceId")
+                    } else {
+                        IpcResult.error(IpcErrorCode.COMMAND_FAILED, "Floating PWA instance not active: $instanceId")
+                    }
                 }
                 val isSleep = cmd.payload["sleep"] == "true" || action == "sleep"
                 val isSnapshotOnly = action == "get_snapshot" || (isSleep && cmd.payload["release"] != "true")

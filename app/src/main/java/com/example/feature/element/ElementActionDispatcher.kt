@@ -129,9 +129,14 @@ object ElementActionDispatcher {
                         "MiniAppLaunchRouting",
                         "ROUTING_DIAG: ELEMENT_ACTION_PAGE_WINDOW item=${item.id} pageType=${item.pageType}"
                     )
-                    val instanceId = if (item.pageType.contains(":")) item.pageType.substringAfter(":") else if (item.pageType == "test_notes") "miniapp_test_notes" else null
                     val baseType = item.pageType.substringBefore(":")
-                    MiniAppManager.toggleApp(context, baseType, instanceId)
+                    if (baseType == "test_notes" || baseType == "note") {
+                        com.example.feature.floating.FloatingMiniAppBridge.getInstance(context)
+                            .openNewNoteInstance(baseType)
+                    } else {
+                        val instanceId = if (item.pageType.contains(":")) item.pageType.substringAfter(":") else null
+                        MiniAppManager.toggleApp(context, baseType, instanceId)
+                    }
                     true
                 }
 
@@ -165,13 +170,14 @@ object ElementActionDispatcher {
     internal fun handleSystemAction(context: Context, action: String, containerId: String = "sidebar"): Boolean {
         LogKeeper.log(context, TAG, "Handling system action: $action (container=$containerId)")
         if (action == "test_notes" || action.startsWith("test_notes:") || action == "note" || action.startsWith("note:")) {
-            val instanceId = if (action.contains(":")) action.substringAfter(":") else "miniapp_test_notes"
+            val baseType = action.substringBefore(":")
             LogKeeper.log(
                 context,
                 "MiniAppLaunchRouting",
-                "ROUTING_DIAG: ELEMENT_ACTION_SYSTEM_ACTION action=$action instanceId=$instanceId containerId=$containerId"
+                "ROUTING_DIAG: ELEMENT_ACTION_SYSTEM_ACTION action=$action containerId=$containerId (spawning new note instance)"
             )
-            MiniAppManager.toggleApp(context, "test_notes", instanceId)
+            com.example.feature.floating.FloatingMiniAppBridge.getInstance(context)
+                .openNewNoteInstance(baseType)
             return true
         }
         return when (action) {
@@ -217,6 +223,10 @@ object ElementActionDispatcher {
             }
             "ebook_reader", "reader" -> {
                 MiniAppManager.toggleApp(context, "reader")
+                true
+            }
+            "floating_pwa" -> {
+                MiniAppManager.toggleApp(context, "floating_pwa")
                 true
             }
             "audio_record" -> {

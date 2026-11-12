@@ -29,6 +29,7 @@ class FloatingMiniAppLauncherBubble(
     context: Context,
     initialX: Int,
     initialY: Int,
+    private val accentColorHex: String? = null,
     private val onBubbleTapped: (String) -> Unit
 ) : FloatingWindow("bubble_$instanceId", context, TYPE_BUBBLE) {
 
@@ -46,6 +47,19 @@ class FloatingMiniAppLauncherBubble(
     private var initialBoundsY = 0
     private var isDragging = false
 
+    fun resolvedAccentColor(): Int {
+        val clean = (accentColorHex?.trim()?.removePrefix("#") ?: "").let { hex ->
+            if (hex.length == 6 && hex.all { it in '0'..'9' || it in 'a'..'f' || it in 'A'..'F' }) {
+                hex
+            } else if (hex.length == 8 && hex.all { it in '0'..'9' || it in 'a'..'f' || it in 'A'..'F' }) {
+                return hex.toLong(16).toInt()
+            } else {
+                NotePersistenceCoordinator.DEFAULT_ACCENT_COLOR.removePrefix("#")
+            }
+        }
+        return (0xFF000000L or clean.toLong(16)).toInt()
+    }
+
     override fun onRegister(manager: FloatingWindowManager) {
         super.onRegister(manager)
         com.example.core.LogKeeper.log(context, "FloatingMiniAppLauncherBubble", "LAUNCHER_ATTACH bounds=$bounds")
@@ -53,11 +67,12 @@ class FloatingMiniAppLauncherBubble(
 
     override fun createContentView(context: Context): View {
         val density = context.resources.displayMetrics.density
+        val strokeColor = resolvedAccentColor()
         val root = FrameLayout(context).apply {
             val bg = GradientDrawable().apply {
                 shape = GradientDrawable.OVAL
                 setColor(Color.parseColor("#313244"))
-                setStroke((1.5f * density).toInt(), Color.parseColor("#89B4FA"))
+                setStroke((2f * density).toInt(), strokeColor)
             }
             background = bg
             elevation = 10 * density
@@ -67,6 +82,7 @@ class FloatingMiniAppLauncherBubble(
         // Centered App Icon (no text label, matching standalone Reader folded bubble)
         val iconRes = when (appType) {
             "reader", "ebook_reader" -> com.example.R.drawable.ic_library_books
+            "floating_pwa" -> android.R.drawable.ic_menu_view
             "dictionary" -> android.R.drawable.ic_menu_sort_alphabetically
             "translation" -> android.R.drawable.ic_menu_sort_alphabetically
             "test_notes", "work_notes", "note" -> android.R.drawable.ic_menu_edit

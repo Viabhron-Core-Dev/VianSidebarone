@@ -28,7 +28,8 @@ object FloatingMiniAppLogFilter {
     private val MINI_APP_TYPE_MARKERS = listOf(
         "test_notes",
         "speed_monitor",
-        "ebook_reader"
+        "ebook_reader",
+        "floating_pwa"
     )
 
     private val MINI_APP_STACK_MARKERS = listOf(
@@ -43,6 +44,7 @@ object FloatingMiniAppLogFilter {
         "TestNotesMiniApp",
         "SpeedMonitorMiniApp",
         "EBookReaderMiniApp",
+        "FloatingPwa",
         "DurableMiniAppStore",
         "com.example.feature.floating."
     )

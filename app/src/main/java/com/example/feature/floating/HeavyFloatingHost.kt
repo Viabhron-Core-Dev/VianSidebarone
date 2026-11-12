@@ -25,6 +25,7 @@ class HeavyFloatingHost private constructor(private val context: Context) {
     private val defaultFactory = DefaultMiniAppFactory()
     private val testNotesFactory = TestNotesMiniAppFactory()
     private val readerFactory = com.example.feature.reader.ReaderMiniAppFactory()
+    private val floatingPwaFactory = com.example.feature.pwa.floating.FloatingPwaMiniAppFactory()
 
     init {
         // Register default and test mini-app factories
@@ -32,6 +33,7 @@ class HeavyFloatingHost private constructor(private val context: Context) {
         registerFactory("work_notes", defaultFactory)
         registerFactory("reader", readerFactory)
         registerFactory("ebook_reader", readerFactory)
+        registerFactory(com.example.feature.pwa.floating.FloatingPwaMiniAppInstance.APP_TYPE, floatingPwaFactory)
         registerFactory("dictionary", defaultFactory)
         registerFactory("translation", defaultFactory)
         registerFactory(TestNotesMiniAppInstance.APP_TYPE, testNotesFactory)
@@ -164,6 +166,30 @@ class HeavyFloatingHost private constructor(private val context: Context) {
             }
             return false
         }
+    }
+
+    fun dispatchEmbeddedImeBlur(instanceId: String): Boolean {
+        synchronized(lock) {
+            val instance = activeInstances[instanceId] ?: return false
+            return when (instance) {
+                is com.example.feature.reader.ReaderMiniAppInstance -> {
+                    instance.clearEmbeddedImeFocus()
+                    true
+                }
+                is com.example.feature.pwa.floating.FloatingPwaMiniAppInstance -> {
+                    instance.clearEmbeddedImeFocus()
+                    true
+                }
+                else -> false
+            }
+        }
+    }
+
+    fun dispatchFloatingPwaCommand(instanceId: String, action: String, params: Map<String, String>): Boolean {
+        val instance = synchronized(lock) {
+            activeInstances[instanceId] as? com.example.feature.pwa.floating.FloatingPwaMiniAppInstance
+        } ?: return false
+        return instance.handleCommand(context, action, params)
     }
 
     /**

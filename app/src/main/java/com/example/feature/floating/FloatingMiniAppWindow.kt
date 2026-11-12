@@ -1,5 +1,7 @@
 package com.example.feature.floating
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.graphics.Color
@@ -21,6 +23,7 @@ import android.view.Display
 import android.view.GestureDetector
 import android.view.Gravity
 import android.view.MotionEvent
+import android.view.SurfaceControl
 import android.view.SurfaceControlViewHost
 import android.view.SurfaceHolder
 import android.view.SurfaceView
@@ -35,7 +38,9 @@ import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.SeekBar
 import android.widget.TextView
+import android.widget.Toast
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import com.example.core.FloatingWindow
@@ -200,7 +205,15 @@ class FloatingMiniAppWindow(
     // View references
     private var rootCardView: FrameLayout? = null
     private var rootCardBackground: GradientDrawable? = null
+    private var rootBorderOverlay: View? = null
+    private var rootBorderDrawable: GradientDrawable? = null
     private var contentContainer: FrameLayout? = null
+    private var contentContainerBg: GradientDrawable? = null
+    private var contentPlaceholderBg: GradientDrawable? = null
+    private var noteEditorBg: GradientDrawable? = null
+    private var topBarIconDrawable: GradientDrawable? = null
+    private var topBarEditBtn: TextView? = null
+    private var topBarEditBtnBg: GradientDrawable? = null
     private var titleView: TextView? = null
     private var noteEditText: EditText? = null
     private var imeBridgeEditText: EditText? = null
@@ -227,6 +240,7 @@ class FloatingMiniAppWindow(
     private var lastRelayoutHeight: Int = -1
 
     private var editPopoverView: View? = null
+    private var pwaWindowController: com.example.feature.pwa.floating.FloatingPwaWindowController? = null
     var currentFontSizeSp: Float = 15f
         private set
     var currentFontStyle: String = "regular"
@@ -235,8 +249,12 @@ class FloatingMiniAppWindow(
         private set
     var currentLineSpacingMult: Float = 1.2f
         private set
+    var currentAccentColorHex: String = NotePersistenceCoordinator.DEFAULT_ACCENT_COLOR
+        private set
 
     var isCardClippedToOutline: Boolean = true
+        private set
+    var appliedCornerRadiusPx: Float = 0f
         private set
 
     val notePersistence = NotePersistenceCoordinator(instanceId, context, durableStore)
@@ -298,7 +316,8 @@ class FloatingMiniAppWindow(
                 }
             } else if (!isAwaitingImeVisibility && !isAwaitingWindowFocusForIme && !isDiagnosticAwaitingWindowFocus) {
                 val isDiagActive = isDiagnosticMode && (diagnosticEditText?.hasFocus() == true)
-                if (!isNoteEditorImeActive && !isDiagActive) {
+                val isPwaUrlActive = pwaWindowController?.isEditingUrlActive() == true
+                if (!isNoteEditorImeActive && !isDiagActive && !isPwaUrlActive) {
                     if ((layoutParams.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE) == 0 && !isResizing && !isDraggingWindow) {
                         layoutParams.flags = layoutParams.flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
                         applyLayoutUpdate()
@@ -321,7 +340,8 @@ class FloatingMiniAppWindow(
     fun getContentViewportHeight(windowHeight: Int): Int {
         val density = context.resources.displayMetrics.density
         val topBarHeight = (38 * density).toInt()
-        return maxOf(0, windowHeight - topBarHeight)
+        val pwaToolbarHeight = pwaWindowController?.getToolbarHeightPx() ?: 0
+        return maxOf(0, windowHeight - topBarHeight - pwaToolbarHeight)
     }
 
     override fun setWindowBounds(newBounds: WindowBounds) {
@@ -361,11 +381,19 @@ class FloatingMiniAppWindow(
                             "TestNotesImeDebug",
                             "MAIN_RECEIVE_FOCUS_REQUEST sess=$sess id=$instanceId sel=($selStart,$selEnd) textLen=${text.length}"
                         )
-                        if (activeTextAuthority != TextAuthority.IME_BRIDGE) {
-                            currentNoteText = text
-                            activeTextAuthority = TextAuthority.HEAVY
+                        if (isMainOnlyApp() || appType == "work_notes") {
+                            if (activeTextAuthority != TextAuthority.IME_BRIDGE) {
+                                currentNoteText = text
+                                activeTextAuthority = TextAuthority.HEAVY
+                            }
                         }
                         activateEmbeddedEditorIme(text, selStart, selEnd, sess)
+                    }
+                    EmbeddedImeBridge.ACTION_MINIAPP_EDITOR_BLUR -> {
+                        val sess = event.payload["sessionId"] ?: ""
+                        if (sess == "force" || sess == activeImeSessionId) {
+                            deactivateEmbeddedEditorIme(notifyHeavy = false)
+                        }
                     }
                     TestNotesMiniAppInstance.ACTION_MINIAPP_SELECTION_CHANGED -> {
                         val selStart = event.payload["selStart"]?.toIntOrNull() ?: 0
@@ -396,6 +424,9 @@ class FloatingMiniAppWindow(
                         )
                         revealEmbeddedContent("frame_committed")
                     }
+                    else -> {
+                        pwaWindowController?.handleHeavyEvent(event)
+                    }
                 }
             }
         }
@@ -411,18 +442,26 @@ class FloatingMiniAppWindow(
         val initialSavedText = saved?.payload?.get(TestNotesMiniAppInstance.KEY_TEXT)
             ?: saved?.payload?.get("text")
             ?: saved?.payload?.get("note_content")
-        if (initialSavedText != null) {
+        val savedSource = saved?.payload?.get("source")
+        if (initialSavedText != null && !TestNotesMiniAppInstance.isLegacyDefaultTemplate(initialSavedText, savedSource)) {
             currentNoteText = initialSavedText
             activeTextAuthority = TextAuthority.SNAPSHOT
-            hasUserEditedText = true
+            hasUserEditedText = initialSavedText.isNotEmpty()
         }
         saved?.payload?.get("font_size")?.toFloatOrNull()?.let { currentFontSizeSp = it }
         saved?.payload?.get("font_style")?.let { currentFontStyle = it }
         saved?.payload?.get("word_wrap")?.toBooleanStrictOrNull()?.let { currentWordWrap = it }
         saved?.payload?.get("line_spacing")?.toFloatOrNull()?.let { currentLineSpacingMult = it }
+        saved?.payload?.get(NotePersistenceCoordinator.KEY_ACCENT_COLOR)?.takeIf { it.isNotBlank() }?.let {
+            currentAccentColorHex = normalizeHexColor(it)
+        }
         if (windowTitle.isEmpty()) {
             windowTitle = saved?.title?.takeIf { it.isNotEmpty() }
-                ?: if (appType == "test_notes" || appType == "note") "Note" else appType.replace('_', ' ').replaceFirstChar { it.uppercase() }
+                ?: when (appType) {
+                    "test_notes", "note" -> "Note"
+                    com.example.feature.pwa.floating.FloatingPwaMiniAppInstance.APP_TYPE -> "Floating PWA"
+                    else -> appType.replace('_', ' ').replaceFirstChar { it.uppercase() }
+                }
         }
     }
 
@@ -463,11 +502,12 @@ class FloatingMiniAppWindow(
                 }
             }
         }.apply {
+            val initialRadius = if (isMaximized) 0f else cardCornerRadius
+            appliedCornerRadiusPx = initialRadius
             val bg = GradientDrawable().apply {
                 shape = GradientDrawable.RECTANGLE
-                cornerRadius = cardCornerRadius
+                cornerRadius = initialRadius
                 setColor(Color.parseColor("#181825"))
-                setStroke((1.5f * density).toInt(), Color.parseColor("#45475A"))
             }
             rootCardBackground = bg
             background = bg
@@ -478,7 +518,7 @@ class FloatingMiniAppWindow(
                 }
             }
             // Clip all children (including top bar, content, and surface) to the card's 16dp rounded outer shape
-            clipToOutline = true
+            clipToOutline = !isMaximized
             elevation = 16 * density
         }
         root.viewTreeObserver?.addOnWindowFocusChangeListener { hasFocus ->
@@ -511,7 +551,41 @@ class FloatingMiniAppWindow(
         val topBar = createTopBar(context)
         mainLayout.addView(topBar)
 
+        // 1b. Optional Floating PWA Loader Toolbar (compact navigation + URL bar + installed PWA picker)
+        if (appType == com.example.feature.pwa.floating.FloatingPwaMiniAppInstance.APP_TYPE) {
+            val controller = com.example.feature.pwa.floating.FloatingPwaWindowController(
+                context = context,
+                instanceId = instanceId,
+                onRequestWindowFocusable = { focusable ->
+                    if (focusable) {
+                        manager?.setFocus(windowId)
+                        if (manager?.getTopVisibleWindow()?.windowId != windowId) {
+                            manager?.bringToFront(windowId)
+                        }
+                        val clearedFlags = (layoutParams.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE.inv()) and
+                            WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM.inv()
+                        if (layoutParams.flags != clearedFlags) {
+                            layoutParams.flags = clearedFlags
+                            applyLayoutUpdate()
+                        }
+                    } else if (!isNoteEditorImeActive && !isResizing && !isDraggingWindow) {
+                        if ((layoutParams.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE) == 0) {
+                            layoutParams.flags = layoutParams.flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                            applyLayoutUpdate()
+                        }
+                    }
+                },
+                onTitleChanged = { newTitle ->
+                    windowTitle = newTitle
+                    titleView?.text = newTitle
+                }
+            )
+            pwaWindowController = controller
+            mainLayout.addView(controller.createToolbarView())
+        }
+
         // 2. Content Container with matching 16dp bottom rounded corners
+        val initialCornerRadius = if (isMaximized) 0f else cardCornerRadius
         val container = FrameLayout(context).apply {
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
@@ -520,17 +594,24 @@ class FloatingMiniAppWindow(
             )
             val containerBg = GradientDrawable().apply {
                 shape = GradientDrawable.RECTANGLE
-                cornerRadii = floatArrayOf(0f, 0f, 0f, 0f, cardCornerRadius, cardCornerRadius, cardCornerRadius, cardCornerRadius)
+                cornerRadii = floatArrayOf(0f, 0f, 0f, 0f, initialCornerRadius, initialCornerRadius, initialCornerRadius, initialCornerRadius)
                 setColor(Color.parseColor("#1E1E2E"))
             }
+            contentContainerBg = containerBg
             background = containerBg
             outlineProvider = object : android.view.ViewOutlineProvider() {
                 override fun getOutline(view: View, outline: android.graphics.Outline) {
                     val r = if (isMaximized) 0f else cardCornerRadius
-                    outline.setRoundRect(0, 0, view.width, view.height, r)
+                    val rInt = r.toInt()
+                    if (rInt > 0 && view.width > 0 && view.height > 0) {
+                        // Extend top past container seam under topBar so only bottom corners round cleanly
+                        outline.setRoundRect(0, -rInt, view.width, view.height, r)
+                    } else {
+                        outline.setRect(0, 0, view.width, view.height)
+                    }
                 }
             }
-            clipToOutline = true
+            clipToOutline = !isMaximized
         }
         contentContainer = container
         mainLayout.addView(container)
@@ -543,9 +624,10 @@ class FloatingMiniAppWindow(
             )
             val pBg = GradientDrawable().apply {
                 shape = GradientDrawable.RECTANGLE
-                cornerRadii = floatArrayOf(0f, 0f, 0f, 0f, cardCornerRadius, cardCornerRadius, cardCornerRadius, cardCornerRadius)
+                cornerRadii = floatArrayOf(0f, 0f, 0f, 0f, initialCornerRadius, initialCornerRadius, initialCornerRadius, initialCornerRadius)
                 setColor(Color.parseColor("#181825"))
             }
+            contentPlaceholderBg = pBg
             background = pBg
             visibility = View.VISIBLE
         }
@@ -554,7 +636,7 @@ class FloatingMiniAppWindow(
 
         // 3b. Content Setup:
         // For Note mini-app ("note" or "test_notes"), host the single authoritative multiline EditText directly in Main.
-        // For non-Note mini-apps (Reader, Speed Monitor, etc.), embed Heavy via SurfaceView / SurfaceControlViewHost.
+        // For non-Note mini-apps (Reader, Floating PWA, etc.), embed Heavy via SurfaceView / SurfaceControlViewHost.
         if (appType == "note" || appType == "test_notes") {
             setupNoteContentView(context, container)
         } else {
@@ -567,6 +649,26 @@ class FloatingMiniAppWindow(
         container.addView(diagContainer)
 
         root.addView(mainLayout)
+
+        // Foreground non-interactive border stroke so children/surface never clip or cover the rounded border
+        val borderDrawable = GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            cornerRadius = initialCornerRadius
+            setColor(Color.TRANSPARENT)
+            setStroke((1.5f * density).toInt().coerceAtLeast(1), Color.parseColor("#45475A"))
+        }
+        rootBorderDrawable = borderDrawable
+        val borderOverlay = View(context).apply {
+            isClickable = false
+            isFocusable = false
+            background = borderDrawable
+            layoutParams = FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
+            )
+        }
+        rootBorderOverlay = borderOverlay
+        root.addView(borderOverlay)
 
         // 4. Compact in-window Edit Popover
         val popover = createEditPopover(context)
@@ -596,7 +698,8 @@ class FloatingMiniAppWindow(
                     scheduleDebouncedImeDismissCheck("insets")
                 } else if (!isAwaitingImeVisibility && !isAwaitingWindowFocusForIme && !isDiagnosticAwaitingWindowFocus) {
                     val isDiagActive = isDiagnosticMode && (diagnosticEditText?.hasFocus() == true)
-                    if (!isNoteEditorImeActive && !isDiagActive) {
+                    val isPwaUrlActive = pwaWindowController?.isEditingUrlActive() == true
+                    if (!isNoteEditorImeActive && !isDiagActive && !isPwaUrlActive) {
                         if ((layoutParams.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE) == 0 && !isResizing && !isDraggingWindow) {
                             layoutParams.flags = layoutParams.flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
                             applyLayoutUpdate()
@@ -696,12 +799,8 @@ class FloatingMiniAppWindow(
             })
         }
 
-        // Programmatic initialization via helper
-        val initialText = if (hasUserEditedText || activeTextAuthority != TextAuthority.NONE) {
-            currentNoteText
-        } else {
-            currentNoteText.ifEmpty { TestNotesMiniAppInstance.DEFAULT_INSTRUCTIONAL_TEXT }
-        }
+        // Programmatic initialization via helper (new notes start blank)
+        val initialText = currentNoteText
         updateImeBridgeTextAndSelection(initialText, initialText.length, initialText.length)
 
         return bridge
@@ -854,7 +953,7 @@ class FloatingMiniAppWindow(
     /**
      * Safely ends the embedded Note editor IME session, clearing focus and re-arming FLAG_NOT_FOCUSABLE.
      */
-    fun deactivateEmbeddedEditorIme() {
+    fun deactivateEmbeddedEditorIme(notifyHeavy: Boolean = true) {
         cancelPendingImeDismissCheck()
         imeSessionToken++
         if (!isNoteEditorImeActive && !isAwaitingWindowFocusForIme && !isAwaitingImeVisibility) return
@@ -869,8 +968,28 @@ class FloatingMiniAppWindow(
 
         val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
         try {
-            imm?.hideSoftInputFromWindow(bridge?.windowToken, 0)
+            imm?.hideSoftInputFromWindow(bridge?.windowToken ?: getView()?.windowToken, 0)
         } catch (_: Throwable) {}
+
+        if (notifyHeavy && wasActive && !isMainOnlyApp()) {
+            try {
+                val cm = HeavyProcessConnectionManager.getInstance(context)
+                if (cm.state == ConnectionState.CONNECTED) {
+                    cm.sendCommand(
+                        HeavyCommand(
+                            commandId = UUID.randomUUID().toString(),
+                            type = HeavyCommandType.PAUSE_OPERATION,
+                            targetId = instanceId,
+                            payload = mapOf(
+                                "action" to EmbeddedImeBridge.CMD_EMBEDDED_IME_BLUR,
+                                "instance_id" to instanceId
+                            )
+                        ),
+                        autoConnect = false
+                    )
+                }
+            } catch (_: Throwable) {}
+        }
 
         if ((layoutParams.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE) == 0 && !isResizing) {
             layoutParams.flags = layoutParams.flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
@@ -973,23 +1092,48 @@ class FloatingMiniAppWindow(
         }
     }
 
+    private fun applySurfaceCornerRadius(radius: Float) {
+        val sv = embeddedSurfaceView ?: return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            try {
+                val method = SurfaceView::class.java.getMethod("setCornerRadius", Float::class.javaPrimitiveType)
+                method.invoke(sv, radius)
+            } catch (_: Throwable) {}
+            try {
+                val sc = sv.surfaceControl
+                if (sc != null && sc.isValid) {
+                    val tx = SurfaceControl.Transaction()
+                    val setCr = SurfaceControl.Transaction::class.java.getMethod(
+                        "setCornerRadius",
+                        SurfaceControl::class.java,
+                        Float::class.javaPrimitiveType
+                    )
+                    setCr.invoke(tx, sc, radius)
+                    tx.apply()
+                }
+            } catch (_: Throwable) {}
+            sv.clipToOutline = radius > 0f
+            sv.invalidateOutline()
+        }
+    }
+
     private fun applyCardCornerRadius(maximized: Boolean) {
         val density = context.resources.displayMetrics.density
         val radius = if (maximized) 0f else 16 * density
+        appliedCornerRadiusPx = radius
         isCardClippedToOutline = !maximized
         rootCardBackground?.cornerRadius = radius
+        rootBorderDrawable?.cornerRadius = radius
+        val bottomRadii = floatArrayOf(0f, 0f, 0f, 0f, radius, radius, radius, radius)
+        contentContainerBg?.cornerRadii = bottomRadii
+        contentPlaceholderBg?.cornerRadii = bottomRadii
+        noteEditorBg?.cornerRadii = bottomRadii
         rootCardView?.clipToOutline = !maximized
         rootCardView?.invalidateOutline()
+        rootBorderOverlay?.invalidate()
         contentContainer?.clipToOutline = !maximized
         contentContainer?.invalidateOutline()
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && embeddedSurfaceView != null) {
-            try {
-                val method = SurfaceView::class.java.getMethod("setCornerRadius", Float::class.javaPrimitiveType)
-                method.invoke(embeddedSurfaceView, radius)
-            } catch (_: Throwable) {}
-            embeddedSurfaceView?.clipToOutline = !maximized
-            embeddedSurfaceView?.invalidateOutline()
-        }
+        applySurfaceCornerRadius(radius)
     }
 
     private fun setupEmbeddedContent(context: Context, container: FrameLayout) {
@@ -997,7 +1141,7 @@ class FloatingMiniAppWindow(
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             val density = context.resources.displayMetrics.density
-            val cardCornerRadius = 16 * density
+            val cardCornerRadius = if (isMaximized) 0f else 16 * density
             val sv = object : SurfaceView(context) {
                 override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
                     val action = ev.actionMasked
@@ -1031,38 +1175,40 @@ class FloatingMiniAppWindow(
                     FrameLayout.LayoutParams.MATCH_PARENT
                 )
                 alpha = 0f
-                setZOrderMediaOverlay(true)
+                // Keep default behind-window z-order so [× — ↘] sticker, popovers, border overlay,
+                // and rounded bottom clipping compose cleanly above the embedded surface without bleed.
                 holder.setFormat(android.graphics.PixelFormat.TRANSLUCENT)
                 outlineProvider = object : android.view.ViewOutlineProvider() {
                     override fun getOutline(view: View, outline: android.graphics.Outline) {
-                        val r = if (isMaximized) 0f else cardCornerRadius
-                        outline.setRoundRect(0, 0, view.width, view.height, r)
+                        val r = if (isMaximized) 0f else 16 * density
+                        val rInt = r.toInt()
+                        if (rInt > 0 && view.width > 0 && view.height > 0) {
+                            outline.setRoundRect(0, -rInt, view.width, view.height, r)
+                        } else {
+                            outline.setRect(0, 0, view.width, view.height)
+                        }
                     }
                 }
-                clipToOutline = true
+                clipToOutline = !isMaximized
             }
-            try {
-                val method = SurfaceView::class.java.getMethod("setCornerRadius", Float::class.javaPrimitiveType)
-                method.invoke(sv, cardCornerRadius)
-            } catch (_: Throwable) {}
             embeddedSurfaceView = sv
+            applySurfaceCornerRadius(cardCornerRadius)
 
             sv.holder.addCallback(object : SurfaceHolder.Callback {
                 override fun surfaceCreated(holder: SurfaceHolder) {
                     val tCreated = SystemClock.elapsedRealtime()
                     LogKeeper.log(context, "FloatingMiniAppTiming", "MAIN_SURFACE_CREATED id=$instanceId elapsedRealtime=$tCreated")
                     surfaceReady = true
+                    applySurfaceCornerRadius(if (isMaximized) 0f else 16 * density)
                     tryAttachSurfacePackage()
                 }
 
                 override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
                     val tChanged = SystemClock.elapsedRealtime()
                     LogKeeper.log(context, "FloatingMiniAppTiming", "MAIN_SURFACE_CHANGED id=$instanceId width=$width height=$height elapsedRealtime=$tChanged")
+                    applySurfaceCornerRadius(if (isMaximized) 0f else 16 * density)
                     if (isResizing) return
-                    val expectedViewportH = getContentViewportHeight(bounds.height)
-                    if (width != bounds.width || height != expectedViewportH) {
-                        return
-                    }
+                    if (width <= 0 || height <= 0) return
                     relayoutEmbeddedSurface(width, height)
                 }
 
@@ -1197,7 +1343,9 @@ class FloatingMiniAppWindow(
             visibility = View.VISIBLE
             alpha = 1f
         }
+        applySurfaceCornerRadius(if (isMaximized) 0f else 16 * context.resources.displayMetrics.density)
         contentPlaceholderView?.visibility = View.GONE
+        contentContainerBg?.setColor(Color.TRANSPARENT)
     }
 
     fun relayoutEmbeddedSurface(viewportWidth: Int, viewportHeight: Int) {
@@ -1219,16 +1367,24 @@ class FloatingMiniAppWindow(
     private fun setupNoteContentView(context: Context, container: FrameLayout) {
         val density = context.resources.displayMetrics.density
         val savedSnapshot = durableStore.loadSnapshot(instanceId)
-        val initialText = savedSnapshot?.payload?.get(TestNotesMiniAppInstance.KEY_TEXT)
+        val rawSavedText = savedSnapshot?.payload?.get(TestNotesMiniAppInstance.KEY_TEXT)
             ?: savedSnapshot?.payload?.get("text")
             ?: savedSnapshot?.payload?.get("note_content")
-            ?: currentNoteText.ifEmpty { TestNotesMiniAppInstance.DEFAULT_INSTRUCTIONAL_TEXT }
+        val savedSource = savedSnapshot?.payload?.get("source")
+        val initialText = when {
+            rawSavedText != null && !TestNotesMiniAppInstance.isLegacyDefaultTemplate(rawSavedText, savedSource) -> rawSavedText
+            else -> currentNoteText
+        }
         currentNoteText = initialText
 
         savedSnapshot?.payload?.get("font_size")?.toFloatOrNull()?.let { currentFontSizeSp = it }
         savedSnapshot?.payload?.get("font_style")?.let { currentFontStyle = it }
         savedSnapshot?.payload?.get("word_wrap")?.toBooleanStrictOrNull()?.let { currentWordWrap = it }
         savedSnapshot?.payload?.get("line_spacing")?.toFloatOrNull()?.let { currentLineSpacingMult = it }
+        savedSnapshot?.payload?.get(NotePersistenceCoordinator.KEY_ACCENT_COLOR)?.takeIf { it.isNotBlank() }?.let {
+            currentAccentColorHex = normalizeHexColor(it)
+        }
+        applyNoteAccentColor(currentAccentColorHex, persist = false)
 
         // Restore undo/redo history from snapshot
         notePersistence.restoreHistoryFromSnapshot(savedSnapshot)
@@ -1238,7 +1394,8 @@ class FloatingMiniAppWindow(
             fontStyle = currentFontStyle,
             wordWrap = currentWordWrap,
             lineSpacing = currentLineSpacingMult,
-            bounds = bounds
+            bounds = bounds,
+            accentColor = currentAccentColorHex
         )
 
         LogKeeper.log(
@@ -1331,7 +1488,7 @@ class FloatingMiniAppWindow(
                 return ic
             }
         }.apply {
-            hint = "Type here... Text is persisted durably on Sleep."
+            hint = "Write a note..."
             setHintTextColor(Color.parseColor("#6C7086"))
             setTextColor(Color.WHITE)
             highlightColor = Color.parseColor("#585B70")
@@ -1361,11 +1518,13 @@ class FloatingMiniAppWindow(
                 (48 * density).toInt()
             )
 
+            val editRadius = if (isMaximized) 0f else cardCornerRadius
             val editBg = GradientDrawable().apply {
                 shape = GradientDrawable.RECTANGLE
-                cornerRadii = floatArrayOf(0f, 0f, 0f, 0f, cardCornerRadius, cardCornerRadius, cardCornerRadius, cardCornerRadius)
+                cornerRadii = floatArrayOf(0f, 0f, 0f, 0f, editRadius, editRadius, editRadius, editRadius)
                 setColor(Color.parseColor("#181825"))
             }
+            noteEditorBg = editBg
             background = editBg
 
             layoutParams = FrameLayout.LayoutParams(
@@ -1400,7 +1559,8 @@ class FloatingMiniAppWindow(
                         fontStyle = currentFontStyle,
                         wordWrap = currentWordWrap,
                         lineSpacing = currentLineSpacingMult,
-                        bounds = bounds
+                        bounds = bounds,
+                        accentColor = currentAccentColorHex
                     )
                     notePersistence.scheduleDebouncedSave()
                     syncLiveTextToHeavy(updated, selectionStart.coerceIn(0, updated.length), selectionEnd.coerceIn(0, updated.length))
@@ -1476,7 +1636,8 @@ class FloatingMiniAppWindow(
             fontStyle = currentFontStyle,
             wordWrap = currentWordWrap,
             lineSpacing = currentLineSpacingMult,
-            bounds = bounds
+            bounds = bounds,
+            accentColor = currentAccentColorHex
         )
         val editor = noteEditText ?: return
         isSyncingImeBridge = true
@@ -1499,10 +1660,15 @@ class FloatingMiniAppWindow(
 
         val density = context.resources.displayMetrics.density
         val savedSnapshot = durableStore.loadSnapshot(instanceId)
-        currentNoteText = savedSnapshot?.payload?.get(TestNotesMiniAppInstance.KEY_TEXT)
+        val rawSaved = savedSnapshot?.payload?.get(TestNotesMiniAppInstance.KEY_TEXT)
             ?: savedSnapshot?.payload?.get("text")
             ?: savedSnapshot?.payload?.get("note_content")
-            ?: TestNotesMiniAppInstance.DEFAULT_INSTRUCTIONAL_TEXT
+        val savedSource = savedSnapshot?.payload?.get("source")
+        currentNoteText = if (rawSaved != null && !TestNotesMiniAppInstance.isLegacyDefaultTemplate(rawSaved, savedSource)) {
+            rawSaved
+        } else {
+            ""
+        }
 
         LogKeeper.log(context, "FloatingMiniAppWindow", "CONTENT_CREATED id=$instanceId mode=in_process_fallback reason=$reason textLength=${currentNoteText.length}")
 
@@ -1950,11 +2116,13 @@ class FloatingMiniAppWindow(
         }
 
         // Mini-App Icon Indicator
+        val initialAccentInt = parseColorSafe(currentAccentColorHex)
+        val iconDrawable = GradientDrawable().apply {
+            shape = GradientDrawable.OVAL
+            setColor(initialAccentInt)
+        }
+        topBarIconDrawable = iconDrawable
         val iconView = ImageView(context).apply {
-            val iconDrawable = GradientDrawable().apply {
-                shape = GradientDrawable.OVAL
-                setColor(Color.parseColor("#89B4FA"))
-            }
             setImageDrawable(iconDrawable)
             layoutParams = LinearLayout.LayoutParams((14 * density).toInt(), (14 * density).toInt()).apply {
                 marginEnd = (10 * density).toInt()
@@ -1972,27 +2140,29 @@ class FloatingMiniAppWindow(
         }
         bar.addView(titleView)
 
-        // Single "Edit" button for Note mini-app (opens formatting options popover)
+        // Single "Edit" button for Note mini-app (opens formatting, copy, and accent options popover)
         if (appType == "note" || appType == "test_notes") {
+            val editBg = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = 4 * density
+                setColor(Color.parseColor("#313244"))
+                setStroke((1 * density).toInt(), initialAccentInt)
+            }
+            topBarEditBtnBg = editBg
             val editBtn = TextView(context).apply {
                 text = "Edit"
-                setTextColor(Color.parseColor("#89B4FA"))
+                setTextColor(initialAccentInt)
                 textSize = 12f
                 typeface = Typeface.DEFAULT_BOLD
                 isClickable = true
                 isFocusable = false
-                val editBg = GradientDrawable().apply {
-                    shape = GradientDrawable.RECTANGLE
-                    cornerRadius = 4 * density
-                    setColor(Color.parseColor("#313244"))
-                    setStroke((1 * density).toInt(), Color.parseColor("#45475A"))
-                }
                 background = editBg
                 setPadding((8 * density).toInt(), (3 * density).toInt(), (8 * density).toInt(), (3 * density).toInt())
                 setOnClickListener {
                     toggleEditPopover()
                 }
             }
+            topBarEditBtn = editBtn
             bar.addView(editBtn)
         }
 
@@ -2165,11 +2335,11 @@ class FloatingMiniAppWindow(
         wrapSpacingRow.addView(spacing15x)
         popover.addView(wrapSpacingRow)
 
-        // 4. Action Row: Undo, Redo, Clear
+        // 4. Action Row: Undo, Redo, Copy, Clear
         val actionRow = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(0, (4 * density).toInt(), 0, (2 * density).toInt())
+            setPadding(0, (4 * density).toInt(), 0, (4 * density).toInt())
         }
         val undoBtn = createPopoverButton(context, "↶ Undo") {
             performNoteUndo()
@@ -2177,13 +2347,189 @@ class FloatingMiniAppWindow(
         val redoBtn = createPopoverButton(context, "↷ Redo") {
             performNoteRedo()
         }
+        val copyBtn = createPopoverButton(context, "Copy", textColor = Color.parseColor("#A6E3A1")) {
+            copyNoteContent()
+        }
         val clearBtn = createPopoverButton(context, "Clear", textColor = Color.parseColor("#F38BA8")) {
             clearNoteContent()
         }
         actionRow.addView(undoBtn)
         actionRow.addView(redoBtn)
+        actionRow.addView(copyBtn)
         actionRow.addView(clearBtn)
         popover.addView(actionRow)
+
+        // 5. Individual Accent Color Presets + Custom Hex/RGB Picker
+        val accentRow = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, (4 * density).toInt(), 0, (2 * density).toInt())
+        }
+        val accentLabel = TextView(context).apply {
+            text = "Accent:"
+            setTextColor(Color.parseColor("#CDD6F4"))
+            textSize = 11f
+            setPadding(0, 0, (6 * density).toInt(), 0)
+        }
+        accentRow.addView(accentLabel)
+
+        val customColorPanel = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            visibility = View.GONE
+            setPadding(0, (6 * density).toInt(), 0, (2 * density).toInt())
+        }
+
+        val swatchPresets = listOf("#89B4FA", "#CBA6F7", "#A6E3A1", "#FAB387", "#F5C2E7", "#F9E2AF")
+        for (hex in swatchPresets) {
+            val swatchSize = (20 * density).toInt()
+            val swatchView = View(context).apply {
+                val bg = GradientDrawable().apply {
+                    shape = GradientDrawable.OVAL
+                    setColor(parseColorSafe(hex))
+                    setStroke((1 * density).toInt().coerceAtLeast(1), Color.parseColor("#CDD6F4"))
+                }
+                background = bg
+                isClickable = true
+                contentDescription = "Accent color $hex"
+                layoutParams = LinearLayout.LayoutParams(swatchSize, swatchSize).apply {
+                    marginEnd = (6 * density).toInt()
+                }
+                setOnClickListener {
+                    applyNoteAccentColor(hex, persist = true)
+                    customColorPanel.visibility = View.GONE
+                }
+            }
+            accentRow.addView(swatchView)
+        }
+
+        val customBtn = createPopoverButton(context, "Custom") {
+            customColorPanel.visibility = if (customColorPanel.visibility == View.VISIBLE) View.GONE else View.VISIBLE
+        }
+        accentRow.addView(customBtn)
+        popover.addView(accentRow)
+
+        // Custom Hex + RGB sliders panel
+        val hexRow = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        val previewSwatch = View(context).apply {
+            val bg = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(parseColorSafe(currentAccentColorHex))
+                setStroke((1 * density).toInt().coerceAtLeast(1), Color.WHITE)
+            }
+            background = bg
+            layoutParams = LinearLayout.LayoutParams((18 * density).toInt(), (18 * density).toInt()).apply {
+                marginEnd = (6 * density).toInt()
+            }
+        }
+        val hexInput = object : EditText(context) {
+            override fun onTouchEvent(event: MotionEvent?): Boolean {
+                if (event?.actionMasked == MotionEvent.ACTION_DOWN) {
+                    val focusCleared = (this@FloatingMiniAppWindow.layoutParams.flags and
+                        WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE.inv()) and
+                        WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM.inv()
+                    if (this@FloatingMiniAppWindow.layoutParams.flags != focusCleared) {
+                        this@FloatingMiniAppWindow.layoutParams.flags = focusCleared
+                        applyLayoutUpdate()
+                    }
+                    manager?.setFocus(this@FloatingMiniAppWindow.windowId)
+                    post {
+                        requestFocus()
+                        val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+                        imm?.showSoftInput(this, InputMethodManager.SHOW_IMPLICIT)
+                    }
+                }
+                return super.onTouchEvent(event)
+            }
+        }.apply {
+            setText(currentAccentColorHex)
+            hint = "#RRGGBB"
+            setTextColor(Color.WHITE)
+            setHintTextColor(Color.parseColor("#6C7086"))
+            textSize = 11f
+            isSingleLine = true
+            setPadding((6 * density).toInt(), (4 * density).toInt(), (6 * density).toInt(), (4 * density).toInt())
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = 4 * density
+                setColor(Color.parseColor("#181825"))
+                setStroke((1 * density).toInt().coerceAtLeast(1), Color.parseColor("#45475A"))
+            }
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+                marginEnd = (6 * density).toInt()
+            }
+        }
+
+        val initialColor = parseColorSafe(currentAccentColorHex)
+        var rgbR = Color.red(initialColor)
+        var rgbG = Color.green(initialColor)
+        var rgbB = Color.blue(initialColor)
+        var isUpdatingRgb = false
+
+        fun updateFromRgbSliders() {
+            val hex = String.format("#%02X%02X%02X", rgbR, rgbG, rgbB)
+            isUpdatingRgb = true
+            hexInput.setText(hex)
+            isUpdatingRgb = false
+            (previewSwatch.background as? GradientDrawable)?.setColor(Color.rgb(rgbR, rgbG, rgbB))
+            applyNoteAccentColor(hex, persist = true)
+        }
+
+        val applyHexBtn = createPopoverButton(context, "Apply", textColor = Color.parseColor("#89B4FA")) {
+            val raw = hexInput.text?.toString()?.trim().orEmpty()
+            val normalized = normalizeHexColorOrNull(raw)
+            if (normalized != null) {
+                val c = parseColorSafe(normalized)
+                rgbR = Color.red(c)
+                rgbG = Color.green(c)
+                rgbB = Color.blue(c)
+                (previewSwatch.background as? GradientDrawable)?.setColor(c)
+                applyNoteAccentColor(normalized, persist = true)
+            } else {
+                Toast.makeText(context, "Enter valid #RRGGBB hex", Toast.LENGTH_SHORT).show()
+            }
+        }
+        hexRow.addView(previewSwatch)
+        hexRow.addView(hexInput)
+        hexRow.addView(applyHexBtn)
+        customColorPanel.addView(hexRow)
+
+        fun addRgbSlider(channel: String, initial: Int, onChange: (Int) -> Unit) {
+            val row = LinearLayout(context).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+            val lbl = TextView(context).apply {
+                text = channel
+                setTextColor(Color.parseColor("#A6ADC8"))
+                textSize = 10f
+                layoutParams = LinearLayout.LayoutParams((14 * density).toInt(), LinearLayout.LayoutParams.WRAP_CONTENT)
+            }
+            val sb = SeekBar(context).apply {
+                max = 255
+                progress = initial
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                    override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                        if (fromUser && !isUpdatingRgb) {
+                            onChange(progress)
+                            updateFromRgbSliders()
+                        }
+                    }
+                    override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+                    override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+                })
+            }
+            row.addView(lbl)
+            row.addView(sb)
+            customColorPanel.addView(row)
+        }
+        addRgbSlider("R", rgbR) { rgbR = it }
+        addRgbSlider("G", rgbG) { rgbG = it }
+        addRgbSlider("B", rgbB) { rgbB = it }
+        popover.addView(customColorPanel)
 
         return popover
     }
@@ -2231,6 +2577,70 @@ class FloatingMiniAppWindow(
         }
     }
 
+    fun copyNoteContent(): Boolean {
+        val text = getAuthoritativeNoteText()
+        if (text.isEmpty()) {
+            try {
+                Toast.makeText(context, "Note is empty", Toast.LENGTH_SHORT).show()
+            } catch (_: Throwable) {}
+            return false
+        }
+        return try {
+            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+            clipboard?.setPrimaryClip(ClipData.newPlainText(windowTitle.ifEmpty { "Note" }, text))
+            try {
+                Toast.makeText(context, "Copied to clipboard", Toast.LENGTH_SHORT).show()
+            } catch (_: Throwable) {}
+            true
+        } catch (t: Throwable) {
+            LogKeeper.logError(context, "FloatingMiniAppWindow", "Failed to copy note id=$instanceId", t)
+            false
+        }
+    }
+
+    fun applyNoteAccentColor(hexColor: String, persist: Boolean = true) {
+        val normalized = normalizeHexColor(hexColor)
+        currentAccentColorHex = normalized
+        val parsed = parseColorSafe(normalized)
+        topBarIconDrawable?.setColor(parsed)
+        topBarEditBtn?.setTextColor(parsed)
+        topBarEditBtnBg?.setStroke((1 * context.resources.displayMetrics.density).toInt().coerceAtLeast(1), parsed)
+        if (persist && isMainOnlyApp()) {
+            notePersistence.updateStateSnapshot(
+                text = currentNoteText,
+                fontSize = currentFontSizeSp,
+                fontStyle = currentFontStyle,
+                wordWrap = currentWordWrap,
+                lineSpacing = currentLineSpacingMult,
+                bounds = bounds,
+                accentColor = normalized
+            )
+            notePersistence.scheduleDebouncedSave()
+        }
+    }
+
+    private fun normalizeHexColorOrNull(raw: String): String? {
+        val hex = raw.trim().removePrefix("#")
+        return when (hex.length) {
+            6 -> if (hex.all { it in '0'..'9' || it in 'a'..'f' || it in 'A'..'F' }) {
+                "#${hex.uppercase()}"
+            } else null
+            8 -> if (hex.all { it in '0'..'9' || it in 'a'..'f' || it in 'A'..'F' }) {
+                "#${hex.substring(2).uppercase()}"
+            } else null
+            else -> null
+        }
+    }
+
+    private fun normalizeHexColor(raw: String): String {
+        return normalizeHexColorOrNull(raw) ?: NotePersistenceCoordinator.DEFAULT_ACCENT_COLOR
+    }
+
+    private fun parseColorSafe(hex: String): Int {
+        val normalized = normalizeHexColor(hex).removePrefix("#")
+        return (0xFF000000L or normalized.toLong(16)).toInt()
+    }
+
     private fun dispatchFormatCommand() {
         applyFormattingToNoteEditor()
         if (isMainOnlyApp()) {
@@ -2241,7 +2651,8 @@ class FloatingMiniAppWindow(
                 fontStyle = currentFontStyle,
                 wordWrap = currentWordWrap,
                 lineSpacing = currentLineSpacingMult,
-                bounds = bounds
+                bounds = bounds,
+                accentColor = currentAccentColorHex
             )
             notePersistence.scheduleDebouncedSave()
             return
@@ -2848,6 +3259,7 @@ class FloatingMiniAppWindow(
                 "font_style" to currentFontStyle,
                 "word_wrap" to currentWordWrap.toString(),
                 "line_spacing" to currentLineSpacingMult.toString(),
+                NotePersistenceCoordinator.KEY_ACCENT_COLOR to currentAccentColorHex,
                 "source" to when (activeTextAuthority) {
                     TextAuthority.IME_BRIDGE -> "ime_bridge"
                     TextAuthority.FALLBACK -> "fallback_editor"
@@ -2879,7 +3291,8 @@ class FloatingMiniAppWindow(
                 fontStyle = currentFontStyle,
                 wordWrap = currentWordWrap,
                 lineSpacing = currentLineSpacingMult,
-                bounds = normalBoundsToSave
+                bounds = normalBoundsToSave,
+                accentColor = currentAccentColorHex
             )
             notePersistence.flushPendingSave(targetState = targetState)
         } else {
@@ -2908,7 +3321,8 @@ class FloatingMiniAppWindow(
                 fontStyle = currentFontStyle,
                 wordWrap = currentWordWrap,
                 lineSpacing = currentLineSpacingMult,
-                bounds = normalBoundsToSave
+                bounds = normalBoundsToSave,
+                accentColor = currentAccentColorHex
             )
             notePersistence.flushPendingSaveAsync(timeoutMs, targetState, onComplete)
         } else {
@@ -2971,6 +3385,7 @@ class FloatingMiniAppWindow(
 
     override fun onHide() {
         super.onHide()
+        pwaWindowController?.clearUrlBarFocus()
         deactivateEmbeddedEditorIme()
         if (isMainOnlyApp()) {
             if (notePersistence.hasPendingEdits()) {
@@ -3013,6 +3428,8 @@ class FloatingMiniAppWindow(
 
     override fun onDestroy() {
         super.onDestroy()
+        pwaWindowController?.release()
+        pwaWindowController = null
         deactivateEmbeddedEditorIme()
         if (isMainOnlyApp()) {
             // Teardown is idempotent: only schedule write if there are uncommitted pending edits

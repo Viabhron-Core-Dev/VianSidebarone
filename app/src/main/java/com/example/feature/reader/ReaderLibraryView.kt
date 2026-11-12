@@ -42,15 +42,21 @@ import java.util.zip.ZipOutputStream
  */
 class ReaderLibraryView(
     context: Context,
+    private val instanceId: String? = null,
+    private val onOpenFolderBrowser: (() -> Unit)? = null,
     private val onBookSelected: (EpubBook) -> Unit
 ) : FrameLayout(context) {
+
+    private val density: Float = (context.resources.displayMetrics.density).takeIf { it > 0f } ?: 2f
+    private fun dp(v: Int): Int = (v * density).toInt()
+    private fun dpF(v: Float): Float = v * density
 
     private val viewScope = CoroutineScope(SupervisorJob() + ReaderDispatchers.main)
     private val repository = LibraryRepository(context)
 
     private val booksContainer: LinearLayout
     private val emptyStateContainer: LinearLayout
-    private val searchBox: EditText
+    private val searchBox: com.example.feature.floating.EmbeddedInputEditText
     private val bookListScrollView: ScrollView
 
     private var allBooks = listOf<EpubBook>()
@@ -66,35 +72,64 @@ class ReaderLibraryView(
         val rootLayout = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
-            setPadding(16, 16, 16, 16)
+            setPadding(dp(10), dp(10), dp(10), dp(10))
         }
 
         // --- Header Bar ---
         val headerBar = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(8, 8, 8, 12)
+            setPadding(dp(4), dp(4), dp(4), dp(8))
         }
 
         val titleView = TextView(context).apply {
             text = "eBook Reader"
-            textSize = 17f
+            textSize = 16f
             typeface = Typeface.DEFAULT_BOLD
             setTextColor(Color.parseColor("#CDD6F4")) // Text color
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         }
         headerBar.addView(titleView)
 
+        if (onOpenFolderBrowser != null) {
+            val folderButton = Button(context).apply {
+                text = "📁 Folders"
+                textSize = 11f
+                typeface = Typeface.DEFAULT_BOLD
+                setTextColor(Color.parseColor("#CDD6F4"))
+                minHeight = dp(40)
+                minimumHeight = dp(40)
+                background = GradientDrawable().apply {
+                    setColor(Color.parseColor("#313244"))
+                    cornerRadius = dpF(10f)
+                }
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply {
+                    marginEnd = dp(6)
+                }
+                setPadding(dp(10), dp(4), dp(10), dp(4))
+                setOnClickListener {
+                    searchBox.clearFocus()
+                    onOpenFolderBrowser.invoke()
+                }
+            }
+            headerBar.addView(folderButton)
+        }
+
         val importButton = Button(context).apply {
-            text = "+ Import"
-            textSize = 12f
+            text = "+ File"
+            textSize = 11f
             typeface = Typeface.DEFAULT_BOLD
             setTextColor(Color.WHITE)
+            minHeight = dp(40)
+            minimumHeight = dp(40)
             background = GradientDrawable().apply {
                 setColor(Color.parseColor("#89B4FA")) // Blue accent
-                cornerRadius = 16f
+                cornerRadius = dpF(10f)
             }
-            setPadding(24, 8, 24, 8)
+            setPadding(dp(12), dp(4), dp(12), dp(4))
             setOnClickListener {
                 launchImportActivity()
             }
@@ -103,21 +138,22 @@ class ReaderLibraryView(
         rootLayout.addView(headerBar)
 
         // --- Search Bar ---
-        searchBox = EditText(context).apply {
+        searchBox = com.example.feature.floating.EmbeddedInputEditText(context) { instanceId }.apply {
             hint = "Search library..."
             setHintTextColor(Color.parseColor("#6C7086"))
             setTextColor(Color.WHITE)
             textSize = 13f
+            isSingleLine = true
             background = GradientDrawable().apply {
                 setColor(Color.parseColor("#313244"))
-                cornerRadius = 12f
+                cornerRadius = dpF(8f)
             }
-            setPadding(24, 16, 24, 16)
+            setPadding(dp(12), dp(8), dp(12), dp(8))
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
             ).apply {
-                setMargins(8, 0, 8, 12)
+                setMargins(dp(4), 0, dp(4), dp(8))
             }
             addTextChangedListener(object : TextWatcher {
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
@@ -156,14 +192,14 @@ class ReaderLibraryView(
                 0,
                 1f
             )
-            setPadding(32, 32, 32, 32)
+            setPadding(dp(20), dp(20), dp(20), dp(20))
         }
 
         val emptyIcon = ImageView(context).apply {
             setImageResource(com.example.R.drawable.ic_library_books)
             setColorFilter(Color.parseColor("#89B4FA"))
-            layoutParams = LinearLayout.LayoutParams(72, 72).apply {
-                bottomMargin = 16
+            layoutParams = LinearLayout.LayoutParams(dp(56), dp(56)).apply {
+                bottomMargin = dp(12)
             }
         }
         emptyStateContainer.addView(emptyIcon)
@@ -178,24 +214,52 @@ class ReaderLibraryView(
         emptyStateContainer.addView(emptyText)
 
         val emptySubText = TextView(context).apply {
-            text = "Import EPUB or TXT books to start reading in this floating window"
+            text = "Browse a folder or import EPUB / TXT books to start reading in this floating window"
             textSize = 12f
             setTextColor(Color.parseColor("#A6ADC8"))
             gravity = Gravity.CENTER
-            setPadding(16, 8, 16, 24)
+            setPadding(dp(12), dp(6), dp(12), dp(16))
         }
         emptyStateContainer.addView(emptySubText)
 
+        if (onOpenFolderBrowser != null) {
+            val emptyFolderButton = Button(context).apply {
+                text = "📁 Browse Books Folder"
+                textSize = 13f
+                typeface = Typeface.DEFAULT_BOLD
+                setTextColor(Color.WHITE)
+                minHeight = dp(44)
+                minimumHeight = dp(44)
+                background = GradientDrawable().apply {
+                    setColor(Color.parseColor("#89B4FA"))
+                    cornerRadius = dpF(10f)
+                }
+                setPadding(dp(20), dp(8), dp(20), dp(8))
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply {
+                    bottomMargin = dp(10)
+                }
+                setOnClickListener {
+                    onOpenFolderBrowser.invoke()
+                }
+            }
+            emptyStateContainer.addView(emptyFolderButton)
+        }
+
         val emptyImportButton = Button(context).apply {
-            text = "+ Import Book"
+            text = "+ Import Book File"
             textSize = 13f
             typeface = Typeface.DEFAULT_BOLD
             setTextColor(Color.WHITE)
+            minHeight = dp(44)
+            minimumHeight = dp(44)
             background = GradientDrawable().apply {
-                setColor(Color.parseColor("#89B4FA"))
-                cornerRadius = 16f
+                setColor(Color.parseColor(if (onOpenFolderBrowser != null) "#313244" else "#89B4FA"))
+                cornerRadius = dpF(10f)
             }
-            setPadding(32, 12, 32, 12)
+            setPadding(dp(20), dp(8), dp(20), dp(8))
             setOnClickListener {
                 launchImportActivity()
             }
@@ -205,20 +269,22 @@ class ReaderLibraryView(
         // Sample Classic loader button for instant out-of-the-box demonstration
         val sampleButton = Button(context).apply {
             text = "Load Sample Classic"
-            textSize = 11f
+            textSize = 12f
             setTextColor(Color.parseColor("#89B4FA"))
+            minHeight = dp(40)
+            minimumHeight = dp(40)
             background = GradientDrawable().apply {
                 setColor(Color.TRANSPARENT)
-                setStroke(2, Color.parseColor("#45475A"))
-                cornerRadius = 16f
+                setStroke(dp(1).coerceAtLeast(1), Color.parseColor("#45475A"))
+                cornerRadius = dpF(10f)
             }
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
             ).apply {
-                topMargin = 16
+                topMargin = dp(10)
             }
-            setPadding(24, 8, 24, 8)
+            setPadding(dp(16), dp(6), dp(16), dp(6))
             setOnClickListener {
                 loadBundledSampleBook()
             }
@@ -276,21 +342,23 @@ class ReaderLibraryView(
             val bookCard = LinearLayout(context).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
+                minimumHeight = dp(60)
                 background = GradientDrawable().apply {
                     setColor(Color.parseColor("#1E1E2E")) // Surface
-                    cornerRadius = 14f
+                    cornerRadius = dpF(10f)
                     setStroke(1, Color.parseColor("#313244"))
                 }
                 layoutParams = LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT,
                     LinearLayout.LayoutParams.WRAP_CONTENT
                 ).apply {
-                    setMargins(8, 6, 8, 6)
+                    setMargins(dp(4), dp(4), dp(4), dp(4))
                 }
-                setPadding(16, 16, 16, 16)
+                setPadding(dp(10), dp(10), dp(10), dp(10))
                 isClickable = true
                 isFocusable = true
                 setOnClickListener {
+                    searchBox.clearFocus()
                     onBookSelected(book)
                 }
             }
@@ -298,7 +366,7 @@ class ReaderLibraryView(
             // Left book badge
             val bookBadge = TextView(context).apply {
                 text = book.title.take(1).uppercase()
-                textSize = 16f
+                textSize = 15f
                 typeface = Typeface.DEFAULT_BOLD
                 setTextColor(Color.WHITE)
                 gravity = Gravity.CENTER
@@ -312,10 +380,10 @@ class ReaderLibraryView(
                     )
                     val colorIndex = Math.abs(book.title.hashCode()) % colors.size
                     setColor(colors[colorIndex])
-                    cornerRadius = 10f
+                    cornerRadius = dpF(8f)
                 }
-                layoutParams = LinearLayout.LayoutParams(44, 52).apply {
-                    marginEnd = 16
+                layoutParams = LinearLayout.LayoutParams(dp(38), dp(46)).apply {
+                    marginEnd = dp(10)
                 }
             }
             bookCard.addView(bookBadge)
@@ -348,7 +416,7 @@ class ReaderLibraryView(
                 }
                 textSize = 11f
                 setTextColor(Color.parseColor("#A6ADC8"))
-                setPadding(0, 4, 0, 4)
+                setPadding(0, dp(2), 0, dp(2))
             }
             detailsLayout.addView(progressText)
 
@@ -359,10 +427,10 @@ class ReaderLibraryView(
                 progressDrawable?.setColorFilter(Color.parseColor("#89B4FA"), android.graphics.PorterDuff.Mode.SRC_IN)
                 layoutParams = LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT,
-                    6
+                    dp(4).coerceAtLeast(4)
                 ).apply {
-                    topMargin = 2
-                    bottomMargin = 4
+                    topMargin = dp(2)
+                    bottomMargin = dp(3)
                 }
             }
             detailsLayout.addView(progressBar)
@@ -376,17 +444,18 @@ class ReaderLibraryView(
 
             bookCard.addView(detailsLayout)
 
-            // Right delete button
+            // Right delete button (44dp touch target)
             val deleteButton = Button(context).apply {
                 text = "✕"
-                textSize = 12f
+                textSize = 13f
                 setTextColor(Color.parseColor("#F38BA8"))
                 background = GradientDrawable().apply {
                     setColor(Color.TRANSPARENT)
-                    cornerRadius = 8f
+                    cornerRadius = dpF(8f)
                 }
-                layoutParams = LinearLayout.LayoutParams(38, 38).apply {
-                    marginStart = 8
+                setPadding(0, 0, 0, 0)
+                layoutParams = LinearLayout.LayoutParams(dp(44), dp(44)).apply {
+                    marginStart = dp(4)
                 }
                 setOnClickListener {
                     showDeleteConfirmation(book)
@@ -531,9 +600,22 @@ class ReaderLibraryView(
         }
     }
 
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        ReaderEventManager.registerListener(eventListener)
+    }
+
     override fun onDetachedFromWindow() {
         super.onDetachedFromWindow()
+        // Do NOT cancel viewScope here: screen switches detach/reattach this view via removeAllViews().
+        ReaderEventManager.unregisterListener(eventListener)
+    }
+
+    fun releaseResources() {
         ReaderEventManager.unregisterListener(eventListener)
         viewScope.cancel()
     }
+
+    fun isViewScopeActiveForTesting(): Boolean =
+        viewScope.coroutineContext[kotlinx.coroutines.Job]?.isActive == true
 }

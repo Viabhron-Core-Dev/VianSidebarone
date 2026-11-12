@@ -45,8 +45,13 @@ import java.util.Locale
  */
 class ReaderReadingView(
     context: Context,
+    private val instanceId: String? = null,
     private val onBackToLibrary: () -> Unit
 ) : FrameLayout(context), TextToSpeech.OnInitListener {
+
+    private val density: Float = (context.resources.displayMetrics.density).takeIf { it > 0f } ?: 2f
+    private fun dp(v: Int): Int = (v * density).toInt()
+    private fun dpF(v: Float): Float = v * density
 
     private val viewScope = CoroutineScope(SupervisorJob() + ReaderDispatchers.main)
     private val repository = LibraryRepository(context)
@@ -75,7 +80,7 @@ class ReaderReadingView(
 
     // Tool panels
     private val searchBarLayout: LinearLayout
-    private val searchEditText: EditText
+    private val searchEditText: com.example.feature.floating.EmbeddedInputEditText
     private val searchCountView: TextView
     private val fontSizeBarLayout: LinearLayout
     private val fontSizeTextView: TextView
@@ -134,7 +139,7 @@ class ReaderReadingView(
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             setBackgroundColor(Color.parseColor("#1E1E2E")) // Surface
-            setPadding(8, 6, 8, 6)
+            setPadding(dp(6), dp(4), dp(6), dp(4))
         }
 
         val backButton = Button(context).apply {
@@ -142,12 +147,17 @@ class ReaderReadingView(
             textSize = 12f
             typeface = Typeface.DEFAULT_BOLD
             setTextColor(Color.parseColor("#89B4FA"))
+            minHeight = dp(40)
+            minimumHeight = dp(40)
+            minWidth = dp(48)
+            minimumWidth = dp(48)
             background = GradientDrawable().apply {
                 setColor(Color.TRANSPARENT)
-                cornerRadius = 8f
+                cornerRadius = dpF(8f)
             }
-            setPadding(12, 6, 12, 6)
+            setPadding(dp(8), dp(4), dp(8), dp(4))
             setOnClickListener {
+                searchEditText.clearFocus()
                 saveCurrentProgressImmediately()
                 stopAutoScroll()
                 stopTts()
@@ -164,26 +174,33 @@ class ReaderReadingView(
             maxLines = 1
             ellipsize = android.text.TextUtils.TruncateAt.END
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
-                marginStart = 8
-                marginEnd = 8
+                marginStart = dp(4)
+                marginEnd = dp(4)
             }
         }
         topBar.addView(chapterTitleTopView)
 
-        // Action icon buttons
+        // Action icon buttons (40dp x 40dp minimum touch targets)
         fun createActionButton(label: String, onClick: () -> Unit): Button {
             return Button(context).apply {
                 text = label
                 textSize = 12f
                 setTextColor(Color.parseColor("#CDD6F4"))
+                minWidth = dp(40)
+                minimumWidth = dp(40)
+                minHeight = dp(40)
+                minimumHeight = dp(40)
                 background = GradientDrawable().apply {
                     setColor(Color.TRANSPARENT)
-                    cornerRadius = 8f
+                    cornerRadius = dpF(8f)
                 }
-                layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, 40).apply {
-                    marginStart = 2
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    dp(40)
+                ).apply {
+                    marginStart = dp(2)
                 }
-                setPadding(8, 4, 8, 4)
+                setPadding(dp(6), dp(2), dp(6), dp(2))
                 setOnClickListener { onClick() }
             }
         }
@@ -202,19 +219,20 @@ class ReaderReadingView(
             gravity = Gravity.CENTER_VERTICAL
             visibility = View.GONE
             setBackgroundColor(Color.parseColor("#252538"))
-            setPadding(12, 8, 12, 8)
+            setPadding(dp(8), dp(6), dp(8), dp(6))
         }
 
-        searchEditText = EditText(context).apply {
+        searchEditText = com.example.feature.floating.EmbeddedInputEditText(context) { instanceId }.apply {
             hint = "Search chapter..."
             setHintTextColor(Color.parseColor("#6C7086"))
             setTextColor(Color.WHITE)
-            textSize = 12f
+            textSize = 13f
+            isSingleLine = true
             background = GradientDrawable().apply {
                 setColor(Color.parseColor("#313244"))
-                cornerRadius = 8f
+                cornerRadius = dpF(8f)
             }
-            setPadding(16, 10, 16, 10)
+            setPadding(dp(10), dp(6), dp(10), dp(6))
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
             addTextChangedListener(object : TextWatcher {
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
@@ -414,7 +432,7 @@ class ReaderReadingView(
 
         val contentInnerLayout = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(20, 20, 20, 40)
+            setPadding(dp(14), dp(12), dp(14), dp(24))
         }
 
         chapterHeadingView = TextView(context).apply {
@@ -422,7 +440,7 @@ class ReaderReadingView(
             textSize = 19f
             typeface = Typeface.DEFAULT_BOLD
             setTextColor(Color.parseColor("#89B4FA")) // Accent color
-            setPadding(0, 8, 0, 16)
+            setPadding(0, dp(4), 0, dp(10))
         }
         contentInnerLayout.addView(chapterHeadingView)
 
@@ -441,7 +459,7 @@ class ReaderReadingView(
         val bottomBar = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(Color.parseColor("#1E1E2E")) // Surface
-            setPadding(12, 6, 12, 8)
+            setPadding(dp(8), dp(4), dp(8), dp(6))
         }
 
         bottomProgressBar = ProgressBar(context, null, android.R.attr.progressBarStyleHorizontal).apply {
@@ -450,9 +468,9 @@ class ReaderReadingView(
             progressDrawable?.setColorFilter(Color.parseColor("#89B4FA"), android.graphics.PorterDuff.Mode.SRC_IN)
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
-                4
+                dp(3).coerceAtLeast(3)
             ).apply {
-                bottomMargin = 6
+                bottomMargin = dp(4)
             }
         }
         bottomBar.addView(bottomProgressBar)
@@ -466,10 +484,13 @@ class ReaderReadingView(
             text = "◀ Prev"
             textSize = 12f
             setTextColor(Color.WHITE)
+            minHeight = dp(40)
+            minimumHeight = dp(40)
             background = GradientDrawable().apply {
                 setColor(Color.parseColor("#313244"))
-                cornerRadius = 10f
+                cornerRadius = dpF(8f)
             }
+            setPadding(dp(10), dp(4), dp(10), dp(4))
             setOnClickListener {
                 if (currentChapterIndex > 0) {
                     openChapter(currentChapterIndex - 1)
@@ -491,10 +512,13 @@ class ReaderReadingView(
             text = "Next ▶"
             textSize = 12f
             setTextColor(Color.WHITE)
+            minHeight = dp(40)
+            minimumHeight = dp(40)
             background = GradientDrawable().apply {
                 setColor(Color.parseColor("#313244"))
-                cornerRadius = 10f
+                cornerRadius = dpF(8f)
             }
+            setPadding(dp(10), dp(4), dp(10), dp(4))
             setOnClickListener {
                 if (currentChapterIndex < chaptersList.size - 1) {
                     openChapter(currentChapterIndex + 1)
@@ -512,26 +536,32 @@ class ReaderReadingView(
         tocOverlayLayout = FrameLayout(context).apply {
             visibility = View.GONE
             setBackgroundColor(Color.parseColor("#E6181825")) // Semi-translucent dark overlay
+            isClickable = true
+            isFocusable = true
             layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
+            setOnClickListener {
+                visibility = View.GONE
+            }
         }
 
         val tocCard = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
+            isClickable = true
             background = GradientDrawable().apply {
                 setColor(Color.parseColor("#1E1E2E"))
-                cornerRadius = 16f
+                cornerRadius = dpF(12f)
                 setStroke(1, Color.parseColor("#313244"))
             }
             layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT).apply {
-                setMargins(24, 24, 24, 24)
+                setMargins(dp(14), dp(14), dp(14), dp(14))
             }
-            setPadding(16, 16, 16, 16)
+            setPadding(dp(12), dp(12), dp(12), dp(12))
         }
 
         val tocHeader = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(8, 8, 8, 12)
+            setPadding(dp(4), dp(4), dp(4), dp(8))
         }
 
         val tocTitle = TextView(context).apply {
@@ -547,9 +577,13 @@ class ReaderReadingView(
             text = "✕"
             textSize = 14f
             setTextColor(Color.parseColor("#A6ADC8"))
+            minWidth = dp(44)
+            minimumWidth = dp(44)
+            minHeight = dp(44)
+            minimumHeight = dp(44)
             background = GradientDrawable().apply {
                 setColor(Color.TRANSPARENT)
-                cornerRadius = 8f
+                cornerRadius = dpF(8f)
             }
             setOnClickListener {
                 tocOverlayLayout.visibility = View.GONE
@@ -579,20 +613,26 @@ class ReaderReadingView(
         searchBookOverlayLayout = FrameLayout(context).apply {
             visibility = View.GONE
             setBackgroundColor(Color.parseColor("#E6181825"))
+            isClickable = true
+            isFocusable = true
             layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
+            setOnClickListener {
+                visibility = View.GONE
+            }
         }
 
         val searchBookCard = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
+            isClickable = true
             background = GradientDrawable().apply {
                 setColor(Color.parseColor("#1E1E2E"))
-                cornerRadius = 16f
+                cornerRadius = dpF(12f)
                 setStroke(1, Color.parseColor("#313244"))
             }
             layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT).apply {
-                setMargins(24, 24, 24, 24)
+                setMargins(dp(14), dp(14), dp(14), dp(14))
             }
-            setPadding(16, 16, 16, 16)
+            setPadding(dp(12), dp(12), dp(12), dp(12))
         }
 
         val searchBookHeader = LinearLayout(context).apply {
@@ -724,15 +764,15 @@ class ReaderReadingView(
     fun saveCurrentProgressImmediately() {
         val book = currentBook ?: return
         scrollSaveJob?.cancel()
-        viewScope.launch {
-            repository.saveReadingProgress(book.id, currentChapterIndex, currentScrollY)
-        }
+        repository.saveReadingProgressAsync(book.id, currentChapterIndex, currentScrollY)
     }
 
     // --- Search Feature ---
     private fun toggleSearchBar() {
         if (searchBarLayout.visibility == View.VISIBLE) {
             searchBarLayout.visibility = View.GONE
+            searchEditText.clearFocus()
+            searchEditText.deactivateBridgeSession()
             clearSearchHighlights()
         } else {
             searchBarLayout.visibility = View.VISIBLE
@@ -740,6 +780,7 @@ class ReaderReadingView(
             autoScrollBarLayout.visibility = View.GONE
             ttsBarLayout.visibility = View.GONE
             searchEditText.requestFocus()
+            searchEditText.activateBridgeSession()
         }
     }
 
@@ -1120,6 +1161,10 @@ class ReaderReadingView(
 
     override fun onDetachedFromWindow() {
         super.onDetachedFromWindow()
-        releaseResources()
+        // Do NOT cancel viewScope or shut down TTS here: screen switches detach/reattach via removeAllViews().
+        scrollSaveJob?.cancel()
     }
+
+    fun isViewScopeActiveForTesting(): Boolean =
+        viewScope.coroutineContext[kotlinx.coroutines.Job]?.isActive == true
 }

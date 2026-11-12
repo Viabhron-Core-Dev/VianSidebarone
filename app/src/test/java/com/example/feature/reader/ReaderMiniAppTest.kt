@@ -155,4 +155,114 @@ class ReaderMiniAppTest {
         assertEquals(ReaderScreenMode.LIBRARY, instance.getCurrentScreenModeForTesting())
         assertNotNull(instance.getLibraryViewForTesting())
     }
+
+    @Test
+    fun testViewScopesSurviveDetachDuringScreenSwitchAndCancelOnRelease() {
+        val instance = ReaderMiniAppInstance("scope_detach_test", "reader")
+        instance.onCreate(null)
+        instance.createContentView(testContext)
+
+        val libView = instance.getLibraryViewForTesting()
+        val readView = instance.getReadingViewForTesting()
+        assertNotNull(libView)
+        assertNotNull(readView)
+
+        assertTrue("Library viewScope must be active initially", libView!!.isViewScopeActiveForTesting())
+        assertTrue("Reading viewScope must be active initially", readView!!.isViewScopeActiveForTesting())
+
+        // Simulate removeAllViews() detaching/reattaching views during screen transitions
+        val detachLib = libView.javaClass.getDeclaredMethod("onDetachedFromWindow").apply { isAccessible = true }
+        val detachRead = readView.javaClass.getDeclaredMethod("onDetachedFromWindow").apply { isAccessible = true }
+        detachLib.invoke(libView)
+        detachRead.invoke(readView)
+
+        assertTrue("Library viewScope must survive onDetachedFromWindow during screen switch", libView.isViewScopeActiveForTesting())
+        assertTrue("Reading viewScope must survive onDetachedFromWindow during screen switch", readView.isViewScopeActiveForTesting())
+
+        // Explicit releaseRuntime must cancel both scopes cleanly
+        instance.releaseRuntime()
+        assertTrue("Library viewScope must cancel on releaseRuntime", !libView.isViewScopeActiveForTesting())
+        assertTrue("Reading viewScope must cancel on releaseRuntime", !readView.isViewScopeActiveForTesting())
+    }
+
+    @Test
+    fun testFolderBrowserFilterAndNaturalSort() {
+        val raw = listOf(
+            ReaderFolderBrowserView.FolderEntry("notes.pdf", isDirectory = false),
+            ReaderFolderBrowserView.FolderEntry("Chapter_10.epub", isDirectory = false),
+            ReaderFolderBrowserView.FolderEntry("Chapter_2.epub", isDirectory = false),
+            ReaderFolderBrowserView.FolderEntry("readme.txt", isDirectory = false),
+            ReaderFolderBrowserView.FolderEntry("cover.png", isDirectory = false),
+            ReaderFolderBrowserView.FolderEntry("Zebra_Folder", isDirectory = true),
+            ReaderFolderBrowserView.FolderEntry("Alpha_Folder", isDirectory = true)
+        )
+
+        val unfiltered = ReaderFolderBrowserView.filterAndSortEntries(raw, "")
+        assertEquals(
+            listOf("Alpha_Folder", "Zebra_Folder", "Chapter_2.epub", "Chapter_10.epub", "readme.txt"),
+            unfiltered.map { it.name }
+        )
+
+        val filtered = ReaderFolderBrowserView.filterAndSortEntries(raw, "chapter")
+        assertEquals(listOf("Chapter_2.epub", "Chapter_10.epub"), filtered.map { it.name })
+    }
+
+    @Test
+    fun testBringToFrontSkipsRefreshWhenOnlyHiddenOrDetachedWindowsAbove() {
+        var removeCount = 0
+        val countingWm = java.lang.reflect.Proxy.newProxyInstance(
+            android.view.WindowManager::class.java.classLoader,
+            arrayOf(android.view.WindowManager::class.java)
+        ) { _, method, _ ->
+            if (method.name == "removeViewImmediate") {
+                removeCount++
+            }
+            null
+        } as android.view.WindowManager
+
+        val wmContext = object : ContextWrapper(testContext) {
+            override fun getApplicationContext(): Context = this
+            override fun getSystemService(name: String): Any? {
+                return if (name == Context.WINDOW_SERVICE) countingWm else super.getSystemService(name)
+            }
+        }
+
+        val instanceField = com.example.core.FloatingWindowManager::class.java.getDeclaredField("instance").apply {
+            isAccessible = true
+        }
+        val previousInstance = instanceField.get(null)
+        instanceField.set(null, null)
+        try {
+            val fwm = com.example.core.FloatingWindowManager.getInstance(wmContext)
+            fun makeTestWin(id: String) = object : com.example.core.FloatingWindow(id, wmContext, "test") {
+                override fun createContentView(context: Context): android.view.View = android.widget.FrameLayout(context)
+            }
+
+            val winA = makeTestWin("win_a")
+            val winHiddenAbove = makeTestWin("win_hidden")
+            val winVisibleAbove = makeTestWin("win_visible")
+
+            fwm.registerWindow(winA)
+            fwm.showWindow("win_a")
+
+            fwm.registerWindow(winHiddenAbove)
+            fwm.showWindow("win_hidden")
+            fwm.hideWindow("win_hidden")
+
+            removeCount = 0
+            // Only win_hidden (invisible) sits above win_a -> must NOT call removeViewImmediate
+            fwm.bringToFront("win_a")
+            assertEquals("Hidden window above must not trigger SurfaceView-destroying removeViewImmediate", 0, removeCount)
+
+            fwm.registerWindow(winVisibleAbove)
+            fwm.showWindow("win_visible")
+
+            removeCount = 0
+            // Now win_visible (attached + visible) sits above win_a -> must reorder overlay cleanly
+            fwm.bringToFront("win_a")
+            assertEquals("Visible attached window above must trigger overlay Z-order refresh", 1, removeCount)
+        } finally {
+            instanceField.set(null, previousInstance)
+        }
+    }
 }

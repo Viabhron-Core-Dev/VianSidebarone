@@ -81,6 +81,10 @@ class NotePersistenceCoordinator(
     var latestBounds: WindowBounds? = null
         private set
 
+    @Volatile
+    var latestAccentColor: String = DEFAULT_ACCENT_COLOR
+        private set
+
     fun pushUndoState(text: String) {
         if (isPerformingUndoRedo || isRestoringState) return
         if (undoStack.isEmpty() || undoStack.last() != text) {
@@ -140,7 +144,8 @@ class NotePersistenceCoordinator(
         fontStyle: String,
         wordWrap: Boolean,
         lineSpacing: Float,
-        bounds: WindowBounds? = null
+        bounds: WindowBounds? = null,
+        accentColor: String? = null
     ) {
         latestText = text
         latestFontSize = fontSize
@@ -149,6 +154,9 @@ class NotePersistenceCoordinator(
         latestLineSpacing = lineSpacing
         if (bounds != null) {
             latestBounds = bounds.copyBounds()
+        }
+        if (!accentColor.isNullOrBlank()) {
+            latestAccentColor = accentColor
         }
     }
 
@@ -393,6 +401,7 @@ class NotePersistenceCoordinator(
             "font_style" to latestFontStyle,
             "word_wrap" to latestWordWrap.toString(),
             "line_spacing" to latestLineSpacing.toString(),
+            KEY_ACCENT_COLOR to latestAccentColor,
             KEY_UNDO_HISTORY to undoJson,
             KEY_REDO_HISTORY to redoJson
         )
@@ -442,6 +451,8 @@ class NotePersistenceCoordinator(
         private const val TAG = "NotePersistenceCoordinator"
         const val KEY_UNDO_HISTORY = "undo_history"
         const val KEY_REDO_HISTORY = "redo_history"
+        const val KEY_ACCENT_COLOR = "accent_color"
+        const val DEFAULT_ACCENT_COLOR = "#89B4FA"
         const val MAX_HISTORY = 50
         const val DEFAULT_DEBOUNCE_MS = 400L
         const val DEFAULT_FLUSH_TIMEOUT_MS = 2000L

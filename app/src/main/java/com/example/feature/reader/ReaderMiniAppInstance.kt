@@ -55,6 +55,7 @@ class ReaderMiniAppInstance(
     private var rootContainer: FrameLayout? = null
     private var libraryView: ReaderLibraryView? = null
     private var readingView: ReaderReadingView? = null
+    private var folderBrowserView: ReaderFolderBrowserView? = null
 
     override fun onCreate(savedSnapshot: MiniAppRecoverySnapshot?) {
         lifecycleState = MiniAppLifecycleState.CREATED
@@ -67,8 +68,10 @@ class ReaderMiniAppInstance(
 
     override fun onResume() {
         lifecycleState = MiniAppLifecycleState.RESUMED
-        if (currentScreenMode == ReaderScreenMode.LIBRARY) {
-            libraryView?.loadBooks()
+        when (currentScreenMode) {
+            ReaderScreenMode.LIBRARY -> libraryView?.loadBooks()
+            ReaderScreenMode.FOLDER_BROWSER -> folderBrowserView?.refreshCurrentFolder()
+            ReaderScreenMode.READING -> {}
         }
     }
 
@@ -110,11 +113,16 @@ class ReaderMiniAppInstance(
     }
 
     override fun releaseRuntime() {
+        readingView?.saveCurrentProgressImmediately()
+        com.example.feature.floating.EmbeddedImeBridge.clearFocusRecursive(rootContainer)
+        libraryView?.releaseResources()
         readingView?.releaseResources()
+        folderBrowserView?.releaseResources()
         rootContainer?.removeAllViews()
         rootContainer = null
         libraryView = null
         readingView = null
+        folderBrowserView = null
     }
 
     override fun restoreFromSnapshot(snapshot: MiniAppRecoverySnapshot) {
@@ -164,17 +172,41 @@ class ReaderMiniAppInstance(
         }
         rootContainer = container
 
-        libraryView = ReaderLibraryView(context) { selectedBook ->
-            openBook(selectedBook)
-        }
+        libraryView = ReaderLibraryView(
+            context = context,
+            instanceId = instanceId,
+            onOpenFolderBrowser = {
+                currentScreenMode = ReaderScreenMode.FOLDER_BROWSER
+                showCurrentScreen()
+            },
+            onBookSelected = { selectedBook ->
+                openBook(selectedBook)
+            }
+        )
 
-        readingView = ReaderReadingView(context) {
+        readingView = ReaderReadingView(context, instanceId = instanceId) {
             currentScreenMode = ReaderScreenMode.LIBRARY
             showCurrentScreen()
         }
 
+        folderBrowserView = ReaderFolderBrowserView(
+            context = context,
+            instanceId = instanceId,
+            onBackToLibrary = {
+                currentScreenMode = ReaderScreenMode.LIBRARY
+                showCurrentScreen()
+            },
+            onBookImported = { importedBook ->
+                openBook(importedBook)
+            }
+        )
+
         showCurrentScreen()
         return container
+    }
+
+    fun clearEmbeddedImeFocus() {
+        com.example.feature.floating.EmbeddedImeBridge.clearFocusRecursive(rootContainer)
     }
 
     private fun openBook(book: EpubBook) {
@@ -183,39 +215,51 @@ class ReaderMiniAppInstance(
         currentScrollY = book.lastReadScrollY
         currentScreenMode = ReaderScreenMode.READING
 
-        showCurrentScreen()
-        readingView?.loadBook(book, currentChapterIndex, currentScrollY, currentFontSizeSp)
+        showCurrentScreen(alreadyLoadedBook = book)
     }
 
-    private fun showCurrentScreen() {
+    private fun showCurrentScreen(alreadyLoadedBook: EpubBook? = null) {
         val container = rootContainer ?: return
+        com.example.feature.floating.EmbeddedImeBridge.clearFocusRecursive(container)
         container.removeAllViews()
 
-        if (currentScreenMode == ReaderScreenMode.READING && currentBookId > 0) {
-            val rView = readingView ?: return
-            container.addView(rView)
+        when {
+            currentScreenMode == ReaderScreenMode.READING && currentBookId > 0 -> {
+                val rView = readingView ?: return
+                container.addView(rView)
 
-            // If reading view is not already loaded with this book, load it from DB
-            instanceScope.launch {
-                val db = AppDatabase.getDatabase(container.context)
-                val book = db.epubDao().getBookById(currentBookId)
-                if (book != null) {
-                    rView.loadBook(book, currentChapterIndex, currentScrollY, currentFontSizeSp)
+                if (alreadyLoadedBook != null && alreadyLoadedBook.id == currentBookId) {
+                    rView.loadBook(alreadyLoadedBook, currentChapterIndex, currentScrollY, currentFontSizeSp)
                 } else {
-                    currentScreenMode = ReaderScreenMode.LIBRARY
-                    showCurrentScreen()
+                    instanceScope.launch {
+                        val db = AppDatabase.getDatabase(container.context)
+                        val book = db.epubDao().getBookById(currentBookId)
+                        if (book != null) {
+                            rView.loadBook(book, currentChapterIndex, currentScrollY, currentFontSizeSp)
+                        } else {
+                            currentScreenMode = ReaderScreenMode.LIBRARY
+                            showCurrentScreen()
+                        }
+                    }
                 }
             }
-        } else {
-            val lView = libraryView ?: return
-            container.addView(lView)
-            lView.loadBooks()
+            currentScreenMode == ReaderScreenMode.FOLDER_BROWSER -> {
+                val fView = folderBrowserView ?: return
+                container.addView(fView)
+                fView.loadRootFolder()
+            }
+            else -> {
+                val lView = libraryView ?: return
+                container.addView(lView)
+                lView.loadBooks()
+            }
         }
     }
 
     // Testing helpers
     fun getLibraryViewForTesting(): ReaderLibraryView? = libraryView
     fun getReadingViewForTesting(): ReaderReadingView? = readingView
+    fun getFolderBrowserViewForTesting(): ReaderFolderBrowserView? = folderBrowserView
     fun getCurrentBookIdForTesting(): Int = currentBookId
     fun getCurrentScreenModeForTesting(): ReaderScreenMode = currentScreenMode
 }

@@ -563,6 +563,25 @@
   - Added `ReaderMiniAppTest.kt` covering factory registration, lifecycle states, snapshot sleep/restore recovery, and view creation.
   - 90/90 tests passing in `FloatingMiniAppFrameworkTest`, `EpubParserTest`, and `ReaderMiniAppTest`. Whole-project compilation clean.
 
+### Phase 14.9: Note, Floating Shell Corners, Reader Refinements & Floating PWA Loader (COMPLETED)
+- **1. Note Mini-App Enhancements (Main-Only Multi-Instance)**:
+  - Blank-slate new Notes with `TestNotesMiniAppInstance.isLegacyDefaultTemplate` sanitization for legacy snapshots.
+  - Multi-instance launcher `FloatingMiniAppBridge.openNewNoteInstance` with staggered bounds.
+  - In-editor Copy action and persistent per-Note `accent_color` (`NotePersistenceCoordinator`) tinting the top-bar indicator, Edit button, popover active swatch, and folded bubble border stroke.
+- **2. Shared Floating Shell 16dp Rounded Corners & Z-Order Stabilization**:
+  - Applied uniform `16dp` rounded outline clipping on `FloatingMiniAppWindow` when floating (`0f` when maximized) with non-interactive `rootBorderOverlay` so inner surfaces and video/WebView layers never bleed square corners over the frame.
+  - `FloatingWindowManager.bringToFront` skips redundant layout passes when only hidden/detached windows sit above the target window.
+- **3. Reader Fixes, Generic IME Bridge & SAF Folder Explorer**:
+  - Replaced `+`-mangling `URLDecoder` with strict `%XX` UTF-8 decoding in `EpubParser.normalizeZipPath` so OPF/ZIP paths with literal `+` characters resolve accurately.
+  - Extracted reusable `EmbeddedImeBridge` (`EmbeddedImeEditText` / `:heavy` blur dispatch) shared across `:heavy` mini-app inputs.
+  - Added SAF folder tree picker (`ReaderFolderTreeActivity`), synced `ReaderFolderPrefs`, and `ReaderFolderBrowserView` with type filtering and natural numeric sort; preserved `CoroutineScope` across screen switches within `ReaderMiniAppInstance`.
+- **4. Separate Floating PWA Loader (`floating_pwa`)**:
+  - Kept full-screen `PwaPlayerActivity.kt` untouched.
+  - Built `:heavy` `FloatingPwaMiniAppFactory` + `FloatingPwaMiniAppInstance` (reusing `PwaEntity`, `PwaPermissionPolicy`, `PwaStorageManager`, and `https://pwa-<id>.local/` virtual origin + external web URLs + audio muting script + IME focus bridge).
+  - Built Main-side `FloatingPwaWindowController` (compact browser toolbar, URL bar with focusability arbitration, linear progress indicator, installed PWA picker modal) and `FloatingPwaRelayActivity` (SAF document chooser and runtime Camera/Mic/Location permission relay).
+  - Wired `"floating_pwa"` across `HeavyFloatingHost`, `HeavyFloatingHostService`, `HeavyPageHostManager`, `FloatingMiniAppWindow`, `ElementActionDispatcher`, `SidebarItem`, `AddElementActivity`, `FloatingMiniAppLauncherBubble`, `FloatingMiniAppLogFilter`, and `AndroidManifest.xml`.
+- **5. Testing**: 111/111 JVM unit tests passing across `FloatingMiniAppFrameworkTest` (82), `EpubParserTest` (10), `ReaderMiniAppTest` (6), `FloatingMiniAppLogFilterTest` (7), and `FloatingPwaMiniAppTest` (6). Whole-project build compiled cleanly.
+
 ---
 
 ## Phase 14: PWA Engine & External AI App Integration (Tier 5 - Highest Complexity)

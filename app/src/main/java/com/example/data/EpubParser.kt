@@ -330,7 +330,7 @@ object EpubParser {
     fun normalizeZipPath(baseDir: String, href: String): String {
         val cleanHref = href.substringBefore('#').substringBefore('?')
         val decodedHref = try {
-            URLDecoder.decode(cleanHref, "UTF-8")
+            URLDecoder.decode(cleanHref.replace("+", "%2B"), "UTF-8")
         } catch (_: Throwable) {
             cleanHref
         }

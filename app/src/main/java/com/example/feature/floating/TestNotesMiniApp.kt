@@ -534,7 +534,7 @@ class TestNotesMiniAppInstance(
         private set
 
     @Volatile
-    var noteText: String = DEFAULT_INSTRUCTIONAL_TEXT
+    var noteText: String = ""
         private set
 
     @Volatile
@@ -1005,6 +1005,10 @@ class TestNotesMiniAppInstance(
         const val ACTION_NOTE_CLEAR = "note_clear"
         const val DEFAULT_INSTRUCTIONAL_TEXT =
             "Floating framework test.\nMove, resize, maximize, sleep, wake, and edit this text."
+
+        fun isLegacyDefaultTemplate(text: String?, source: String?): Boolean {
+            return text == DEFAULT_INSTRUCTIONAL_TEXT && (source == null || source == "default")
+        }
     }
 }
 

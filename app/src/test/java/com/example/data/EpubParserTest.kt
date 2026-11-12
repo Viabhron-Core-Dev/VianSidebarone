@@ -346,6 +346,46 @@ Winston Smith, his chin nuzzled into his breast in an effort to escape the vile 
         assertTrue(ch1.contains("clocks were striking thirteen"))
     }
 
+    /**
+     * Case 10: Literal '+' signs in OPF hrefs and ZIP paths must be preserved (not converted to spaces).
+     */
+    @Test
+    fun testLiteralPlusSignPreservedInPathsAndParsedEpub() = runBlocking {
+        assertEquals(
+            "OEBPS/text/Chapter+1.xhtml",
+            EpubParser.normalizeZipPath("OEBPS/", "text/Chapter+1.xhtml")
+        )
+        assertEquals(
+            "OEBPS/Part 1+Notes+Extra.xhtml",
+            EpubParser.normalizeZipPath("OEBPS/", "Part%201+Notes%2BExtra.xhtml")
+        )
+
+        val epubFile = File(tempDir, "plus_href.epub")
+        createZip(epubFile) { zos ->
+            writeEntry(zos, "META-INF/container.xml", containerXml("OEBPS/content.opf"))
+            writeEntry(zos, "OEBPS/text/chapter+1.xhtml", htmlDoc("Chapter+1", "Content with literal plus filename"))
+
+            val opf = """<?xml version="1.0" encoding="UTF-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:title>Plus Filename Test</dc:title>
+  </metadata>
+  <manifest>
+    <item id="c1" href="text/chapter+1.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine>
+    <itemref idref="c1"/>
+  </spine>
+</package>"""
+            writeEntry(zos, "OEBPS/content.opf", opf)
+        }
+
+        val result = EpubParser.parseEpub(testContext, 109, epubFile)
+        assertEquals("Must resolve chapter+1.xhtml without turning '+' into space", 1, result.chapterCount)
+        val text = EpubParser.getChapterText(testContext, 109, 0)
+        assertTrue(text.contains("Content with literal plus filename"))
+    }
+
     // --- Helper methods to generate test ZIP archives ---
 
     private fun createZip(target: File, writer: (ZipOutputStream) -> Unit) {

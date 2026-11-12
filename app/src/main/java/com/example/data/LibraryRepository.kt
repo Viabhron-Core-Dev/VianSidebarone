@@ -4,7 +4,11 @@ import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
 import com.example.core.LogKeeper
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
@@ -29,6 +33,7 @@ class LibraryRepository(private val context: Context) {
 
     companion object {
         private const val TAG = "LibraryRepository"
+        val persistentIoScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     }
 
     suspend fun getBooks(): List<EpubBook> = withContext(Dispatchers.IO) {
@@ -62,8 +67,10 @@ class LibraryRepository(private val context: Context) {
         val baseTitle = rawName.removeSuffix(".epub").removeSuffix(".txt")
 
         try {
-            val inputStream = context.contentResolver.openInputStream(uri) ?: return@withContext null
-            importFromInputStream(inputStream, isTxt, baseTitle)
+            val stream = context.contentResolver.openInputStream(uri) ?: return@withContext null
+            stream.use { inputStream ->
+                importFromInputStream(inputStream, isTxt, baseTitle)
+            }
         } catch (e: Exception) {
             LogKeeper.log(context, TAG, "Failed to import from Uri: ${e.message}")
             e.printStackTrace()
@@ -133,10 +140,18 @@ class LibraryRepository(private val context: Context) {
             parseResult.chapterCount
         }
 
+        if (totalChapters <= 0) {
+            LogKeeper.log(context, TAG, "BOOK_IMPORT_FAILED_CLEANUP id=$id chapters=$totalChapters title='$finalTitle'")
+            try { dao.deleteBook(finalBook) } catch (_: Throwable) {}
+            try { destFile.delete() } catch (_: Throwable) {}
+            try { File(context.filesDir, "book_$id").deleteRecursively() } catch (_: Throwable) {}
+            return null
+        }
+
         val readyBook = finalBook.copy(
             title = finalTitle,
-            totalChapters = totalChapters.coerceAtLeast(0),
-            isParsed = totalChapters > 0
+            totalChapters = totalChapters,
+            isParsed = true
         )
         dao.updateBook(readyBook)
         LogKeeper.log(context, TAG, "BOOK_IMPORTED id=$id title='$finalTitle' chapters=$totalChapters")
@@ -158,9 +173,9 @@ class LibraryRepository(private val context: Context) {
     }
 
     /**
-     * Updates reading progress for an open book.
+     * Updates reading progress for an open book safely without cancellation loss.
      */
-    suspend fun saveReadingProgress(bookId: Int, chapterIndex: Int, scrollY: Int) = withContext(Dispatchers.IO) {
+    suspend fun saveReadingProgress(bookId: Int, chapterIndex: Int, scrollY: Int) = withContext(NonCancellable + Dispatchers.IO) {
         val existing = dao.getBookById(bookId) ?: return@withContext
         val updated = existing.copy(
             lastReadChapter = chapterIndex,
@@ -168,6 +183,16 @@ class LibraryRepository(private val context: Context) {
             lastOpenedTimestamp = System.currentTimeMillis()
         )
         dao.updateBook(updated)
+    }
+
+    fun saveReadingProgressAsync(bookId: Int, chapterIndex: Int, scrollY: Int) {
+        persistentIoScope.launch {
+            try {
+                saveReadingProgress(bookId, chapterIndex, scrollY)
+            } catch (t: Throwable) {
+                LogKeeper.log(context, TAG, "Failed to persist reading progress id=$bookId: ${t.message}")
+            }
+        }
     }
 
     /**
