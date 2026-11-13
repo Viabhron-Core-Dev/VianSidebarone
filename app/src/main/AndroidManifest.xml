@@ -118,6 +118,12 @@
             android:exported="false"
             android:theme="@android:style/Theme.Translucent.NoTitleBar" />
         <activity
+            android:name=".feature.reader.BookTrackerActivity"
+            android:exported="false"
+            android:process=":heavy"
+            android:label="Book Tracker"
+            android:theme="@style/Theme.LiteReader" />
+        <activity
             android:name=".feature.pwa.floating.FloatingPwaRelayActivity"
             android:exported="false"
             android:theme="@android:style/Theme.Translucent.NoTitleBar" />

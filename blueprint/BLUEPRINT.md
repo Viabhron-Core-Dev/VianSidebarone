@@ -582,6 +582,27 @@
   - Wired `"floating_pwa"` across `HeavyFloatingHost`, `HeavyFloatingHostService`, `HeavyPageHostManager`, `FloatingMiniAppWindow`, `ElementActionDispatcher`, `SidebarItem`, `AddElementActivity`, `FloatingMiniAppLauncherBubble`, `FloatingMiniAppLogFilter`, and `AndroidManifest.xml`.
 - **5. Testing**: 111/111 JVM unit tests passing across `FloatingMiniAppFrameworkTest` (82), `EpubParserTest` (10), `ReaderMiniAppTest` (6), `FloatingMiniAppLogFilterTest` (7), and `FloatingPwaMiniAppTest` (6). Whole-project build compiled cleanly.
 
+### Phase 14.10: Complete Sidebar Reader Architecture, Book Tracker & Backup System (COMPLETED)
+- **1. Main-Process Reader Runtime & Threading**:
+  - Moved `"reader"` / `"ebook_reader"` out of `:heavy` `HeavyFloatingHost` so floating Reader runtime and UI run exclusively in Main (`com.example`).
+  - Fixed `ReaderDispatchers.main` to bind directly to `Looper.getMainLooper()` in Android runtime rather than silently falling back to `Dispatchers.Default`.
+- **2. Room v10 → v11 Schema & Strict Book Identity**:
+  - Added `MIGRATION_10_11` and `.enableMultiInstanceInvalidation()` on `AppDatabase` (`litereader_db`).
+  - Added `author` and `lastActivityTimestamp` to `EpubBook`; added `linkedEpubBookId` (FK to `epubs(id)` with `ON DELETE SET NULL`), `lastReadingActivityTimestamp`, `lastMetadataEditTimestamp`, and `backupOriginKey` to `TrackerBook`.
+  - Preserved distinct identities for duplicate titles; deleting an `EpubBook` unlinks (`linkedEpubBookId = null`) without deleting Tracker progress.
+- **3. Lazy Metadata-First Parser, 21-Chapter Rolling Cache & Virtualized TOC**:
+  - Updated `EpubParser` and `LibraryRepository` to parse metadata/manifest/spine/TXT ranges into `toc.json` and `cache_manifest.json` on import without upfront full-book extraction.
+  - Maintained a rolling 21-chapter cache window (`[current - 10 .. current + 10]`) during reading and streamed out-of-window chapters transiently via `readChapterTextTransient` during full-book search.
+  - Upgraded TOC overlay to a virtualized `RecyclerView` (`TocChapterAdapter`) displaying 1 ellipsized line per chapter (`"${index + 1}. ${title}"`) with current-chapter highlighting.
+- **4. Recent (Last 10) vs All Books & Resume vs High-Water Separation**:
+  - `ReaderLibraryView` defaults to **Recent** (up to 10 distinct opened books ordered by `lastOpenedTimestamp DESC`) with a separate uncapped **All Books** tab; cold restarts open **Recent** by default while warm fold/unfold preserves the active session.
+  - Strictly separated `EpubBook` resume position (`lastReadChapter`/`lastReadScrollY`) from `TrackerBook.readChapters` high-water progress; TOC/search jumps and restorations update resume only, while genuine reading advances `readChapters` and shows an in-Reader **Undo** banner.
+- **5. Heavy Book Tracker, Reader Settings & LiteReader/Moon+ Backups**:
+  - Added `:heavy` `BookTrackerActivity` (search, genre filter, sort, Add/Edit/Delete, manual progress & flags, exact `linkedEpubBookId` **Open in Reader** dispatch) and `ReaderSettingsScreen` in `SettingsActivity`.
+  - Wired floating Reader top-bar `Edit` button in Main to open `:heavy` Book Tracker editor for the exact current `EpubBook.id`.
+  - Implemented `LiteReaderBackupManager` in `:heavy` supporting Full ZIP, NoBooks ZIP, Tracker TSV import/export, and Moon+ `.mrstd` import via safe non-destructive temp-dir merging.
+- **6. Verification**: 111/111 JVM tests passing (`EpubParserTest`: 12, `ReaderMiniAppTest`: 6, `ReaderArchitectureAndBackupTest`: 5, `FloatingMiniAppFrameworkTest`: 82, `FloatingPwaMiniAppTest`: 6); `compile_applet` build succeeded.
+
 ---
 
 ## Phase 14: PWA Engine & External AI App Integration (Tier 5 - Highest Complexity)

@@ -78,3 +78,65 @@
 * How it was verified: Local JVM unit test execution (`gradle :app:testDebugUnitTest` on the 5 targeted suites listed above: 111/111 passing) and full Android build via `compile_applet` — on-device runtime behavior (overlay IME, WebView rendering, SAF pickers, SurfaceControlViewHost framing) not tested on physical device/emulator in this environment.
 * Any deviation from what was requested, and why: None; excluded Quick Notes, Book Tracker Edit/details panel, legacy backup migration, Dictionary, and kept `PwaPlayerActivity.kt` unchanged as instructed.
 * Any known issue or follow-up needed: Physical device verification required for multi-process overlay WebView rendering, SAF tree/file chooser relays, IME focus transitions, and physical runtime memory teardown. Pre-existing unrelated test `CallSensorIpcTest.testHeavyUnavailableAndQueueingBehavior` was not modified per isolation discipline.
+
+---
+
+### Receipt 113
+* Timestamp: 2026-11-13 22:32 UTC
+* One-line summary of what was requested: Implement the complete Sidebar Reader architecture and Reader system (Main-process Reader runtime, Room v10→v11 schema & identity migration, lazy metadata-first EPUB/TXT parser + 21-chapter rolling cache + virtualized RecyclerView TOC, Recent vs All Books landing tabs, high-water vs resume separation + Undo banner, Heavy-process Book Tracker & Reader Settings, fold/unfold recovery, and LiteReader/Moon+ backup import/export).
+* Exact files touched:
+  - Process & Floating Host Routing:
+    - `app/src/main/java/com/example/feature/floating/FloatingMiniAppBridge.kt`
+    - `app/src/main/java/com/example/feature/floating/FloatingMiniAppWindow.kt`
+    - `app/src/main/java/com/example/feature/floating/HeavyFloatingHost.kt`
+    - `app/src/main/AndroidManifest.xml`
+  - Room v10→v11 Data & Lazy Parser Layer:
+    - `app/src/main/java/com/example/data/EpubBook.kt`
+    - `app/src/main/java/com/example/data/TrackerBook.kt`
+    - `app/src/main/java/com/example/data/AppDatabase.kt`
+    - `app/src/main/java/com/example/data/EpubParser.kt`
+    - `app/src/main/java/com/example/data/LibraryRepository.kt`
+  - Main-Process Reader Runtime & UI:
+    - `app/src/main/java/com/example/feature/reader/ReaderModels.kt`
+    - `app/src/main/java/com/example/feature/reader/ReaderMiniAppInstance.kt`
+    - `app/src/main/java/com/example/feature/reader/ReaderMiniAppFactory.kt`
+    - `app/src/main/java/com/example/feature/reader/ReaderLibraryView.kt`
+    - `app/src/main/java/com/example/feature/reader/ReaderReadingView.kt`
+    - `app/src/main/java/com/example/feature/reader/ReaderFolderBrowserView.kt`
+  - Heavy-Process Book Tracker, Reader Settings & Backup System:
+    - `app/src/main/java/com/example/feature/reader/BookTrackerActivity.kt` (new)
+    - `app/src/main/java/com/example/feature/reader/LiteReaderBackupManager.kt` (new)
+    - `app/src/main/java/com/example/feature/settings/ReaderSettingsScreen.kt` (new)
+    - `app/src/main/java/com/example/SettingsActivity.kt`
+  - Tests & Documentation:
+    - `app/src/test/java/com/example/data/EpubParserTest.kt`
+    - `app/src/test/java/com/example/feature/reader/ReaderMiniAppTest.kt`
+    - `app/src/test/java/com/example/feature/reader/ReaderArchitectureAndBackupTest.kt` (new)
+    - `app/src/test/java/com/example/feature/floating/FloatingMiniAppFrameworkTest.kt`
+    - `blueprint/BLUEPRINT.md`
+    - `receipts/RECEIPTS_101.md`
+* What was actually done — factual, not persuasive:
+  1. Main-Process Reader Runtime & Dispatcher Safety:
+     - Routed `"reader"` and `"ebook_reader"` to run exclusively in the Main process (`com.example`) in `FloatingMiniAppBridge` and `FloatingMiniAppWindow` (removed Reader from `HeavyFloatingHost`).
+     - Configured `ReaderDispatchers.main` to execute directly on `Looper.getMainLooper()` in Android runtime rather than silently falling back to `Dispatchers.Default`.
+  2. Room Schema v10→v11 & Strict Book Identity:
+     - Added `MIGRATION_10_11` and `.enableMultiInstanceInvalidation()` on `AppDatabase` (`litereader_db`).
+     - Added `author` and `lastActivityTimestamp` to `EpubBook`; added `linkedEpubBookId` (nullable FK to `epubs(id)` with `ON DELETE SET NULL` and index), `lastReadingActivityTimestamp`, `lastMetadataEditTimestamp`, and `backupOriginKey` to `TrackerBook`.
+     - Kept duplicate titles distinct; deleting an `EpubBook` unlinks (`linkedEpubBookId = null`) without deleting Tracker progress.
+  3. Lazy Metadata-First Parser, 21-Chapter Rolling Cache & Virtualized TOC:
+     - Updated `EpubParser` and `LibraryRepository` to parse metadata/manifest/spine/TXT ranges into `toc.json` and `cache_manifest.json` at import without upfront full-book extraction, maintain a rolling 21-chapter cache window (`[current - 10 .. current + 10]`) for books > 21 chapters, and stream outside-window chapters transiently during full-book search via `readChapterTextTransient`.
+     - Replaced `ReaderReadingView` TOC rendering with a virtualized `RecyclerView` + `TocChapterAdapter` displaying 1 ellipsized line per chapter (`"${index + 1}. ${title}"`) with active-chapter highlight.
+     - Fixed `ReaderReadingView`, `ReaderLibraryView`, and `ReaderFolderBrowserView` to hold `appContext` directly instead of calling final `View.getContext()` and guarded `RecyclerView(context)` creation for headless JUnit mock contexts.
+  4. Reader Home Landing, Resume vs High-Water Progress & Undo Banner:
+     - Configured `ReaderLibraryView` to open on **Recent** (max 10 opened Reader books ordered by `lastOpenedTimestamp DESC`, cold-start default) alongside a separate uncapped **All Books** tab.
+     - Separated `EpubBook.lastReadChapter`/`lastReadScrollY` (resume) from `TrackerBook.readChapters` (high-water); TOC/search jumps and initial/warm restores update resume only, while genuine reading advances `readChapters` and presents an in-Reader **Undo** banner.
+  5. Heavy Book Tracker, Reader Settings, Fold/Recovery & Backups:
+     - Implemented `BookTrackerActivity` and `ReaderSettingsScreen` in `:heavy`, linked top-bar `Edit` in Main's floating Reader window to `:heavy`'s Tracker editor for the exact `EpubBook.id`, and added **Open in Reader** dispatch by exact `linkedEpubBookId`.
+     - Implemented `LiteReaderBackupManager` in `:heavy` supporting Full ZIP, NoBooks ZIP, Tracker TSV (import/export), and Moon+ `.mrstd` import with non-destructive temp-dir SQLite/manifest merging, zip-slip protection, `linkedEpubBookId` remapping, and `quick_notes`/window-state exclusion.
+  6. Verification:
+     - Targeted unit test execution: `111/111` passed (`EpubParserTest`: 12, `ReaderMiniAppTest`: 6, `ReaderArchitectureAndBackupTest`: 5, `FloatingMiniAppFrameworkTest`: 82, `FloatingPwaMiniAppTest`: 6).
+     - Full debug Android build via `compile_applet` succeeded.
+* How it was verified: Local JVM unit tests (`gradle :app:testDebugUnitTest` across the 5 suites listed above: 111/111 passed) and `compile_applet` full APK compilation. Multi-process IPC, SAF pickers, TTS/Auto-Scroll playback, and SQLite backup round-trips on physical storage were not tested on a physical Android device or emulator in this environment.
+* Any deviation from what was requested, and why: None requested. In `LiteReaderBackupManager`, added a JSON manifest snapshot alongside `litereader_db` SQLite tables inside exported backup archives so archive round-trips execute deterministically in both pure JVM unit tests (without SQLite native libs) and Android runtime.
+* Any known issue or follow-up needed: Physical device verification required for Main↔`:heavy` multi-process Intent/IPC round-trips (`Open in Reader`, top-bar `Edit`), Android SAF ZIP/TSV/MRSTD import/export, and Room v10→v11 on-device migration.
+

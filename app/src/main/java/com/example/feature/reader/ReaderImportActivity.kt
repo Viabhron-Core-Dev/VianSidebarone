@@ -40,24 +40,7 @@ class ReaderImportActivity : ComponentActivity() {
                 val book = repo.importBook(uri)
                 if (book != null) {
                     Toast.makeText(applicationContext, "Imported: ${book.title}", Toast.LENGTH_SHORT).show()
-                    ReaderEventManager.notifyLibraryChanged()
-                    try {
-                        val cm = com.example.core.ipc.HeavyProcessConnectionManager.getInstance(applicationContext)
-                        if (cm.state == com.example.core.ipc.ConnectionState.CONNECTED) {
-                            cm.sendCommand(
-                                com.example.core.ipc.HeavyCommand(
-                                    commandId = java.util.UUID.randomUUID().toString(),
-                                    type = com.example.core.ipc.HeavyCommandType.PAUSE_OPERATION,
-                                    targetId = "reader",
-                                    payload = mapOf(
-                                        "action" to "reader_library_changed",
-                                        "instance_id" to "reader"
-                                    )
-                                ),
-                                autoConnect = false
-                            )
-                        }
-                    } catch (_: Throwable) {}
+                    ReaderEventManager.notifyLibraryChanged(applicationContext)
                 } else {
                     Toast.makeText(applicationContext, "Failed to import book.", Toast.LENGTH_SHORT).show()
                 }

@@ -386,6 +386,118 @@ Winston Smith, his chin nuzzled into his breast in an effort to escape the vile 
         assertTrue(text.contains("Content with literal plus filename"))
     }
 
+    /**
+     * Case 11: Lazy metadata-first import builds toc.json and cache_manifest.json without extracting chapter_*.txt files upfront.
+     */
+    @Test
+    fun testLazyMetadataFirstImportDoesNotExtractAllChaptersUpfront() = runBlocking {
+        val epubFile = File(tempDir, "lazy_200.epub")
+        createMultiChapterEpub(epubFile, 50)
+
+        val bookId = 201
+        val parsed = EpubParser.parseEpub(testContext, bookId, epubFile)
+        assertEquals(50, parsed.chapterCount)
+
+        val outDir = File(tempDir, "book_$bookId")
+        val tocFile = File(outDir, "toc.json")
+        val manifestFile = File(outDir, "cache_manifest.json")
+        assertTrue("toc.json must be created at import", tocFile.exists())
+        assertTrue("cache_manifest.json must be created at import", manifestFile.exists())
+
+        val extractedTxtFiles = outDir.listFiles { f -> f.name.startsWith("chapter_") && f.name.endsWith(".txt") } ?: emptyArray()
+        assertEquals("Zero chapter_*.txt files should be extracted upfront during lazy import", 0, extractedTxtFiles.size)
+    }
+
+    /**
+     * Case 12: 21-chapter rolling cache window (current - 10 .. current + 10) for books > 21 chapters,
+     * full retention for books <= 21 chapters, and transient search streaming without polluting cache.
+     */
+    @Test
+    fun testRolling21ChapterCacheAndTransientSearch() = runBlocking {
+        val epubFile = File(tempDir, "book_200_chapters.epub")
+        createMultiChapterEpub(epubFile, 200)
+
+        val bookId = 202
+        val parsed = EpubParser.parseEpub(testContext, bookId, epubFile)
+        assertEquals(200, parsed.chapterCount)
+
+        // 1. Open chapter 50 -> caches only 40..60 (21 chapters)
+        val ch50Text = EpubParser.getChapterText(testContext, bookId, 50)
+        assertTrue(ch50Text.contains("Body of chapter 50"))
+        val cachedAt50 = EpubParser.getCachedChapterIndicesOnDisk(testContext, bookId)
+        assertEquals("Opening ch 50 in 200-ch book must cache exactly 21 chapters", 21, cachedAt50.size)
+        assertEquals((40..60).toSet(), cachedAt50)
+        assertEquals((40..60).toSet(), EpubParser.getCachedChapterIndicesInMemory(bookId))
+
+        // 2. Move forward to chapter 52 -> shifts window to 42..62 and evicts 40, 41
+        EpubParser.getChapterText(testContext, bookId, 52)
+        val cachedAt52 = EpubParser.getCachedChapterIndicesOnDisk(testContext, bookId)
+        assertEquals((42..62).toSet(), cachedAt52)
+        assertTrue("Old chapters 40 and 41 must be evicted", !cachedAt52.contains(40) && !cachedAt52.contains(41))
+
+        // 3. Move backward to chapter 49 -> shifts window to 39..59 and evicts 60, 61, 62
+        EpubParser.getChapterText(testContext, bookId, 49)
+        val cachedAt49 = EpubParser.getCachedChapterIndicesOnDisk(testContext, bookId)
+        assertEquals((39..59).toSet(), cachedAt49)
+        assertTrue("Future chapters 60..62 must be evicted", !cachedAt49.contains(60) && !cachedAt49.contains(62))
+
+        // 4. Jump to chapter 180 -> replaces window around 180 (170..190)
+        val ch180Text = EpubParser.getChapterText(testContext, bookId, 180)
+        assertTrue(ch180Text.contains("Body of chapter 180"))
+        val cachedAt180 = EpubParser.getCachedChapterIndicesOnDisk(testContext, bookId)
+        assertEquals((170..190).toSet(), cachedAt180)
+        assertEquals((170..190).toSet(), EpubParser.getCachedChapterIndicesInMemory(bookId))
+
+        // 5. Full-book search outside window (e.g., chapter 5) streams transiently without polluting 170..190 cache
+        val transientCh5 = EpubParser.readChapterTextTransient(testContext, bookId, 5)
+        assertTrue(transientCh5.contains("Body of chapter 5"))
+        assertEquals(
+            "Transient search read must not pollute disk rolling window",
+            (170..190).toSet(),
+            EpubParser.getCachedChapterIndicesOnDisk(testContext, bookId)
+        )
+        assertEquals(
+            "Transient search read must not pollute in-memory rolling window",
+            (170..190).toSet(),
+            EpubParser.getCachedChapterIndicesInMemory(bookId)
+        )
+
+        // 6. Books with <= 21 chapters keep all chapters without unnecessary eviction
+        val smallEpub = File(tempDir, "book_15_chapters.epub")
+        createMultiChapterEpub(smallEpub, 15)
+        val smallBookId = 203
+        EpubParser.parseEpub(testContext, smallBookId, smallEpub)
+        EpubParser.getChapterText(testContext, smallBookId, 0)
+        assertEquals((0..14).toSet(), EpubParser.getCachedChapterIndicesOnDisk(testContext, smallBookId))
+        EpubParser.getChapterText(testContext, smallBookId, 14)
+        assertEquals((0..14).toSet(), EpubParser.getCachedChapterIndicesOnDisk(testContext, smallBookId))
+    }
+
+    private fun createMultiChapterEpub(target: File, count: Int) {
+        createZip(target) { zos ->
+            writeEntry(zos, "META-INF/container.xml", containerXml("OEBPS/content.opf"))
+            val manifestItems = StringBuilder()
+            val spineItems = StringBuilder()
+            for (i in 0 until count) {
+                writeEntry(zos, "OEBPS/ch_$i.xhtml", htmlDoc("Chapter ${i + 1}", "Body of chapter $i unique token_$i"))
+                manifestItems.append("""    <item id="c$i" href="ch_$i.xhtml" media-type="application/xhtml+xml"/>""").append("\n")
+                spineItems.append("""    <itemref idref="c$i"/>""").append("\n")
+            }
+            val opf = """<?xml version="1.0" encoding="UTF-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:title>Book With $count Chapters</dc:title>
+    <dc:creator>Test Author</dc:creator>
+  </metadata>
+  <manifest>
+$manifestItems  </manifest>
+  <spine>
+$spineItems  </spine>
+</package>"""
+            writeEntry(zos, "OEBPS/content.opf", opf)
+        }
+    }
+
     // --- Helper methods to generate test ZIP archives ---
 
     private fun createZip(target: File, writer: (ZipOutputStream) -> Unit) {

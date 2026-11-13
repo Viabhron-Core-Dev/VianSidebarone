@@ -30,7 +30,67 @@ class FloatingMiniAppBridge private constructor(private val context: Context) {
     private val activeBubbles = LinkedHashMap<String, FloatingMiniAppLauncherBubble>()
     private var noteStaggerIndex = 0
 
-    fun isMainOnlyMiniApp(appType: String): Boolean = (appType == "note" || appType == "test_notes")
+    private val readerActionReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(ctx: Context?, intent: Intent?) {
+            when (intent?.action) {
+                com.example.feature.reader.ReaderEventManager.ACTION_OPEN_BOOK_IN_READER -> {
+                    val epubId = intent.getIntExtra(com.example.feature.reader.ReaderEventManager.EXTRA_EPUB_BOOK_ID, -1)
+                    if (epubId > 0) {
+                        android.os.Handler(android.os.Looper.getMainLooper()).post {
+                            openBookInFloatingReader(epubId)
+                        }
+                    }
+                }
+                com.example.feature.reader.ReaderEventManager.ACTION_READER_DB_CHANGED -> {
+                    android.os.Handler(android.os.Looper.getMainLooper()).post {
+                        com.example.feature.reader.ReaderEventManager.notifyLibraryChanged()
+                    }
+                }
+            }
+        }
+    }
+
+    init {
+        try {
+            val filter = android.content.IntentFilter().apply {
+                addAction(com.example.feature.reader.ReaderEventManager.ACTION_OPEN_BOOK_IN_READER)
+                addAction(com.example.feature.reader.ReaderEventManager.ACTION_READER_DB_CHANGED)
+            }
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                context.registerReceiver(readerActionReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+            } else {
+                context.registerReceiver(readerActionReceiver, filter)
+            }
+        } catch (_: Throwable) {}
+    }
+
+    fun isNoteMiniApp(appType: String): Boolean = (appType == "note" || appType == "test_notes")
+
+    fun isReaderMiniApp(appType: String): Boolean = (appType == "reader" || appType == "ebook_reader")
+
+    fun isMainOnlyMiniApp(appType: String): Boolean = isNoteMiniApp(appType) || isReaderMiniApp(appType)
+
+    /**
+     * Opens or wakes the Main-process floating Reader window and loads the specified [epubBookId]
+     * at its saved resume chapter and scroll offset.
+     */
+    fun openBookInFloatingReader(epubBookId: Int, targetInstanceId: String? = null): FloatingMiniAppWindow {
+        val instanceId = targetInstanceId
+            ?: durableStore.getAllSnapshots().firstOrNull { isReaderMiniApp(it.appType) }?.instanceId
+            ?: "miniapp_reader"
+        com.example.feature.reader.ReaderSessionTracker.markWarmSession(instanceId)
+        val saved = durableStore.loadSnapshot(instanceId)
+        if (saved != null) {
+            saved.payload[com.example.feature.reader.ReaderMiniAppInstance.KEY_SCREEN_MODE] =
+                com.example.feature.reader.ReaderScreenMode.READING.name
+            saved.payload[com.example.feature.reader.ReaderMiniAppInstance.KEY_BOOK_ID] = epubBookId.toString()
+            saved.payload[com.example.feature.reader.ReaderMiniAppInstance.KEY_COLD_START] = "false"
+            durableStore.saveSnapshot(saved)
+        }
+        val window = openMiniApp(instanceId, "reader")
+        window.openReaderBookById(epubBookId)
+        return window
+    }
 
     /**
      * Creates and opens a brand-new blank Note mini-app instance with a unique persistent instanceId
@@ -42,7 +102,7 @@ class FloatingMiniAppBridge private constructor(private val context: Context) {
         val density = context.resources.displayMetrics.density
         val stepPx = (28 * density).toInt().coerceAtLeast(16)
         val openNoteCount = windowManager.getAllWindows()
-            .count { it is FloatingMiniAppWindow && isMainOnlyMiniApp(it.appType) }
+            .count { it is FloatingMiniAppWindow && isNoteMiniApp(it.appType) }
         val slot = (openNoteCount + noteStaggerIndex) % 6
         noteStaggerIndex = (noteStaggerIndex + 1) % 60
 
@@ -109,6 +169,9 @@ class FloatingMiniAppBridge private constructor(private val context: Context) {
             ?: savedSnapshot?.windowBounds?.copyBounds()
             ?: WindowBounds(120, 150, 650, 850)
 
+        val isReader = isReaderMiniApp(appType)
+        val isWarmReaderSession = isReader && com.example.feature.reader.ReaderSessionTracker.isWarmSession(instanceId)
+
         // Ensure snapshot exists and is marked ACTIVE
         if (savedSnapshot == null) {
             val newSnapshot = MiniAppRecoverySnapshot(
@@ -117,11 +180,23 @@ class FloatingMiniAppBridge private constructor(private val context: Context) {
                 state = MiniAppState.ACTIVE,
                 windowBounds = bounds.copyBounds()
             )
+            if (isReader) {
+                newSnapshot.payload[com.example.feature.reader.ReaderMiniAppInstance.KEY_COLD_START] =
+                    if (isWarmReaderSession) "false" else "true"
+            }
             durableStore.saveSnapshot(newSnapshot)
         } else {
             savedSnapshot.state = MiniAppState.ACTIVE
             savedSnapshot.windowBounds = bounds.copyBounds()
+            if (isReader) {
+                savedSnapshot.payload[com.example.feature.reader.ReaderMiniAppInstance.KEY_COLD_START] =
+                    if (isWarmReaderSession) "false" else "true"
+            }
             durableStore.saveSnapshot(savedSnapshot)
+        }
+
+        if (isReader) {
+            com.example.feature.reader.ReaderSessionTracker.markWarmSession(instanceId)
         }
 
         val window = FloatingMiniAppWindow(instanceId, context, appType)
@@ -160,6 +235,9 @@ class FloatingMiniAppBridge private constructor(private val context: Context) {
 
         if (isMainOnlyMiniApp(appType)) {
             LogKeeper.log(context, TAG, "SLEEP_MAIN_ONLY id=$instanceId type=$appType (skipping Heavy)")
+            if (isReaderMiniApp(appType)) {
+                com.example.feature.reader.ReaderSessionTracker.markWarmSession(instanceId)
+            }
 
             if (window != null) {
                 // Authoritative non-blocking asynchronous flush to MiniAppState.SLEEPING
@@ -334,6 +412,10 @@ class FloatingMiniAppBridge private constructor(private val context: Context) {
         }
 
         val appType = snapshot?.appType ?: "generic"
+        if (isReaderMiniApp(appType)) {
+            // Waking a sleeping bubble in the same process is a warm unfold; if process restarted, ReaderSessionTracker.isWarmSession is false
+            // Note: if ReaderSessionTracker.isWarmSession(instanceId) is already true, openMiniApp will preserve the active book/chapter/scroll!
+        }
         val bounds = snapshot?.windowBounds?.copyBounds()
 
         openMiniApp(instanceId, appType, bounds)
@@ -511,6 +593,12 @@ class FloatingMiniAppBridge private constructor(private val context: Context) {
             when (snapshot.state) {
                 MiniAppState.ACTIVE -> {
                     if (windowManager.getWindow(snapshot.instanceId) == null) {
+                        if (isReaderMiniApp(snapshot.appType) &&
+                            !com.example.feature.reader.ReaderSessionTracker.isWarmSession(snapshot.instanceId)
+                        ) {
+                            snapshot.payload[com.example.feature.reader.ReaderMiniAppInstance.KEY_COLD_START] = "true"
+                            durableStore.saveSnapshot(snapshot)
+                        }
                         val window = FloatingMiniAppWindow(snapshot.instanceId, context, snapshot.appType)
                         window.setWindowBounds(snapshot.windowBounds)
                         windowManager.registerWindow(window)

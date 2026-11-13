@@ -24,15 +24,12 @@ class HeavyFloatingHost private constructor(private val context: Context) {
     private val lock = Any()
     private val defaultFactory = DefaultMiniAppFactory()
     private val testNotesFactory = TestNotesMiniAppFactory()
-    private val readerFactory = com.example.feature.reader.ReaderMiniAppFactory()
     private val floatingPwaFactory = com.example.feature.pwa.floating.FloatingPwaMiniAppFactory()
 
     init {
-        // Register default and test mini-app factories
+        // Register default and Heavy-hosted mini-app factories (Note and Reader run in Main)
         registerFactory("generic", defaultFactory)
         registerFactory("work_notes", defaultFactory)
-        registerFactory("reader", readerFactory)
-        registerFactory("ebook_reader", readerFactory)
         registerFactory(com.example.feature.pwa.floating.FloatingPwaMiniAppInstance.APP_TYPE, floatingPwaFactory)
         registerFactory("dictionary", defaultFactory)
         registerFactory("translation", defaultFactory)

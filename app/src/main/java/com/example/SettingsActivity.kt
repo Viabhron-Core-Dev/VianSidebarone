@@ -129,12 +129,18 @@ fun SettingsNavigationApp(initialRoute: String, onFinish: () -> Unit) {
                 onBack = { navigateBack() }
             )
         }
+        currentRoute == "reader_settings" || currentRoute == "reader" -> {
+            com.example.feature.settings.ReaderSettingsScreen(
+                onBack = { navigateBack() }
+            )
+        }
         else -> {
             MainSettingsScreen(
                 onNavigateToHandles = { navigateTo("handles") },
                 onNavigateToNetSpeed = { navigateTo("netspeed") },
                 onNavigateToCallRecorder = { navigateTo("call_recorder") },
                 onNavigateToScreenCap = { navigateTo("screencap") },
+                onNavigateToReaderSettings = { navigateTo("reader_settings") },
                 onNavigateToPermissions = { navigateTo("permissions") },
                 onBack = onFinish
             )
@@ -149,6 +155,7 @@ fun MainSettingsScreen(
     onNavigateToNetSpeed: () -> Unit,
     onNavigateToCallRecorder: () -> Unit,
     onNavigateToScreenCap: () -> Unit,
+    onNavigateToReaderSettings: () -> Unit = {},
     onNavigateToPermissions: () -> Unit,
     onBack: () -> Unit
 ) {
@@ -178,6 +185,28 @@ fun MainSettingsScreen(
                     modifier = Modifier
                         .clickable { onNavigateToHandles() }
                         .testTag("settings_item_handles")
+                )
+                HorizontalDivider()
+            }
+            item {
+                ListItem(
+                    headlineContent = { Text("Reader Settings") },
+                    supportingContent = { Text("Configure eReader font size, line spacing, themes, auto-scroll, TTS, and backups") },
+                    modifier = Modifier
+                        .clickable { onNavigateToReaderSettings() }
+                        .testTag("settings_item_reader_settings")
+                )
+                HorizontalDivider()
+            }
+            item {
+                ListItem(
+                    headlineContent = { Text("Book Tracker") },
+                    supportingContent = { Text("Track read chapters, edit book metadata, and import/export LiteReader backups") },
+                    modifier = Modifier
+                        .clickable {
+                            com.example.feature.reader.BookTrackerActivity.launch(context)
+                        }
+                        .testTag("settings_item_book_tracker")
                 )
                 HorizontalDivider()
             }

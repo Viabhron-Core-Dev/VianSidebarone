@@ -673,6 +673,16 @@ class HeavyProcessConnectionManager internal constructor(
                                 val delta = request.parameters["delta"]?.toIntOrNull() ?: 0
                                 safeLog("HeavyProcessConnectionManager", "Executing NAVIGATE_PAGE delta=$delta from Heavy")
                                 com.example.feature.sidebar.SidebarWindowCoordinator.getInstance(ctx).navigatePage(delta)
+                            } else if (request.targetId == "READER_ACTION") {
+                                val subAction = request.parameters["subAction"]
+                                if (subAction == "OPEN_BOOK") {
+                                    val epubBookId = request.parameters["epubBookId"]?.toIntOrNull() ?: -1
+                                    if (epubBookId > 0) {
+                                        safeLog("HeavyProcessConnectionManager", "Executing READER_ACTION OPEN_BOOK epubBookId=$epubBookId from Heavy")
+                                        com.example.feature.floating.FloatingMiniAppBridge.getInstance(ctx)
+                                            .openBookInFloatingReader(epubBookId)
+                                    }
+                                }
                             }
                         }
                         else -> {

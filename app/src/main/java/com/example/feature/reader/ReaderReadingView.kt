@@ -10,44 +10,59 @@ import android.speech.tts.TextToSpeech
 import android.text.Editable
 import android.text.SpannableString
 import android.text.Spanned
+import android.text.TextUtils
 import android.text.TextWatcher
 import android.text.style.BackgroundColorSpan
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
+import android.view.ViewGroup
+import android.view.inputmethod.InputMethodManager
 import android.widget.Button
-import android.widget.EditText
 import android.widget.FrameLayout
-import android.widget.HorizontalScrollView
-import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
 import com.example.core.LogKeeper
 import com.example.data.ChapterMeta
 import com.example.data.EpubBook
+import com.example.data.EpubParser
+import com.example.data.HighWaterProgressUpdate
 import com.example.data.LibraryRepository
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import java.util.Locale
 
 /**
- * ReaderReadingView: The actual reading screen inside the floating Reader mini-app.
- * Includes text display, chapter navigation, table of contents, in-chapter and in-book search,
- * font scaling, auto-scroll, text selection, and Text-to-Speech.
+ * ReaderReadingView: The Main-process reading screen inside the floating Reader mini-app.
+ *
+ * Implements:
+ * 1. Virtualized TOC chapter list (`RecyclerView`, 1 line per chapter, `"${index + 1}. ${title}"`,
+ *    `maxLines = 1`, `ellipsize = END`, current chapter highlighted).
+ * 2. Strict separation between Reader resume position (`EpubBook.lastReadChapter`/`lastReadScrollY`)
+ *    and Tracker high-water progress (`TrackerBook.readChapters`).
+ * 3. Accidental jump protection: TOC jumps, search result jumps, and initial/restored chapter loads
+ *    update ONLY the resume position and never advance Tracker high-water progress.
+ * 4. Genuine reading activity detection + Undo banner when high-water progress increases.
+ * 5. Rolling 21-chapter cache window maintenance across chapter transitions, auto-scroll, and TTS.
  */
 class ReaderReadingView(
     context: Context,
     private val instanceId: String? = null,
+    private val onRequestWindowFocusable: ((Boolean) -> Unit)? = null,
+    private val onActiveBookChanged: ((EpubBook?) -> Unit)? = null,
     private val onBackToLibrary: () -> Unit
 ) : FrameLayout(context), TextToSpeech.OnInitListener {
+
+    private val appContext: Context = context
 
     private val density: Float = (context.resources.displayMetrics.density).takeIf { it > 0f } ?: 2f
     private fun dp(v: Int): Int = (v * density).toInt()
@@ -57,26 +72,45 @@ class ReaderReadingView(
     private val repository = LibraryRepository(context)
     private val mainHandler = Handler(Looper.getMainLooper())
 
-    private var currentBook: EpubBook? = null
+    var currentBook: EpubBook? = null
+        private set
     var currentChapterIndex: Int = 0
         private set
     var currentScrollY: Int = 0
         private set
-    var currentFontSizeSp: Float = 16f
+    var currentFontSizeSp: Float = ReaderPreferences.getDefaultFontSizeSp(context)
         private set
+    private var currentLineSpacingMult: Float = ReaderPreferences.getLineSpacingMultiplier(context)
+    private var currentThemePreset: String = ReaderPreferences.getThemePreset(context)
 
     private var chaptersList: List<ChapterMeta> = emptyList()
     private var rawChapterText: String = ""
 
+    // Genuine reading activity tracking for the currently displayed chapter
+    private var isProgrammaticScrollOrLoad = false
+    private var hasGenuineReadingInCurrentChapter = false
+    private var userTouchDownInReadingView = false
+    private var initialChapterLoadScrollY = 0
+    private var lastHighWaterUpdate: HighWaterProgressUpdate? = null
+    private var undoBannerHideJob: Job? = null
+
     // UI elements
+    private val mainLayout: LinearLayout
+    private val topBarLayout: LinearLayout
     private val chapterTitleTopView: TextView
     private val chapterHeadingView: TextView
     private val readingContentTextView: TextView
     private val readingScrollView: ScrollView
     private val prevChapterButton: Button
     private val nextChapterButton: Button
+    private val bottomBarLayout: LinearLayout
     private val bottomProgressTextView: TextView
     private val bottomProgressBar: ProgressBar
+
+    // High-Water Progress Undo Banner
+    private val undoBannerLayout: LinearLayout
+    private val undoBannerTextView: TextView
+    private val undoBannerActionButton: Button
 
     // Tool panels
     private val searchBarLayout: LinearLayout
@@ -91,9 +125,10 @@ class ReaderReadingView(
     private val ttsPlayPauseButton: Button
     private val ttsStatusView: TextView
 
-    // TOC overlay
+    // Virtualized TOC overlay
     private val tocOverlayLayout: FrameLayout
-    private val tocItemsContainer: LinearLayout
+    private val tocRecyclerView: RecyclerView?
+    private val tocAdapter: TocChapterAdapter
 
     // Search in book overlay
     private val searchBookOverlayLayout: FrameLayout
@@ -101,12 +136,17 @@ class ReaderReadingView(
 
     // Auto-scroll state
     private var isAutoScrollRunning = false
-    private var autoScrollSpeedMultiplier = 1.0f
+    private var autoScrollSpeedMultiplier = ReaderPreferences.getAutoScrollSpeed(context)
+    private var autoScrollPixelsAccumulated = 0
     private val autoScrollRunnable = object : Runnable {
         override fun run() {
             if (isAutoScrollRunning) {
                 val step = (2 * autoScrollSpeedMultiplier).toInt().coerceAtLeast(1)
                 readingScrollView.smoothScrollBy(0, step)
+                autoScrollPixelsAccumulated += step
+                if (autoScrollPixelsAccumulated >= dp(90) && !hasGenuineReadingInCurrentChapter) {
+                    recordGenuineReadingActivityOnCurrentChapter()
+                }
                 mainHandler.postDelayed(this, 40L)
             }
         }
@@ -126,19 +166,40 @@ class ReaderReadingView(
     // Debounced scroll persistence
     private var scrollSaveJob: Job? = null
 
-    init {
-        setBackgroundColor(Color.parseColor("#181825")) // Catppuccin Base
+    private val settingsListener = {
+        applyReaderPreferences()
+    }
 
-        val mainLayout = LinearLayout(context).apply {
+    fun refreshPreferences() {
+        applyReaderPreferences()
+    }
+
+    private val libraryChangedListener = {
+        val bookId = currentBook?.id
+        if (bookId != null && bookId > 0) {
+            viewScope.launch {
+                val refreshed = repository.getBook(bookId)
+                if (refreshed != null) {
+                    currentBook = refreshed
+                    onActiveBookChanged?.invoke(refreshed)
+                }
+            }
+        }
+    }
+
+    init {
+        setBackgroundColor(Color.parseColor("#181825"))
+
+        mainLayout = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
         }
 
         // --- Top Navigation & Action Bar ---
-        val topBar = LinearLayout(context).apply {
+        topBarLayout = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setBackgroundColor(Color.parseColor("#1E1E2E")) // Surface
+            setBackgroundColor(Color.parseColor("#1E1E2E"))
             setPadding(dp(6), dp(4), dp(6), dp(4))
         }
 
@@ -147,24 +208,25 @@ class ReaderReadingView(
             textSize = 12f
             typeface = Typeface.DEFAULT_BOLD
             setTextColor(Color.parseColor("#89B4FA"))
-            minHeight = dp(40)
-            minimumHeight = dp(40)
+            minHeight = dp(38)
+            minimumHeight = dp(38)
             minWidth = dp(48)
             minimumWidth = dp(48)
             background = GradientDrawable().apply {
                 setColor(Color.TRANSPARENT)
                 cornerRadius = dpF(8f)
             }
-            setPadding(dp(8), dp(4), dp(8), dp(4))
+            setPadding(dp(6), dp(2), dp(6), dp(2))
             setOnClickListener {
-                searchEditText.clearFocus()
+                clearSearchFocus()
                 saveCurrentProgressImmediately()
                 stopAutoScroll()
                 stopTts()
+                onActiveBookChanged?.invoke(null)
                 onBackToLibrary()
             }
         }
-        topBar.addView(backButton)
+        topBarLayout.addView(backButton)
 
         chapterTitleTopView = TextView(context).apply {
             text = "Chapter"
@@ -172,46 +234,81 @@ class ReaderReadingView(
             typeface = Typeface.DEFAULT_BOLD
             setTextColor(Color.parseColor("#CDD6F4"))
             maxLines = 1
-            ellipsize = android.text.TextUtils.TruncateAt.END
+            ellipsize = TextUtils.TruncateAt.END
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
                 marginStart = dp(4)
                 marginEnd = dp(4)
             }
         }
-        topBar.addView(chapterTitleTopView)
+        topBarLayout.addView(chapterTitleTopView)
 
-        // Action icon buttons (40dp x 40dp minimum touch targets)
         fun createActionButton(label: String, onClick: () -> Unit): Button {
             return Button(context).apply {
                 text = label
                 textSize = 12f
                 setTextColor(Color.parseColor("#CDD6F4"))
-                minWidth = dp(40)
-                minimumWidth = dp(40)
-                minHeight = dp(40)
-                minimumHeight = dp(40)
+                minWidth = dp(38)
+                minimumWidth = dp(38)
+                minHeight = dp(38)
+                minimumHeight = dp(38)
                 background = GradientDrawable().apply {
                     setColor(Color.TRANSPARENT)
                     cornerRadius = dpF(8f)
                 }
                 layoutParams = LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.WRAP_CONTENT,
-                    dp(40)
+                    dp(38)
                 ).apply {
                     marginStart = dp(2)
                 }
-                setPadding(dp(6), dp(2), dp(6), dp(2))
+                setPadding(dp(5), dp(2), dp(5), dp(2))
                 setOnClickListener { onClick() }
             }
         }
 
-        topBar.addView(createActionButton("🔍") { toggleSearchBar() })
-        topBar.addView(createActionButton("A") { toggleFontSizeBar() })
-        topBar.addView(createActionButton("▼") { toggleAutoScrollBar() })
-        topBar.addView(createActionButton("🔊") { toggleTtsBar() })
-        topBar.addView(createActionButton("☰") { toggleTocOverlay() })
+        topBarLayout.addView(createActionButton("🔍") { toggleSearchBar() })
+        topBarLayout.addView(createActionButton("A") { toggleFontSizeBar() })
+        topBarLayout.addView(createActionButton("▼") { toggleAutoScrollBar() })
+        topBarLayout.addView(createActionButton("🔊") { toggleTtsBar() })
+        topBarLayout.addView(createActionButton("☰") { toggleTocOverlay() })
 
-        mainLayout.addView(topBar)
+        mainLayout.addView(topBarLayout)
+
+        // --- High-Water Progress Undo Banner ---
+        undoBannerLayout = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            visibility = View.GONE
+            setBackgroundColor(Color.parseColor("#313244"))
+            setPadding(dp(10), dp(4), dp(10), dp(4))
+        }
+
+        undoBannerTextView = TextView(context).apply {
+            text = "Tracker progress updated"
+            textSize = 11f
+            setTextColor(Color.parseColor("#A6E3A1"))
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        }
+        undoBannerLayout.addView(undoBannerTextView)
+
+        undoBannerActionButton = Button(context).apply {
+            text = "Undo"
+            textSize = 11f
+            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(Color.parseColor("#11111B"))
+            minHeight = dp(28)
+            minimumHeight = dp(28)
+            background = GradientDrawable().apply {
+                setColor(Color.parseColor("#F9E2AF"))
+                cornerRadius = dpF(6f)
+            }
+            setPadding(dp(10), dp(2), dp(10), dp(2))
+            setOnClickListener {
+                performHighWaterProgressUndo()
+            }
+        }
+        undoBannerLayout.addView(undoBannerActionButton)
+        mainLayout.addView(undoBannerLayout)
 
         // --- Search Bar Panel ---
         searchBarLayout = LinearLayout(context).apply {
@@ -234,6 +331,17 @@ class ReaderReadingView(
             }
             setPadding(dp(10), dp(6), dp(10), dp(6))
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            setOnTouchListener { v, event ->
+                if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+                    onRequestWindowFocusable?.invoke(true)
+                    v.post {
+                        v.requestFocus()
+                        val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+                        imm?.showSoftInput(v, InputMethodManager.SHOW_IMPLICIT)
+                    }
+                }
+                false
+            }
             addTextChangedListener(object : TextWatcher {
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
                 override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
@@ -283,6 +391,7 @@ class ReaderReadingView(
             setOnClickListener {
                 if (currentFontSizeSp > 12f) {
                     currentFontSizeSp -= 2f
+                    ReaderPreferences.setDefaultFontSizeSp(context, currentFontSizeSp)
                     applyFontSize()
                 }
             }
@@ -290,7 +399,7 @@ class ReaderReadingView(
         fontSizeBarLayout.addView(decFontButton)
 
         fontSizeTextView = TextView(context).apply {
-            text = "16sp"
+            text = "${currentFontSizeSp.toInt()}sp"
             textSize = 13f
             setTextColor(Color.parseColor("#CDD6F4"))
             gravity = Gravity.CENTER
@@ -309,6 +418,7 @@ class ReaderReadingView(
             setOnClickListener {
                 if (currentFontSizeSp < 28f) {
                     currentFontSizeSp += 2f
+                    ReaderPreferences.setDefaultFontSizeSp(context, currentFontSizeSp)
                     applyFontSize()
                 }
             }
@@ -342,7 +452,7 @@ class ReaderReadingView(
         autoScrollBarLayout.addView(autoScrollPlayPauseButton)
 
         autoScrollSpeedButton = Button(context).apply {
-            text = "Speed: 1.0x"
+            text = "Speed: ${autoScrollSpeedMultiplier}x"
             textSize = 12f
             setTextColor(Color.parseColor("#CDD6F4"))
             background = GradientDrawable().apply {
@@ -424,22 +534,34 @@ class ReaderReadingView(
                 0,
                 1f
             )
+            setOnTouchListener { _, ev ->
+                if (ev.actionMasked == MotionEvent.ACTION_DOWN || ev.actionMasked == MotionEvent.ACTION_MOVE) {
+                    userTouchDownInReadingView = true
+                }
+                false
+            }
             setOnScrollChangeListener { _, _, scrollY, _, _ ->
                 currentScrollY = scrollY
+                if (!isProgrammaticScrollOrLoad && userTouchDownInReadingView) {
+                    val delta = kotlin.math.abs(scrollY - initialChapterLoadScrollY)
+                    if (delta >= dp(80) && !hasGenuineReadingInCurrentChapter) {
+                        recordGenuineReadingActivityOnCurrentChapter()
+                    }
+                }
                 scheduleDebouncedProgressSave()
             }
         }
 
         val contentInnerLayout = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(14), dp(12), dp(14), dp(24))
+            setPadding(dp(14), dp(12), dp(14), dp(28))
         }
 
         chapterHeadingView = TextView(context).apply {
             text = "Chapter"
             textSize = 19f
             typeface = Typeface.DEFAULT_BOLD
-            setTextColor(Color.parseColor("#89B4FA")) // Accent color
+            setTextColor(Color.parseColor("#89B4FA"))
             setPadding(0, dp(4), 0, dp(10))
         }
         contentInnerLayout.addView(chapterHeadingView)
@@ -448,18 +570,18 @@ class ReaderReadingView(
             setTextIsSelectable(true)
             textSize = currentFontSizeSp
             setTextColor(Color.parseColor("#CDD6F4"))
-            setLineSpacing(0f, 1.35f)
+            setLineSpacing(0f, currentLineSpacingMult)
         }
         contentInnerLayout.addView(readingContentTextView)
 
         readingScrollView.addView(contentInnerLayout)
         mainLayout.addView(readingScrollView)
 
-        // --- Bottom Chapter Navigation Bar ---
-        val bottomBar = LinearLayout(context).apply {
+        // --- Bottom Chapter Navigation Bar (with clearance for bottom-right [ ×  —  ↘ ] sticker) ---
+        bottomBarLayout = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(Color.parseColor("#1E1E2E")) // Surface
-            setPadding(dp(8), dp(4), dp(8), dp(6))
+            setBackgroundColor(Color.parseColor("#1E1E2E"))
+            setPadding(dp(8), dp(4), dp(8), dp(42))
         }
 
         bottomProgressBar = ProgressBar(context, null, android.R.attr.progressBarStyleHorizontal).apply {
@@ -473,7 +595,7 @@ class ReaderReadingView(
                 bottomMargin = dp(4)
             }
         }
-        bottomBar.addView(bottomProgressBar)
+        bottomBarLayout.addView(bottomProgressBar)
 
         val bottomRow = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -484,8 +606,8 @@ class ReaderReadingView(
             text = "◀ Prev"
             textSize = 12f
             setTextColor(Color.WHITE)
-            minHeight = dp(40)
-            minimumHeight = dp(40)
+            minHeight = dp(38)
+            minimumHeight = dp(38)
             background = GradientDrawable().apply {
                 setColor(Color.parseColor("#313244"))
                 cornerRadius = dpF(8f)
@@ -493,7 +615,7 @@ class ReaderReadingView(
             setPadding(dp(10), dp(4), dp(10), dp(4))
             setOnClickListener {
                 if (currentChapterIndex > 0) {
-                    openChapter(currentChapterIndex - 1)
+                    openChapter(currentChapterIndex - 1, initialScrollY = 0, isDirectJump = false)
                 }
             }
         }
@@ -512,8 +634,8 @@ class ReaderReadingView(
             text = "Next ▶"
             textSize = 12f
             setTextColor(Color.WHITE)
-            minHeight = dp(40)
-            minimumHeight = dp(40)
+            minHeight = dp(38)
+            minimumHeight = dp(38)
             background = GradientDrawable().apply {
                 setColor(Color.parseColor("#313244"))
                 cornerRadius = dpF(8f)
@@ -521,21 +643,25 @@ class ReaderReadingView(
             setPadding(dp(10), dp(4), dp(10), dp(4))
             setOnClickListener {
                 if (currentChapterIndex < chaptersList.size - 1) {
-                    openChapter(currentChapterIndex + 1)
+                    // Advancing via Next after completing a short or scrolled chapter counts as completing current chapter
+                    if (!hasGenuineReadingInCurrentChapter) {
+                        recordGenuineReadingActivityOnCurrentChapter()
+                    }
+                    openChapter(currentChapterIndex + 1, initialScrollY = 0, isDirectJump = false)
                 }
             }
         }
         bottomRow.addView(nextChapterButton)
 
-        bottomBar.addView(bottomRow)
-        mainLayout.addView(bottomBar)
+        bottomBarLayout.addView(bottomRow)
+        mainLayout.addView(bottomBarLayout)
 
         addView(mainLayout)
 
-        // --- TOC Overlay Drawer (Fullscreen inside floating window) ---
+        // --- Virtualized TOC Overlay Drawer ---
         tocOverlayLayout = FrameLayout(context).apply {
             visibility = View.GONE
-            setBackgroundColor(Color.parseColor("#E6181825")) // Semi-translucent dark overlay
+            setBackgroundColor(Color.parseColor("#E6181825"))
             isClickable = true
             isFocusable = true
             layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
@@ -553,20 +679,20 @@ class ReaderReadingView(
                 setStroke(1, Color.parseColor("#313244"))
             }
             layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT).apply {
-                setMargins(dp(14), dp(14), dp(14), dp(14))
+                setMargins(dp(12), dp(12), dp(12), dp(46))
             }
-            setPadding(dp(12), dp(12), dp(12), dp(12))
+            setPadding(dp(12), dp(10), dp(12), dp(10))
         }
 
         val tocHeader = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(4), dp(4), dp(4), dp(8))
+            setPadding(dp(4), dp(2), dp(4), dp(8))
         }
 
         val tocTitle = TextView(context).apply {
             text = "Table of Contents"
-            textSize = 16f
+            textSize = 15f
             typeface = Typeface.DEFAULT_BOLD
             setTextColor(Color.parseColor("#CDD6F4"))
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
@@ -577,10 +703,10 @@ class ReaderReadingView(
             text = "✕"
             textSize = 14f
             setTextColor(Color.parseColor("#A6ADC8"))
-            minWidth = dp(44)
-            minimumWidth = dp(44)
-            minHeight = dp(44)
-            minimumHeight = dp(44)
+            minWidth = dp(40)
+            minimumWidth = dp(40)
+            minHeight = dp(40)
+            minimumHeight = dp(40)
             background = GradientDrawable().apply {
                 setColor(Color.TRANSPARENT)
                 cornerRadius = dpF(8f)
@@ -592,19 +718,25 @@ class ReaderReadingView(
         tocHeader.addView(tocClose)
         tocCard.addView(tocHeader)
 
-        val tocScrollView = ScrollView(context).apply {
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                0,
-                1f
-            )
+        tocAdapter = TocChapterAdapter { selectedChapter ->
+            tocOverlayLayout.visibility = View.GONE
+            // Jumping via TOC updates ONLY Reader resume position — never advances Tracker high-water progress!
+            openChapter(selectedChapter.index, initialScrollY = 0, isDirectJump = true)
         }
 
-        tocItemsContainer = LinearLayout(context).apply {
-            orientation = LinearLayout.VERTICAL
+        tocRecyclerView = try {
+            RecyclerView(context).apply {
+                layoutManager = LinearLayoutManager(context)
+                adapter = tocAdapter
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    0,
+                    1f
+                )
+            }.also { tocCard.addView(it) }
+        } catch (_: Throwable) {
+            null
         }
-        tocScrollView.addView(tocItemsContainer)
-        tocCard.addView(tocScrollView)
 
         tocOverlayLayout.addView(tocCard)
         addView(tocOverlayLayout)
@@ -630,15 +762,15 @@ class ReaderReadingView(
                 setStroke(1, Color.parseColor("#313244"))
             }
             layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT).apply {
-                setMargins(dp(14), dp(14), dp(14), dp(14))
+                setMargins(dp(12), dp(12), dp(12), dp(46))
             }
-            setPadding(dp(12), dp(12), dp(12), dp(12))
+            setPadding(dp(12), dp(10), dp(12), dp(10))
         }
 
         val searchBookHeader = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(8, 8, 8, 12)
+            setPadding(8, 6, 8, 10)
         }
 
         val searchBookTitle = TextView(context).apply {
@@ -682,6 +814,10 @@ class ReaderReadingView(
         searchBookOverlayLayout.addView(searchBookCard)
         addView(searchBookOverlayLayout)
 
+        ReaderEventManager.registerSettingsListener(settingsListener)
+        ReaderEventManager.registerListener(libraryChangedListener)
+        applyReaderPreferences()
+
         // Initialize TTS
         try {
             textToSpeech = TextToSpeech(context, this)
@@ -694,61 +830,187 @@ class ReaderReadingView(
         if (status == TextToSpeech.SUCCESS) {
             isTtsInitialized = true
             textToSpeech?.language = Locale.getDefault()
+            textToSpeech?.setSpeechRate(ReaderPreferences.getTtsSpeechRate(appContext))
             ttsStatusView.text = "TTS Ready"
         } else {
             ttsStatusView.text = "TTS Unavailable"
         }
     }
 
-    fun loadBook(book: EpubBook, initialChapter: Int? = null, initialScrollY: Int? = null, fontSizeSp: Float? = null) {
+    private fun applyReaderPreferences() {
+        currentLineSpacingMult = ReaderPreferences.getLineSpacingMultiplier(appContext)
+        currentThemePreset = ReaderPreferences.getThemePreset(appContext)
+        autoScrollSpeedMultiplier = ReaderPreferences.getAutoScrollSpeed(appContext)
+        autoScrollSpeedButton.text = "Speed: ${autoScrollSpeedMultiplier}x"
+        textToSpeech?.setSpeechRate(ReaderPreferences.getTtsSpeechRate(appContext))
+
+        val palette = ReaderPreferences.getPalette(currentThemePreset)
+        setBackgroundColor(palette.backgroundColor)
+        readingScrollView.setBackgroundColor(palette.backgroundColor)
+        topBarLayout.setBackgroundColor(palette.surfaceColor)
+        bottomBarLayout.setBackgroundColor(palette.surfaceColor)
+        readingContentTextView.setTextColor(palette.textColor)
+        readingContentTextView.setLineSpacing(0f, currentLineSpacingMult)
+        chapterHeadingView.setTextColor(palette.accentColor)
+        chapterTitleTopView.setTextColor(palette.textColor)
+        bottomProgressTextView.setTextColor(palette.secondaryTextColor)
+    }
+
+    private fun clearSearchFocus() {
+        searchEditText.clearFocus()
+        onRequestWindowFocusable?.invoke(false)
+    }
+
+    /**
+     * Opens a book at its saved resume position (or explicit [initialChapter] / [initialScrollY]).
+     * Restoration or initial book load NEVER counts as new high-water Tracker progress.
+     */
+    fun loadBook(
+        book: EpubBook,
+        initialChapter: Int? = null,
+        initialScrollY: Int? = null,
+        fontSizeSp: Float? = null
+    ) {
         currentBook = book
+        onActiveBookChanged?.invoke(book)
         if (fontSizeSp != null && fontSizeSp in 12f..28f) {
             currentFontSizeSp = fontSizeSp
+        } else {
+            currentFontSizeSp = ReaderPreferences.getDefaultFontSizeSp(appContext)
         }
         applyFontSize()
+        applyReaderPreferences()
 
         viewScope.launch {
             chaptersList = repository.getChapters(book.id)
             val chapterIdx = initialChapter ?: book.lastReadChapter
             val scrollY = initialScrollY ?: book.lastReadScrollY
-            openChapter(chapterIdx.coerceIn(0, (chaptersList.size - 1).coerceAtLeast(0)), scrollY)
+            val clampedIdx = chapterIdx.coerceIn(0, (chaptersList.size - 1).coerceAtLeast(0))
+            openChapter(clampedIdx, scrollY, isDirectJump = false, isInitialRestore = true)
         }
     }
 
-    fun openChapter(chapterIndex: Int, initialScrollY: Int = 0) {
+    /**
+     * Loads and displays [chapterIndex].
+     *
+     * - Updates the 21-chapter rolling cache window around [chapterIndex].
+     * - Saves ONLY the Reader resume position (`EpubBook.lastReadChapter`, `lastReadScrollY`).
+     * - Does NOT advance `TrackerBook.readChapters` merely because the chapter was displayed!
+     */
+    fun openChapter(
+        chapterIndex: Int,
+        initialScrollY: Int = 0,
+        isDirectJump: Boolean = false,
+        isInitialRestore: Boolean = false
+    ) {
+        val wasTtsSpeaking = isTtsSpeaking
+        val wasAutoScrolling = isAutoScrollRunning
+
         currentChapterIndex = chapterIndex
         currentScrollY = initialScrollY
-        stopTts()
-        stopAutoScroll()
+        isProgrammaticScrollOrLoad = true
+        hasGenuineReadingInCurrentChapter = false
+        userTouchDownInReadingView = false
+        initialChapterLoadScrollY = initialScrollY
+        autoScrollPixelsAccumulated = 0
+
+        if (!wasTtsSpeaking) {
+            stopTts()
+        } else {
+            textToSpeech?.stop()
+            ttsParagraphs = emptyList()
+            ttsCurrentParagraphIndex = 0
+        }
+        if (!wasAutoScrolling) {
+            stopAutoScroll()
+        }
         clearSearchHighlights()
 
         val book = currentBook ?: return
         val totalCh = chaptersList.size.coerceAtLeast(1)
         val chapterMeta = chaptersList.getOrNull(chapterIndex)
-        val title = chapterMeta?.title ?: "Chapter ${chapterIndex + 1}"
+        val title = chapterMeta?.title?.takeIf { it.isNotBlank() } ?: "Chapter ${chapterIndex + 1}"
 
         chapterTitleTopView.text = title
         chapterHeadingView.text = title
 
-        // Update bottom progress bar
         val progressPercent = (((chapterIndex + 1).toFloat() / totalCh.toFloat()) * 100).toInt()
         bottomProgressBar.progress = progressPercent
         bottomProgressTextView.text = "Chapter ${chapterIndex + 1} of $totalCh • $progressPercent%"
 
         prevChapterButton.isEnabled = chapterIndex > 0
         nextChapterButton.isEnabled = chapterIndex < chaptersList.size - 1
+        tocAdapter.submitChapters(chaptersList, currentChapterIndex)
 
         viewScope.launch {
+            // Maintain 21-chapter rolling cache window and load chapter text
             rawChapterText = repository.getChapterText(book.id, chapterIndex)
             readingContentTextView.text = rawChapterText
 
-            // Restore scroll position
             readingScrollView.post {
                 readingScrollView.scrollTo(0, initialScrollY)
+                isProgrammaticScrollOrLoad = false
             }
 
-            // Immediately save progress for chapter transition
-            repository.saveReadingProgress(book.id, chapterIndex, initialScrollY)
+            // Save ONLY Reader resume position (never advances Tracker high-water progress on open/jump/restore)
+            repository.saveResumePosition(
+                bookId = book.id,
+                chapterIndex = chapterIndex,
+                scrollY = initialScrollY,
+                updateOpenRecency = true
+            )
+
+            // Seamless TTS continuity across chapter transitions / rolling window shifts
+            if (wasTtsSpeaking && rawChapterText.isNotBlank()) {
+                startTts()
+            }
+        }
+    }
+
+    /**
+     * Records genuine reading activity in the current chapter and shows the Undo banner if
+     * Tracker high-water progress (`TrackerBook.readChapters`) increased.
+     */
+    fun recordGenuineReadingActivityOnCurrentChapter() {
+        val book = currentBook ?: return
+        if (hasGenuineReadingInCurrentChapter) return
+        hasGenuineReadingInCurrentChapter = true
+
+        viewScope.launch {
+            val update = repository.recordGenuineReadingProgress(book.id, currentChapterIndex)
+            if (update != null) {
+                showHighWaterUndoBanner(update)
+            }
+        }
+    }
+
+    private fun showHighWaterUndoBanner(update: HighWaterProgressUpdate) {
+        lastHighWaterUpdate = update
+        undoBannerTextView.text = "Tracker progress: Ch. ${update.previousReadChapters} → Ch. ${update.newReadChapters}"
+        undoBannerLayout.visibility = View.VISIBLE
+
+        undoBannerHideJob?.cancel()
+        undoBannerHideJob = viewScope.launch {
+            delay(6000L)
+            undoBannerLayout.visibility = View.GONE
+        }
+    }
+
+    fun performHighWaterProgressUndo() {
+        val update = lastHighWaterUpdate ?: return
+        undoBannerHideJob?.cancel()
+        undoBannerLayout.visibility = View.GONE
+        lastHighWaterUpdate = null
+
+        viewScope.launch {
+            val ok = repository.undoHighWaterProgress(update)
+            if (ok) {
+                Toast.makeText(
+                    appContext,
+                    "Reverted Tracker progress to Ch. ${update.previousReadChapters}",
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
         }
     }
 
@@ -756,31 +1018,30 @@ class ReaderReadingView(
         val book = currentBook ?: return
         scrollSaveJob?.cancel()
         scrollSaveJob = viewScope.launch {
-            delay(500L) // Debounce rapid scroll events
-            repository.saveReadingProgress(book.id, currentChapterIndex, currentScrollY)
+            delay(500L)
+            repository.saveResumePosition(book.id, currentChapterIndex, currentScrollY, updateOpenRecency = true)
         }
     }
 
     fun saveCurrentProgressImmediately() {
         val book = currentBook ?: return
         scrollSaveJob?.cancel()
-        repository.saveReadingProgressAsync(book.id, currentChapterIndex, currentScrollY)
+        repository.saveReadingProgressAsync(book.id, currentChapterIndex, currentScrollY, updateOpenRecency = true)
     }
 
     // --- Search Feature ---
     private fun toggleSearchBar() {
         if (searchBarLayout.visibility == View.VISIBLE) {
             searchBarLayout.visibility = View.GONE
-            searchEditText.clearFocus()
-            searchEditText.deactivateBridgeSession()
+            clearSearchFocus()
             clearSearchHighlights()
         } else {
             searchBarLayout.visibility = View.VISIBLE
             fontSizeBarLayout.visibility = View.GONE
             autoScrollBarLayout.visibility = View.GONE
             ttsBarLayout.visibility = View.GONE
+            onRequestWindowFocusable?.invoke(true)
             searchEditText.requestFocus()
-            searchEditText.activateBridgeSession()
         }
     }
 
@@ -837,12 +1098,13 @@ class ReaderReadingView(
         readingContentTextView.text = spannable
         searchCountView.text = "${currentSearchMatchIndex + 1}/${searchMatches.size}"
 
-        // Scroll to match
         val layout = readingContentTextView.layout
         if (layout != null) {
             val line = layout.getLineForOffset(matchOffset)
             val y = layout.getLineTop(line)
+            isProgrammaticScrollOrLoad = true
             readingScrollView.smoothScrollTo(0, y)
+            readingScrollView.post { isProgrammaticScrollOrLoad = false }
         }
     }
 
@@ -856,13 +1118,14 @@ class ReaderReadingView(
     private fun openSearchInBookDialog() {
         val query = searchEditText.text.toString().trim()
         if (query.isBlank()) {
-            Toast.makeText(context, "Enter a search term first.", Toast.LENGTH_SHORT).show()
+            Toast.makeText(appContext, "Enter a search term first.", Toast.LENGTH_SHORT).show()
             return
         }
         val book = currentBook ?: return
+        clearSearchFocus()
 
         searchBookItemsContainer.removeAllViews()
-        val loadingText = TextView(context).apply {
+        val loadingText = TextView(appContext).apply {
             text = "Searching across all chapters..."
             textSize = 13f
             setTextColor(Color.parseColor("#A6ADC8"))
@@ -876,7 +1139,7 @@ class ReaderReadingView(
             searchBookItemsContainer.removeAllViews()
 
             if (results.isEmpty()) {
-                val emptyView = TextView(context).apply {
+                val emptyView = TextView(appContext).apply {
                     text = "No matches found for '$query'"
                     textSize = 13f
                     setTextColor(Color.parseColor("#A6ADC8"))
@@ -887,7 +1150,7 @@ class ReaderReadingView(
             }
 
             for (res in results) {
-                val itemCard = LinearLayout(context).apply {
+                val itemCard = LinearLayout(appContext).apply {
                     orientation = LinearLayout.VERTICAL
                     background = GradientDrawable().apply {
                         setColor(Color.parseColor("#252538"))
@@ -903,19 +1166,20 @@ class ReaderReadingView(
                     isClickable = true
                     setOnClickListener {
                         searchBookOverlayLayout.visibility = View.GONE
-                        openChapter(res.chapterIndex)
+                        // Jumping via Search Result updates ONLY Reader resume position — never advances Tracker high-water!
+                        openChapter(res.chapterIndex, initialScrollY = 0, isDirectJump = true)
                     }
                 }
 
-                val title = TextView(context).apply {
-                    text = res.chapterTitle
+                val title = TextView(appContext).apply {
+                    text = "${res.chapterIndex + 1}. ${res.chapterTitle}"
                     textSize = 13f
                     typeface = Typeface.DEFAULT_BOLD
                     setTextColor(Color.parseColor("#89B4FA"))
                 }
                 itemCard.addView(title)
 
-                val snippet = TextView(context).apply {
+                val snippet = TextView(appContext).apply {
                     text = res.snippet
                     textSize = 12f
                     setTextColor(Color.parseColor("#CDD6F4"))
@@ -976,7 +1240,7 @@ class ReaderReadingView(
         mainHandler.post(autoScrollRunnable)
     }
 
-    private fun stopAutoScroll() {
+    fun stopAutoScroll() {
         isAutoScrollRunning = false
         autoScrollPlayPauseButton.text = "▶ Play"
         autoScrollPlayPauseButton.background = GradientDrawable().apply {
@@ -993,6 +1257,7 @@ class ReaderReadingView(
             2.0f -> 3.0f
             else -> 0.5f
         }
+        ReaderPreferences.setAutoScrollSpeed(appContext, autoScrollSpeedMultiplier)
         autoScrollSpeedButton.text = "Speed: ${autoScrollSpeedMultiplier}x"
     }
 
@@ -1019,7 +1284,7 @@ class ReaderReadingView(
 
     private fun startTts() {
         if (!isTtsInitialized || textToSpeech == null) {
-            Toast.makeText(context, "TTS not initialized.", Toast.LENGTH_SHORT).show()
+            Toast.makeText(appContext, "TTS not initialized.", Toast.LENGTH_SHORT).show()
             return
         }
 
@@ -1038,9 +1303,20 @@ class ReaderReadingView(
     }
 
     private fun speakCurrentTtsParagraph() {
-        if (!isTtsSpeaking || ttsCurrentParagraphIndex >= ttsParagraphs.size) {
-            stopTts()
+        if (!isTtsSpeaking) return
+        if (ttsCurrentParagraphIndex >= ttsParagraphs.size) {
+            // Completed chapter via TTS -> counts as genuine reading activity
+            recordGenuineReadingActivityOnCurrentChapter()
+            if (currentChapterIndex < chaptersList.size - 1) {
+                openChapter(currentChapterIndex + 1, initialScrollY = 0, isDirectJump = false)
+            } else {
+                stopTts()
+            }
             return
+        }
+
+        if (ttsCurrentParagraphIndex >= 1 && !hasGenuineReadingInCurrentChapter) {
+            recordGenuineReadingActivityOnCurrentChapter()
         }
 
         val text = ttsParagraphs[ttsCurrentParagraphIndex]
@@ -1048,9 +1324,9 @@ class ReaderReadingView(
 
         textToSpeech?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "reader_tts_$ttsCurrentParagraphIndex")
 
-        // Schedule next paragraph when finished (best-effort timer based on word length)
         val words = text.split(Regex("\\s+")).size
-        val durationMs = ((words.toFloat() / 2.5f) * 1000L).toLong().coerceIn(1200L, 20000L)
+        val rate = ReaderPreferences.getTtsSpeechRate(appContext).coerceAtLeast(0.5f)
+        val durationMs = ((words.toFloat() / (2.5f * rate)) * 1000L).toLong().coerceIn(1200L, 20000L)
         mainHandler.postDelayed({
             if (isTtsSpeaking) {
                 ttsCurrentParagraphIndex++
@@ -1066,7 +1342,7 @@ class ReaderReadingView(
         ttsStatusView.text = "Paused at ${ttsCurrentParagraphIndex + 1}/${ttsParagraphs.size}"
     }
 
-    private fun stopTts() {
+    fun stopTts() {
         isTtsSpeaking = false
         ttsCurrentParagraphIndex = 0
         ttsParagraphs = emptyList()
@@ -1075,80 +1351,20 @@ class ReaderReadingView(
         ttsStatusView.text = "TTS Stopped"
     }
 
-    // --- Table of Contents Overlay ---
+    // --- Virtualized Table of Contents Overlay ---
     private fun toggleTocOverlay() {
         if (tocOverlayLayout.visibility == View.VISIBLE) {
             tocOverlayLayout.visibility = View.GONE
         } else {
-            renderTocItems()
+            tocAdapter.submitChapters(chaptersList, currentChapterIndex)
             tocOverlayLayout.visibility = View.VISIBLE
-        }
-    }
-
-    private fun renderTocItems() {
-        tocItemsContainer.removeAllViews()
-        for (ch in chaptersList) {
-            val isCurrent = ch.index == currentChapterIndex
-            val itemRow = LinearLayout(context).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-                background = GradientDrawable().apply {
-                    setColor(if (isCurrent) Color.parseColor("#313244") else Color.parseColor("#252538"))
-                    cornerRadius = 10f
-                    if (isCurrent) setStroke(2, Color.parseColor("#89B4FA"))
-                }
-                layoutParams = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT
-                ).apply {
-                    setMargins(0, 4, 0, 4)
-                }
-                setPadding(16, 14, 16, 14)
-                isClickable = true
-                setOnClickListener {
-                    tocOverlayLayout.visibility = View.GONE
-                    openChapter(ch.index)
-                }
-            }
-
-            val chNumber = TextView(context).apply {
-                text = "${ch.index + 1}."
-                textSize = 13f
-                typeface = Typeface.DEFAULT_BOLD
-                setTextColor(if (isCurrent) Color.parseColor("#89B4FA") else Color.parseColor("#A6ADC8"))
-                setPadding(0, 0, 12, 0)
-            }
-            itemRow.addView(chNumber)
-
-            val chTitle = TextView(context).apply {
-                text = ch.title
-                textSize = 13f
-                typeface = if (isCurrent) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
-                setTextColor(if (isCurrent) Color.parseColor("#89B4FA") else Color.parseColor("#CDD6F4"))
-                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-            }
-            itemRow.addView(chTitle)
-
-            if (isCurrent) {
-                val currentBadge = TextView(context).apply {
-                    text = "Reading"
-                    textSize = 10f
-                    typeface = Typeface.DEFAULT_BOLD
-                    setTextColor(Color.parseColor("#89B4FA"))
-                    background = GradientDrawable().apply {
-                        setColor(Color.parseColor("#181825"))
-                        cornerRadius = 6f
-                    }
-                    setPadding(10, 4, 10, 4)
-                }
-                itemRow.addView(currentBadge)
-            }
-
-            tocItemsContainer.addView(itemRow)
+            tocRecyclerView?.scrollToPosition(currentChapterIndex.coerceIn(0, (chaptersList.size - 1).coerceAtLeast(0)))
         }
     }
 
     fun releaseResources() {
+        ReaderEventManager.unregisterSettingsListener(settingsListener)
+        ReaderEventManager.unregisterListener(libraryChangedListener)
         stopAutoScroll()
         stopTts()
         try {
@@ -1156,15 +1372,129 @@ class ReaderReadingView(
         } catch (_: Throwable) {}
         textToSpeech = null
         scrollSaveJob?.cancel()
+        undoBannerHideJob?.cancel()
+        rawChapterText = ""
+        readingContentTextView.text = ""
+        EpubParser.releaseInMemoryWindow(currentBook?.id)
         viewScope.cancel()
     }
 
     override fun onDetachedFromWindow() {
         super.onDetachedFromWindow()
-        // Do NOT cancel viewScope or shut down TTS here: screen switches detach/reattach via removeAllViews().
-        scrollSaveJob?.cancel()
     }
 
     fun isViewScopeActiveForTesting(): Boolean =
         viewScope.coroutineContext[kotlinx.coroutines.Job]?.isActive == true
+
+    fun isAutoScrollRunningForTesting(): Boolean = isAutoScrollRunning
+    fun isTtsSpeakingForTesting(): Boolean = isTtsSpeaking
+    fun isUndoBannerVisibleForTesting(): Boolean = undoBannerLayout.visibility == View.VISIBLE
+    fun getLastHighWaterUpdateForTesting(): HighWaterProgressUpdate? = lastHighWaterUpdate
+    fun getTocRecyclerViewForTesting(): RecyclerView? = tocRecyclerView
+
+    /**
+     * Virtualized RecyclerView Adapter for Table of Contents (TOC).
+     * Strictly renders 1 line per chapter: "${index + 1}. ${actualTitle}" with end ellipsis
+     * and highlights the currently open chapter.
+     */
+    class TocChapterAdapter(
+        private val onChapterClicked: (ChapterMeta) -> Unit
+    ) : RecyclerView.Adapter<TocChapterAdapter.TocViewHolder>() {
+
+        private var items: List<ChapterMeta> = emptyList()
+        private var currentIndex: Int = 0
+
+        fun submitChapters(newItems: List<ChapterMeta>, activeChapterIndex: Int) {
+            items = newItems
+            currentIndex = activeChapterIndex
+            try {
+                notifyDataSetChanged()
+            } catch (_: Throwable) {}
+        }
+
+        fun formatTocLine(meta: ChapterMeta): String {
+            val numberPrefix = "${meta.index + 1}. "
+            val cleanTitle = meta.title.trim().takeIf { it.isNotBlank() } ?: "Chapter ${meta.index + 1}"
+            return "$numberPrefix$cleanTitle"
+        }
+
+        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): TocViewHolder {
+            val ctx = parent.context
+            val density = (ctx.resources.displayMetrics.density).takeIf { it > 0f } ?: 2f
+            fun dp(v: Int): Int = (v * density).toInt()
+
+            val row = LinearLayout(ctx).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                minimumHeight = dp(44)
+                layoutParams = RecyclerView.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                ).apply {
+                    setMargins(0, dp(2), 0, dp(2))
+                }
+                setPadding(dp(12), dp(10), dp(12), dp(10))
+                isClickable = true
+                isFocusable = true
+            }
+
+            val lineText = TextView(ctx).apply {
+                textSize = 13f
+                maxLines = 1
+                isSingleLine = true
+                ellipsize = TextUtils.TruncateAt.END
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            }
+            row.addView(lineText)
+
+            val badgeText = TextView(ctx).apply {
+                text = "Current"
+                textSize = 10f
+                typeface = Typeface.DEFAULT_BOLD
+                setTextColor(Color.parseColor("#89B4FA"))
+                background = GradientDrawable().apply {
+                    setColor(Color.parseColor("#181825"))
+                    cornerRadius = 6 * density
+                }
+                setPadding(dp(8), dp(2), dp(8), dp(2))
+                visibility = View.GONE
+            }
+            row.addView(badgeText)
+
+            return TocViewHolder(row, lineText, badgeText)
+        }
+
+        override fun onBindViewHolder(holder: TocViewHolder, position: Int) {
+            val item = items[position]
+            val isCurrent = item.index == currentIndex
+            val density = (holder.itemView.context.resources.displayMetrics.density).takeIf { it > 0f } ?: 2f
+
+            holder.lineText.text = formatTocLine(item)
+            holder.lineText.typeface = if (isCurrent) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
+            holder.lineText.setTextColor(
+                if (isCurrent) Color.parseColor("#89B4FA") else Color.parseColor("#CDD6F4")
+            )
+            holder.badgeText.visibility = if (isCurrent) View.VISIBLE else View.GONE
+
+            holder.row.background = GradientDrawable().apply {
+                setColor(if (isCurrent) Color.parseColor("#313244") else Color.parseColor("#252538"))
+                cornerRadius = 8 * density
+                if (isCurrent) {
+                    setStroke((1.5f * density).toInt().coerceAtLeast(1), Color.parseColor("#89B4FA"))
+                }
+            }
+
+            holder.row.setOnClickListener {
+                onChapterClicked(item)
+            }
+        }
+
+        override fun getItemCount(): Int = items.size
+
+        class TocViewHolder(
+            val row: LinearLayout,
+            val lineText: TextView,
+            val badgeText: TextView
+        ) : RecyclerView.ViewHolder(row)
+    }
 }

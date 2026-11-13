@@ -31,7 +31,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * In-app SAF folder explorer for Reader in :heavy.
+ * In-app SAF folder explorer for Reader in Main process.
  * Navigates folders granted via ACTION_OPEN_DOCUMENT_TREE, filters .epub/.txt books,
  * searches filenames, and imports tapped files cleanly into Room via LibraryRepository.
  */
@@ -39,8 +39,11 @@ class ReaderFolderBrowserView(
     context: Context,
     private val instanceId: String? = null,
     private val onBackToLibrary: () -> Unit,
-    private val onBookImported: (EpubBook) -> Unit
+    private val onBookImported: (EpubBook) -> Unit,
+    private val onRequestWindowFocusable: ((Boolean) -> Unit)? = null
 ) : FrameLayout(context) {
+
+    private val appContext: Context = context
 
     data class FolderEntry(
         val name: String,
@@ -211,6 +214,13 @@ class ReaderFolderBrowserView(
             ).apply {
                 bottomMargin = dp(8)
             }
+            setOnTouchListener { _, _ ->
+                onRequestWindowFocusable?.invoke(true)
+                false
+            }
+            setOnFocusChangeListener { _, hasFocus ->
+                onRequestWindowFocusable?.invoke(hasFocus)
+            }
             addTextChangedListener(object : TextWatcher {
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
                 override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
@@ -328,11 +338,11 @@ class ReaderFolderBrowserView(
         if (top != null) {
             loadDirectory(top)
         } else {
-            loadRootFolder(ReaderFolderPrefs.getFolderUri(context))
+            loadRootFolder(ReaderFolderPrefs.getFolderUri(appContext))
         }
     }
 
-    fun loadRootFolder(uriStr: String? = ReaderFolderPrefs.getFolderUri(context)) {
+    fun loadRootFolder(uriStr: String? = ReaderFolderPrefs.getFolderUri(appContext)) {
         folderStack.clear()
         if (uriStr.isNullOrBlank()) {
             showNoFolderState(
@@ -344,7 +354,7 @@ class ReaderFolderBrowserView(
 
         val uri = try { Uri.parse(uriStr) } catch (_: Throwable) { null }
         val rootDoc = uri?.let {
-            try { DocumentFile.fromTreeUri(context, it) } catch (_: Throwable) { null }
+            try { DocumentFile.fromTreeUri(appContext, it) } catch (_: Throwable) { null }
         }
 
         if (rootDoc == null || !rootDoc.exists() || !rootDoc.canRead()) {
@@ -374,7 +384,7 @@ class ReaderFolderBrowserView(
         listScrollView.visibility = View.VISIBLE
 
         itemsContainer.removeAllViews()
-        itemsContainer.addView(TextView(context).apply {
+        itemsContainer.addView(TextView(appContext).apply {
             text = "Scanning folder..."
             textSize = 12f
             setTextColor(Color.parseColor("#A6ADC8"))
@@ -399,7 +409,7 @@ class ReaderFolderBrowserView(
                         )
                     }
                 } catch (t: Throwable) {
-                    LogKeeper.log(context, "ReaderFolderBrowser", "listFiles error: ${t.message}")
+                    LogKeeper.log(appContext, "ReaderFolderBrowser", "listFiles error: ${t.message}")
                     null
                 }
             }
@@ -439,7 +449,7 @@ class ReaderFolderBrowserView(
             } else {
                 "No matches for '$currentQuery'."
             }
-            itemsContainer.addView(TextView(context).apply {
+            itemsContainer.addView(TextView(appContext).apply {
                 text = msg
                 textSize = 12f
                 setTextColor(Color.parseColor("#A6ADC8"))
@@ -489,7 +499,7 @@ class ReaderFolderBrowserView(
         accent: Boolean,
         onClick: () -> Unit
     ): LinearLayout {
-        return LinearLayout(context).apply {
+        return LinearLayout(appContext).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             minimumHeight = dp(48)
@@ -509,17 +519,17 @@ class ReaderFolderBrowserView(
             isFocusable = true
             setOnClickListener { onClick() }
 
-            addView(TextView(context).apply {
+            addView(TextView(appContext).apply {
                 text = icon
                 textSize = 18f
                 setPadding(0, 0, dp(10), 0)
             })
 
-            val col = LinearLayout(context).apply {
+            val col = LinearLayout(appContext).apply {
                 orientation = LinearLayout.VERTICAL
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
             }
-            col.addView(TextView(context).apply {
+            col.addView(TextView(appContext).apply {
                 text = title
                 textSize = 13f
                 typeface = Typeface.DEFAULT_BOLD
@@ -527,7 +537,7 @@ class ReaderFolderBrowserView(
                 maxLines = 2
                 ellipsize = android.text.TextUtils.TruncateAt.END
             })
-            col.addView(TextView(context).apply {
+            col.addView(TextView(appContext).apply {
                 text = subtitle
                 textSize = 11f
                 setTextColor(Color.parseColor("#A6ADC8"))
@@ -538,22 +548,23 @@ class ReaderFolderBrowserView(
 
     private fun importDocumentFile(name: String, doc: DocumentFile) {
         if (isImporting) {
-            Toast.makeText(context, "Import already in progress...", Toast.LENGTH_SHORT).show()
+            Toast.makeText(appContext, "Import already in progress...", Toast.LENGTH_SHORT).show()
             return
         }
         isImporting = true
-        Toast.makeText(context, "Importing $name...", Toast.LENGTH_SHORT).show()
+        Toast.makeText(appContext, "Importing $name...", Toast.LENGTH_SHORT).show()
 
         viewScope.launch {
             try {
                 val imported = repository.importBook(doc.uri)
                 if (imported != null) {
-                    Toast.makeText(context, "Imported: ${imported.title}", Toast.LENGTH_SHORT).show()
-                    ReaderEventManager.notifyLibraryChanged()
+                    Toast.makeText(appContext, "Imported: ${imported.title}", Toast.LENGTH_SHORT).show()
+                    ReaderEventManager.notifyLibraryChanged(appContext)
                     EmbeddedImeBridge.clearFocusRecursive(this@ReaderFolderBrowserView)
+                    onRequestWindowFocusable?.invoke(false)
                     onBookImported(imported)
                 } else {
-                    Toast.makeText(context, "Failed to import '$name'. File may be corrupted or empty.", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(appContext, "Failed to import '$name'. File may be corrupted or empty.", Toast.LENGTH_SHORT).show()
                 }
             } finally {
                 isImporting = false
@@ -573,25 +584,25 @@ class ReaderFolderBrowserView(
 
     private fun launchFolderTreePicker() {
         try {
-            val intent = Intent(context, ReaderFolderTreeActivity::class.java).apply {
+            val intent = Intent(appContext, ReaderFolderTreeActivity::class.java).apply {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
-            context.startActivity(intent)
+            appContext.startActivity(intent)
         } catch (e: Exception) {
-            LogKeeper.log(context, "ReaderFolderBrowser", "Failed to start ReaderFolderTreeActivity: ${e.message}")
-            Toast.makeText(context, "Cannot open folder picker.", Toast.LENGTH_SHORT).show()
+            LogKeeper.log(appContext, "ReaderFolderBrowser", "Failed to start ReaderFolderTreeActivity: ${e.message}")
+            Toast.makeText(appContext, "Cannot open folder picker.", Toast.LENGTH_SHORT).show()
         }
     }
 
     private fun launchSingleFileFallback() {
         try {
-            val intent = Intent(context, ReaderImportActivity::class.java).apply {
+            val intent = Intent(appContext, ReaderImportActivity::class.java).apply {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
-            context.startActivity(intent)
+            appContext.startActivity(intent)
         } catch (e: Exception) {
-            LogKeeper.log(context, "ReaderFolderBrowser", "Failed to start ReaderImportActivity: ${e.message}")
-            Toast.makeText(context, "Cannot open file picker.", Toast.LENGTH_SHORT).show()
+            LogKeeper.log(appContext, "ReaderFolderBrowser", "Failed to start ReaderImportActivity: ${e.message}")
+            Toast.makeText(appContext, "Cannot open file picker.", Toast.LENGTH_SHORT).show()
         }
     }
 

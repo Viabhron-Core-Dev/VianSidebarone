@@ -661,7 +661,7 @@ class FloatingMiniAppFrameworkTest {
         val instanceId = "close_order_test"
         val snapshot = MiniAppRecoverySnapshot(
             instanceId = instanceId,
-            appType = "reader",
+            appType = "floating_pwa",
             state = MiniAppState.ACTIVE,
             windowBounds = WindowBounds(100, 100, 500, 600)
         )
@@ -681,7 +681,7 @@ class FloatingMiniAppFrameworkTest {
         connManager.setMockProxyForTesting(mockProxy, ConnectionState.CONNECTED)
         connManager.acquireConsumer("miniapp_$instanceId", reason = "test")
 
-        val window = FloatingMiniAppWindow(instanceId, testContext, "reader")
+        val window = FloatingMiniAppWindow(instanceId, testContext, "floating_pwa")
         wm.registerWindow(window)
         assertNotNull(wm.getWindow(instanceId))
 
@@ -769,7 +769,7 @@ class FloatingMiniAppFrameworkTest {
         val instanceId = "fold_persist_test"
         val initialSnapshot = MiniAppRecoverySnapshot(
             instanceId = instanceId,
-            appType = "reader",
+            appType = "floating_pwa",
             state = MiniAppState.ACTIVE,
             windowBounds = WindowBounds(150, 180, 520, 620),
             payload = mutableMapOf("text" to "Durable Note to Fold")
@@ -790,7 +790,7 @@ class FloatingMiniAppFrameworkTest {
         connManager.setMockProxyForTesting(mockProxy, ConnectionState.CONNECTED)
         connManager.acquireConsumer("miniapp_$instanceId", reason = "fold_test")
 
-        val window = FloatingMiniAppWindow(instanceId, testContext, "reader")
+        val window = FloatingMiniAppWindow(instanceId, testContext, "floating_pwa")
         com.example.core.FloatingWindowManager.getInstance(testContext).registerWindow(window)
 
         // Execute sleep / fold
@@ -1771,10 +1771,10 @@ class FloatingMiniAppFrameworkTest {
         val bridge = FloatingMiniAppBridge.getInstance(testContext)
         val connectionManager = HeavyProcessConnectionManager.getInstance(testContext)
 
-        // Confirm bridge recognizes Note as Main-only
+        // Confirm bridge recognizes Note and Reader as Main-only, while Heavy-hosted apps are not
         assertTrue(bridge.isMainOnlyMiniApp("test_notes"))
         assertTrue(bridge.isMainOnlyMiniApp("note"))
-        assertFalse(bridge.isMainOnlyMiniApp("reader"))
+        assertTrue(bridge.isMainOnlyMiniApp("reader"))
         assertFalse(bridge.isMainOnlyMiniApp("speed_monitor"))
 
         // Open Note window

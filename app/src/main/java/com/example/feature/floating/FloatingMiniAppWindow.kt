@@ -241,6 +241,8 @@ class FloatingMiniAppWindow(
 
     private var editPopoverView: View? = null
     private var pwaWindowController: com.example.feature.pwa.floating.FloatingPwaWindowController? = null
+    private var readerInstance: com.example.feature.reader.ReaderMiniAppInstance? = null
+    private var isReaderFocusRequested: Boolean = false
     var currentFontSizeSp: Float = 15f
         private set
     var currentFontStyle: String = "regular"
@@ -317,7 +319,7 @@ class FloatingMiniAppWindow(
             } else if (!isAwaitingImeVisibility && !isAwaitingWindowFocusForIme && !isDiagnosticAwaitingWindowFocus) {
                 val isDiagActive = isDiagnosticMode && (diagnosticEditText?.hasFocus() == true)
                 val isPwaUrlActive = pwaWindowController?.isEditingUrlActive() == true
-                if (!isNoteEditorImeActive && !isDiagActive && !isPwaUrlActive) {
+                if (!isNoteEditorImeActive && !isDiagActive && !isPwaUrlActive && !isReaderFocusRequested) {
                     if ((layoutParams.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE) == 0 && !isResizing && !isDraggingWindow) {
                         layoutParams.flags = layoutParams.flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
                         applyLayoutUpdate()
@@ -327,7 +329,17 @@ class FloatingMiniAppWindow(
         }
     }
 
-    fun isMainOnlyApp(): Boolean = (appType == "note" || appType == "test_notes")
+    fun isNoteApp(): Boolean = (appType == "note" || appType == "test_notes")
+
+    fun isReaderApp(): Boolean = (appType == "reader" || appType == "ebook_reader")
+
+    fun isMainOnlyApp(): Boolean = isNoteApp() || isReaderApp()
+
+    fun getReaderInstanceForTesting(): com.example.feature.reader.ReaderMiniAppInstance? = readerInstance
+
+    fun openReaderBookById(epubBookId: Int) {
+        readerInstance?.openBookById(epubBookId)
+    }
 
     fun getImeBridgeEditTextForTesting(): EditText? = imeBridgeEditText
     fun getFallbackEditTextForTesting(): EditText? = noteEditText
@@ -635,10 +647,12 @@ class FloatingMiniAppWindow(
         container.addView(placeholder)
 
         // 3b. Content Setup:
-        // For Note mini-app ("note" or "test_notes"), host the single authoritative multiline EditText directly in Main.
-        // For non-Note mini-apps (Reader, Floating PWA, etc.), embed Heavy via SurfaceView / SurfaceControlViewHost.
-        if (appType == "note" || appType == "test_notes") {
+        // For Note ("note"/"test_notes") and Reader ("reader"/"ebook_reader"), host UI directly in Main.
+        // For Heavy mini-apps (Floating PWA, etc.), embed Heavy via SurfaceView / SurfaceControlViewHost.
+        if (isNoteApp()) {
             setupNoteContentView(context, container)
+        } else if (isReaderApp()) {
+            setupReaderContentView(context, container)
         } else {
             // Embedded Heavy Content Setup
             setupEmbeddedContent(context, container)
@@ -699,7 +713,7 @@ class FloatingMiniAppWindow(
                 } else if (!isAwaitingImeVisibility && !isAwaitingWindowFocusForIme && !isDiagnosticAwaitingWindowFocus) {
                     val isDiagActive = isDiagnosticMode && (diagnosticEditText?.hasFocus() == true)
                     val isPwaUrlActive = pwaWindowController?.isEditingUrlActive() == true
-                    if (!isNoteEditorImeActive && !isDiagActive && !isPwaUrlActive) {
+                    if (!isNoteEditorImeActive && !isDiagActive && !isPwaUrlActive && !isReaderFocusRequested) {
                         if ((layoutParams.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE) == 0 && !isResizing && !isDraggingWindow) {
                             layoutParams.flags = layoutParams.flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
                             applyLayoutUpdate()
@@ -1576,6 +1590,57 @@ class FloatingMiniAppWindow(
         isContentRevealed = true
     }
 
+    private fun setupReaderContentView(context: Context, container: FrameLayout) {
+        val savedSnapshot = durableStore.loadSnapshot(instanceId)
+        val instance = com.example.feature.reader.ReaderMiniAppInstance(
+            instanceId = instanceId,
+            appType = appType,
+            onRequestWindowFocusable = { focusable ->
+                isReaderFocusRequested = focusable
+                if (focusable) {
+                    manager?.setFocus(windowId)
+                    if (manager?.getTopVisibleWindow()?.windowId != windowId) {
+                        manager?.bringToFront(windowId)
+                    }
+                    val clearedFlags = (layoutParams.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE.inv()) and
+                        WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM.inv()
+                    if (layoutParams.flags != clearedFlags) {
+                        layoutParams.flags = clearedFlags
+                        applyLayoutUpdate()
+                    }
+                } else if (!isNoteEditorImeActive && !isResizing && !isDraggingWindow) {
+                    if ((layoutParams.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE) == 0) {
+                        layoutParams.flags = layoutParams.flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                        applyLayoutUpdate()
+                    }
+                }
+            },
+            onActiveBookChanged = { activeBook ->
+                val newTitle = if (activeBook != null && activeBook.title.isNotBlank()) {
+                    "Reader • ${activeBook.title}"
+                } else {
+                    "Reader"
+                }
+                windowTitle = newTitle
+                titleView?.text = newTitle
+            }
+        )
+        readerInstance = instance
+        instance.onCreate(savedSnapshot)
+        val readerView = instance.createContentView(context)
+        instance.onStart()
+        instance.onResume()
+
+        container.addView(readerView)
+        contentPlaceholderView?.visibility = View.GONE
+        isContentRevealed = true
+        LogKeeper.log(
+            context,
+            "FloatingMiniAppWindow",
+            "CONTENT_CREATED id=$instanceId mode=main_native_reader appType=$appType"
+        )
+    }
+
     private fun applyFormattingToNoteEditor() {
         val editor = noteEditText ?: return
         editor.textSize = currentFontSizeSp
@@ -2140,8 +2205,8 @@ class FloatingMiniAppWindow(
         }
         bar.addView(titleView)
 
-        // Single "Edit" button for Note mini-app (opens formatting, copy, and accent options popover)
-        if (appType == "note" || appType == "test_notes") {
+        // "Edit" button for Note mini-app (opens formatting popover) and Reader mini-app (opens Heavy Tracker editor for current book)
+        if (isNoteApp() || isReaderApp()) {
             val editBg = GradientDrawable().apply {
                 shape = GradientDrawable.RECTANGLE
                 cornerRadius = 4 * density
@@ -2159,7 +2224,16 @@ class FloatingMiniAppWindow(
                 background = editBg
                 setPadding((8 * density).toInt(), (3 * density).toInt(), (8 * density).toInt(), (3 * density).toInt())
                 setOnClickListener {
-                    toggleEditPopover()
+                    if (isReaderApp()) {
+                        val activeBookId = readerInstance?.getCurrentBookId() ?: -1
+                        if (activeBookId > 0) {
+                            com.example.feature.reader.BookTrackerActivity.launchForEpubBook(context, activeBookId)
+                        } else {
+                            com.example.feature.reader.BookTrackerActivity.launch(context)
+                        }
+                    } else {
+                        toggleEditPopover()
+                    }
                 }
             }
             topBarEditBtn = editBtn
@@ -3236,6 +3310,9 @@ class FloatingMiniAppWindow(
     }
 
     fun getCurrentPayload(): Map<String, String> {
+        if (isReaderApp()) {
+            return readerInstance?.onSaveState() ?: emptyMap()
+        }
         val authoritativeText = when (activeTextAuthority) {
             TextAuthority.IME_BRIDGE -> imeBridgeEditText?.text?.toString() ?: currentNoteText
             TextAuthority.FALLBACK -> noteEditText?.text?.toString() ?: currentNoteText
@@ -3268,7 +3345,7 @@ class FloatingMiniAppWindow(
                     TextAuthority.NONE -> "default"
                 }
             )
-            if (isMainOnlyApp()) {
+            if (isNoteApp()) {
                 baseMap[NotePersistenceCoordinator.KEY_UNDO_HISTORY] = notePersistence.serializeHistory(notePersistence.undoStack)
                 baseMap[NotePersistenceCoordinator.KEY_REDO_HISTORY] = notePersistence.serializeHistory(notePersistence.redoStack)
             }
@@ -3278,30 +3355,59 @@ class FloatingMiniAppWindow(
         }
     }
 
-    fun flushPendingSave(targetState: MiniAppState? = null): Boolean {
-        return if (isMainOnlyApp()) {
-            val normalBoundsToSave = if (!isMaximized) {
-                normalFloatingBounds.copyBounds()
-            } else {
-                maximizeRestoreBounds?.copyBounds() ?: normalFloatingBounds.copyBounds()
-            }
-            notePersistence.updateStateSnapshot(
-                text = currentNoteText,
-                fontSize = currentFontSizeSp,
-                fontStyle = currentFontStyle,
-                wordWrap = currentWordWrap,
-                lineSpacing = currentLineSpacingMult,
-                bounds = normalBoundsToSave,
-                accentColor = currentAccentColorHex
-            )
-            notePersistence.flushPendingSave(targetState = targetState)
+    private fun saveReaderSnapshotInternal(targetState: MiniAppState?): Boolean {
+        val normalBoundsToSave = if (!isMaximized) {
+            normalFloatingBounds.copyBounds()
         } else {
-            false
+            maximizeRestoreBounds?.copyBounds() ?: normalFloatingBounds.copyBounds()
+        }
+        val readerPayload = if (targetState == MiniAppState.SLEEPING) {
+            readerInstance?.prepareForSleep() ?: readerInstance?.onSaveState() ?: emptyMap()
+        } else {
+            readerInstance?.onSaveState() ?: emptyMap()
+        }
+        val snapshot = durableStore.loadSnapshot(instanceId) ?: MiniAppRecoverySnapshot(
+            instanceId = instanceId,
+            appType = appType,
+            state = targetState ?: MiniAppState.ACTIVE,
+            windowBounds = normalBoundsToSave
+        )
+        if (targetState != null) {
+            snapshot.state = targetState
+        }
+        snapshot.windowBounds = normalBoundsToSave
+        snapshot.payload.putAll(readerPayload)
+        return durableStore.saveSnapshot(snapshot)
+    }
+
+    fun flushPendingSave(targetState: MiniAppState? = null): Boolean {
+        return when {
+            isNoteApp() -> {
+                val normalBoundsToSave = if (!isMaximized) {
+                    normalFloatingBounds.copyBounds()
+                } else {
+                    maximizeRestoreBounds?.copyBounds() ?: normalFloatingBounds.copyBounds()
+                }
+                notePersistence.updateStateSnapshot(
+                    text = currentNoteText,
+                    fontSize = currentFontSizeSp,
+                    fontStyle = currentFontStyle,
+                    wordWrap = currentWordWrap,
+                    lineSpacing = currentLineSpacingMult,
+                    bounds = normalBoundsToSave,
+                    accentColor = currentAccentColorHex
+                )
+                notePersistence.flushPendingSave(targetState = targetState)
+            }
+            isReaderApp() -> {
+                saveReaderSnapshotInternal(targetState)
+            }
+            else -> false
         }
     }
 
     /**
-     * Non-blocking asynchronous flush delegating directly to NotePersistenceCoordinator.
+     * Non-blocking asynchronous flush delegating directly to NotePersistenceCoordinator (or Reader snapshot save).
      * Guarantees callback is dispatched on the Android main thread.
      */
     fun flushPendingSaveAsync(
@@ -3309,24 +3415,35 @@ class FloatingMiniAppWindow(
         targetState: MiniAppState? = null,
         onComplete: (Boolean) -> Unit
     ) {
-        if (isMainOnlyApp()) {
-            val normalBoundsToSave = if (!isMaximized) {
-                normalFloatingBounds.copyBounds()
-            } else {
-                maximizeRestoreBounds?.copyBounds() ?: normalFloatingBounds.copyBounds()
+        when {
+            isNoteApp() -> {
+                val normalBoundsToSave = if (!isMaximized) {
+                    normalFloatingBounds.copyBounds()
+                } else {
+                    maximizeRestoreBounds?.copyBounds() ?: normalFloatingBounds.copyBounds()
+                }
+                notePersistence.updateStateSnapshot(
+                    text = currentNoteText,
+                    fontSize = currentFontSizeSp,
+                    fontStyle = currentFontStyle,
+                    wordWrap = currentWordWrap,
+                    lineSpacing = currentLineSpacingMult,
+                    bounds = normalBoundsToSave,
+                    accentColor = currentAccentColorHex
+                )
+                notePersistence.flushPendingSaveAsync(timeoutMs, targetState, onComplete)
             }
-            notePersistence.updateStateSnapshot(
-                text = currentNoteText,
-                fontSize = currentFontSizeSp,
-                fontStyle = currentFontStyle,
-                wordWrap = currentWordWrap,
-                lineSpacing = currentLineSpacingMult,
-                bounds = normalBoundsToSave,
-                accentColor = currentAccentColorHex
-            )
-            notePersistence.flushPendingSaveAsync(timeoutMs, targetState, onComplete)
-        } else {
-            onComplete(false)
+            isReaderApp() -> {
+                val ok = saveReaderSnapshotInternal(targetState)
+                if (Looper.myLooper() == Looper.getMainLooper()) {
+                    onComplete(ok)
+                } else {
+                    mainHandler.post { onComplete(ok) }
+                }
+            }
+            else -> {
+                onComplete(false)
+            }
         }
     }
 
@@ -3340,6 +3457,9 @@ class FloatingMiniAppWindow(
     override fun onShow() {
         super.onShow()
         if (isMainOnlyApp()) {
+            if (isReaderApp()) {
+                readerInstance?.onResume()
+            }
             LogKeeper.log(context, "FloatingMiniAppWindow", "ON_SHOW_MAIN_ONLY id=$instanceId appType=$appType (skipping Heavy)")
             return
         }
@@ -3388,8 +3508,10 @@ class FloatingMiniAppWindow(
         pwaWindowController?.clearUrlBarFocus()
         deactivateEmbeddedEditorIme()
         if (isMainOnlyApp()) {
-            if (notePersistence.hasPendingEdits()) {
+            if (isNoteApp() && notePersistence.hasPendingEdits()) {
                 notePersistence.scheduleDebouncedSave(0L)
+            } else if (isReaderApp()) {
+                readerInstance?.onPause()
             }
             LogKeeper.log(context, "FloatingMiniAppWindow", "ON_HIDE_MAIN_ONLY id=$instanceId appType=$appType (skipping Heavy)")
             return
@@ -3431,11 +3553,14 @@ class FloatingMiniAppWindow(
         pwaWindowController?.release()
         pwaWindowController = null
         deactivateEmbeddedEditorIme()
-        if (isMainOnlyApp()) {
+        if (isNoteApp()) {
             // Teardown is idempotent: only schedule write if there are uncommitted pending edits
             if (notePersistence.hasPendingEdits()) {
                 notePersistence.scheduleDebouncedSave(0L)
             }
+        } else if (isReaderApp()) {
+            readerInstance?.onDestroy()
+            readerInstance = null
         }
         if (!isMainOnlyApp()) {
             HeavyProcessConnectionManager.getInstance(context).removeListener(connectionListener)
@@ -3445,7 +3570,7 @@ class FloatingMiniAppWindow(
         }
         globalLayoutListener = null
 
-        // For non-Main apps only: Main-only apps are authoritatively persisted by NotePersistenceCoordinator
+        // For non-Main apps only: Main-only apps are authoritatively persisted by NotePersistenceCoordinator or Reader flush
         if (!isMainOnlyApp()) {
             val payload = getCurrentPayload()
             if (payload.isNotEmpty()) {

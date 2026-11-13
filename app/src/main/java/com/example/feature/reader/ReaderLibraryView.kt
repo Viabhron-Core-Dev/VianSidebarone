@@ -9,9 +9,10 @@ import android.graphics.drawable.GradientDrawable
 import android.text.Editable
 import android.text.TextWatcher
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
+import android.view.inputmethod.InputMethodManager
 import android.widget.Button
-import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
@@ -37,15 +38,23 @@ import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 
 /**
- * ReaderLibraryView: The library shelf interface hosted inside the floating Reader mini-app.
- * Displays recent and imported books, reading progress, search filtering, and import affordances.
+ * ReaderLibraryView: The Main-process library shelf interface hosted inside the floating Reader mini-app.
+ *
+ * Implements:
+ * 1. Default **Recent** landing view: shows at most the last 10 distinct opened Reader books,
+ *    ordered strictly by `EpubBook.lastOpenedTimestamp DESC` (never by Tracker metadata edit time).
+ * 2. Separate **All Books** view: contains every imported EPUB/TXT source without any 10- or 20-book cap.
+ * 3. Search filtering by title or author, SAF folder browser entry, file import, and Tracker entry.
  */
 class ReaderLibraryView(
     context: Context,
     private val instanceId: String? = null,
+    private val onRequestWindowFocusable: ((Boolean) -> Unit)? = null,
     private val onOpenFolderBrowser: (() -> Unit)? = null,
     private val onBookSelected: (EpubBook) -> Unit
 ) : FrameLayout(context) {
+
+    private val appContext: Context = context
 
     private val density: Float = (context.resources.displayMetrics.density).takeIf { it > 0f } ?: 2f
     private fun dp(v: Int): Int = (v * density).toInt()
@@ -54,11 +63,19 @@ class ReaderLibraryView(
     private val viewScope = CoroutineScope(SupervisorJob() + ReaderDispatchers.main)
     private val repository = LibraryRepository(context)
 
+    var activeTab: ReaderLibraryTab = ReaderLibraryTab.RECENT
+        private set
+
+    private val recentTabButton: Button
+    private val allBooksTabButton: Button
     private val booksContainer: LinearLayout
     private val emptyStateContainer: LinearLayout
+    private val emptyTitleView: TextView
+    private val emptySubTitleView: TextView
     private val searchBox: com.example.feature.floating.EmbeddedInputEditText
     private val bookListScrollView: ScrollView
 
+    private var recentBooks = listOf<EpubBook>()
     private var allBooks = listOf<EpubBook>()
     private var currentFilterQuery = ""
 
@@ -67,29 +84,54 @@ class ReaderLibraryView(
     }
 
     init {
-        setBackgroundColor(Color.parseColor("#181825")) // Catppuccin Base
+        setBackgroundColor(Color.parseColor("#181825"))
 
         val rootLayout = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
-            setPadding(dp(10), dp(10), dp(10), dp(10))
+            setPadding(dp(10), dp(8), dp(10), dp(42)) // 42dp bottom clearance for [ ×  —  ↘ ] sticker
         }
 
         // --- Header Bar ---
         val headerBar = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(4), dp(4), dp(4), dp(8))
+            setPadding(dp(4), dp(2), dp(4), dp(6))
         }
 
         val titleView = TextView(context).apply {
             text = "eBook Reader"
-            textSize = 16f
+            textSize = 15f
             typeface = Typeface.DEFAULT_BOLD
-            setTextColor(Color.parseColor("#CDD6F4")) // Text color
+            setTextColor(Color.parseColor("#CDD6F4"))
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         }
         headerBar.addView(titleView)
+
+        val trackerButton = Button(context).apply {
+            text = "📊 Tracker"
+            textSize = 11f
+            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(Color.parseColor("#CBA6F7"))
+            minHeight = dp(36)
+            minimumHeight = dp(36)
+            background = GradientDrawable().apply {
+                setColor(Color.parseColor("#313244"))
+                cornerRadius = dpF(8f)
+            }
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                marginEnd = dp(6)
+            }
+            setPadding(dp(8), dp(2), dp(8), dp(2))
+            setOnClickListener {
+                clearSearchFocus()
+                BookTrackerActivity.launch(context)
+            }
+        }
+        headerBar.addView(trackerButton)
 
         if (onOpenFolderBrowser != null) {
             val folderButton = Button(context).apply {
@@ -97,11 +139,11 @@ class ReaderLibraryView(
                 textSize = 11f
                 typeface = Typeface.DEFAULT_BOLD
                 setTextColor(Color.parseColor("#CDD6F4"))
-                minHeight = dp(40)
-                minimumHeight = dp(40)
+                minHeight = dp(36)
+                minimumHeight = dp(36)
                 background = GradientDrawable().apply {
                     setColor(Color.parseColor("#313244"))
-                    cornerRadius = dpF(10f)
+                    cornerRadius = dpF(8f)
                 }
                 layoutParams = LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.WRAP_CONTENT,
@@ -109,9 +151,9 @@ class ReaderLibraryView(
                 ).apply {
                     marginEnd = dp(6)
                 }
-                setPadding(dp(10), dp(4), dp(10), dp(4))
+                setPadding(dp(8), dp(2), dp(8), dp(2))
                 setOnClickListener {
-                    searchBox.clearFocus()
+                    clearSearchFocus()
                     onOpenFolderBrowser.invoke()
                 }
             }
@@ -123,23 +165,71 @@ class ReaderLibraryView(
             textSize = 11f
             typeface = Typeface.DEFAULT_BOLD
             setTextColor(Color.WHITE)
-            minHeight = dp(40)
-            minimumHeight = dp(40)
+            minHeight = dp(36)
+            minimumHeight = dp(36)
             background = GradientDrawable().apply {
-                setColor(Color.parseColor("#89B4FA")) // Blue accent
-                cornerRadius = dpF(10f)
+                setColor(Color.parseColor("#89B4FA"))
+                cornerRadius = dpF(8f)
             }
-            setPadding(dp(12), dp(4), dp(12), dp(4))
+            setPadding(dp(10), dp(2), dp(10), dp(2))
             setOnClickListener {
+                clearSearchFocus()
                 launchImportActivity()
             }
         }
         headerBar.addView(importButton)
         rootLayout.addView(headerBar)
 
+        // --- Segmented Tab Bar: Recent (Last 10) vs All Books ---
+        val tabBar = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            background = GradientDrawable().apply {
+                setColor(Color.parseColor("#1E1E2E"))
+                cornerRadius = dpF(10f)
+                setStroke(1, Color.parseColor("#313244"))
+            }
+            setPadding(dp(3), dp(3), dp(3), dp(3))
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                setMargins(dp(4), 0, dp(4), dp(6))
+            }
+        }
+
+        recentTabButton = Button(context).apply {
+            text = "Recent (0)"
+            textSize = 12f
+            typeface = Typeface.DEFAULT_BOLD
+            minHeight = dp(34)
+            minimumHeight = dp(34)
+            setPadding(dp(8), dp(2), dp(8), dp(2))
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            setOnClickListener {
+                selectTab(ReaderLibraryTab.RECENT)
+            }
+        }
+        tabBar.addView(recentTabButton)
+
+        allBooksTabButton = Button(context).apply {
+            text = "All Books (0)"
+            textSize = 12f
+            typeface = Typeface.DEFAULT_BOLD
+            minHeight = dp(34)
+            minimumHeight = dp(34)
+            setPadding(dp(8), dp(2), dp(8), dp(2))
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            setOnClickListener {
+                selectTab(ReaderLibraryTab.ALL_BOOKS)
+            }
+        }
+        tabBar.addView(allBooksTabButton)
+        rootLayout.addView(tabBar)
+
         // --- Search Bar ---
         searchBox = com.example.feature.floating.EmbeddedInputEditText(context) { instanceId }.apply {
-            hint = "Search library..."
+            hint = "Search by title or author..."
             setHintTextColor(Color.parseColor("#6C7086"))
             setTextColor(Color.WHITE)
             textSize = 13f
@@ -153,7 +243,18 @@ class ReaderLibraryView(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
             ).apply {
-                setMargins(dp(4), 0, dp(4), dp(8))
+                setMargins(dp(4), 0, dp(4), dp(6))
+            }
+            setOnTouchListener { v, event ->
+                if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+                    onRequestWindowFocusable?.invoke(true)
+                    v.post {
+                        v.requestFocus()
+                        val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+                        imm?.showSoftInput(v, InputMethodManager.SHOW_IMPLICIT)
+                    }
+                }
+                false
             }
             addTextChangedListener(object : TextWatcher {
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
@@ -192,54 +293,54 @@ class ReaderLibraryView(
                 0,
                 1f
             )
-            setPadding(dp(20), dp(20), dp(20), dp(20))
+            setPadding(dp(16), dp(12), dp(16), dp(12))
         }
 
         val emptyIcon = ImageView(context).apply {
             setImageResource(com.example.R.drawable.ic_library_books)
             setColorFilter(Color.parseColor("#89B4FA"))
-            layoutParams = LinearLayout.LayoutParams(dp(56), dp(56)).apply {
-                bottomMargin = dp(12)
+            layoutParams = LinearLayout.LayoutParams(dp(48), dp(48)).apply {
+                bottomMargin = dp(10)
             }
         }
         emptyStateContainer.addView(emptyIcon)
 
-        val emptyText = TextView(context).apply {
-            text = "Your library is empty"
-            textSize = 16f
+        emptyTitleView = TextView(context).apply {
+            text = "No recently opened books"
+            textSize = 15f
             typeface = Typeface.DEFAULT_BOLD
             setTextColor(Color.parseColor("#CDD6F4"))
             gravity = Gravity.CENTER
         }
-        emptyStateContainer.addView(emptyText)
+        emptyStateContainer.addView(emptyTitleView)
 
-        val emptySubText = TextView(context).apply {
-            text = "Browse a folder or import EPUB / TXT books to start reading in this floating window"
+        emptySubTitleView = TextView(context).apply {
+            text = "Open a book from All Books, browse a folder, or import an EPUB / TXT file."
             textSize = 12f
             setTextColor(Color.parseColor("#A6ADC8"))
             gravity = Gravity.CENTER
-            setPadding(dp(12), dp(6), dp(12), dp(16))
+            setPadding(dp(12), dp(4), dp(12), dp(14))
         }
-        emptyStateContainer.addView(emptySubText)
+        emptyStateContainer.addView(emptySubTitleView)
 
         if (onOpenFolderBrowser != null) {
             val emptyFolderButton = Button(context).apply {
                 text = "📁 Browse Books Folder"
-                textSize = 13f
+                textSize = 12f
                 typeface = Typeface.DEFAULT_BOLD
                 setTextColor(Color.WHITE)
-                minHeight = dp(44)
-                minimumHeight = dp(44)
+                minHeight = dp(42)
+                minimumHeight = dp(42)
                 background = GradientDrawable().apply {
                     setColor(Color.parseColor("#89B4FA"))
                     cornerRadius = dpF(10f)
                 }
-                setPadding(dp(20), dp(8), dp(20), dp(8))
+                setPadding(dp(18), dp(6), dp(18), dp(6))
                 layoutParams = LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.WRAP_CONTENT,
                     LinearLayout.LayoutParams.WRAP_CONTENT
                 ).apply {
-                    bottomMargin = dp(10)
+                    bottomMargin = dp(8)
                 }
                 setOnClickListener {
                     onOpenFolderBrowser.invoke()
@@ -250,29 +351,28 @@ class ReaderLibraryView(
 
         val emptyImportButton = Button(context).apply {
             text = "+ Import Book File"
-            textSize = 13f
+            textSize = 12f
             typeface = Typeface.DEFAULT_BOLD
             setTextColor(Color.WHITE)
-            minHeight = dp(44)
-            minimumHeight = dp(44)
+            minHeight = dp(42)
+            minimumHeight = dp(42)
             background = GradientDrawable().apply {
                 setColor(Color.parseColor(if (onOpenFolderBrowser != null) "#313244" else "#89B4FA"))
                 cornerRadius = dpF(10f)
             }
-            setPadding(dp(20), dp(8), dp(20), dp(8))
+            setPadding(dp(18), dp(6), dp(18), dp(6))
             setOnClickListener {
                 launchImportActivity()
             }
         }
         emptyStateContainer.addView(emptyImportButton)
 
-        // Sample Classic loader button for instant out-of-the-box demonstration
         val sampleButton = Button(context).apply {
             text = "Load Sample Classic"
-            textSize = 12f
+            textSize = 11f
             setTextColor(Color.parseColor("#89B4FA"))
-            minHeight = dp(40)
-            minimumHeight = dp(40)
+            minHeight = dp(38)
+            minimumHeight = dp(38)
             background = GradientDrawable().apply {
                 setColor(Color.TRANSPARENT)
                 setStroke(dp(1).coerceAtLeast(1), Color.parseColor("#45475A"))
@@ -282,9 +382,9 @@ class ReaderLibraryView(
                 LinearLayout.LayoutParams.WRAP_CONTENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
             ).apply {
-                topMargin = dp(10)
+                topMargin = dp(8)
             }
-            setPadding(dp(16), dp(6), dp(16), dp(6))
+            setPadding(dp(14), dp(4), dp(14), dp(4))
             setOnClickListener {
                 loadBundledSampleBook()
             }
@@ -294,39 +394,121 @@ class ReaderLibraryView(
         rootLayout.addView(emptyStateContainer)
         addView(rootLayout)
 
+        updateTabVisuals()
         ReaderEventManager.registerListener(eventListener)
         loadBooks()
     }
 
+    fun selectTab(tab: ReaderLibraryTab) {
+        activeTab = tab
+        updateTabVisuals()
+        renderBooksList()
+    }
+
+    private fun updateTabVisuals() {
+        val isRecent = activeTab == ReaderLibraryTab.RECENT
+        recentTabButton.text = "Recent (${recentBooks.size})"
+        allBooksTabButton.text = "All Books (${allBooks.size})"
+
+        recentTabButton.background = GradientDrawable().apply {
+            setColor(Color.parseColor(if (isRecent) "#89B4FA" else "#1E1E2E"))
+            cornerRadius = dpF(8f)
+        }
+        recentTabButton.setTextColor(if (isRecent) Color.parseColor("#11111B") else Color.parseColor("#A6ADC8"))
+
+        allBooksTabButton.background = GradientDrawable().apply {
+            setColor(Color.parseColor(if (!isRecent) "#89B4FA" else "#1E1E2E"))
+            cornerRadius = dpF(8f)
+        }
+        allBooksTabButton.setTextColor(if (!isRecent) Color.parseColor("#11111B") else Color.parseColor("#A6ADC8"))
+    }
+
+    private fun clearSearchFocus() {
+        searchBox.clearFocus()
+        onRequestWindowFocusable?.invoke(false)
+    }
+
     fun loadBooks() {
         viewScope.launch {
-            allBooks = repository.getBooks()
-            renderBooksList()
+            try {
+                recentBooks = repository.getRecentBooks()
+                allBooks = repository.getAllBooks()
+                updateTabVisuals()
+                renderBooksList()
+            } catch (_: Throwable) {}
         }
     }
 
     private fun renderBooksList() {
         booksContainer.removeAllViews()
 
+        val sourceList = when (activeTab) {
+            ReaderLibraryTab.RECENT -> recentBooks
+            ReaderLibraryTab.ALL_BOOKS -> allBooks
+        }
+
         val filtered = if (currentFilterQuery.isBlank()) {
-            allBooks
+            sourceList
         } else {
-            allBooks.filter { it.title.contains(currentFilterQuery, ignoreCase = true) }
+            sourceList.filter {
+                it.title.contains(currentFilterQuery, ignoreCase = true) ||
+                    it.author.contains(currentFilterQuery, ignoreCase = true)
+            }
         }
 
         if (filtered.isEmpty()) {
-            if (allBooks.isEmpty()) {
-                emptyStateContainer.visibility = View.VISIBLE
-                bookListScrollView.visibility = View.GONE
+            if (sourceList.isEmpty()) {
+                if (activeTab == ReaderLibraryTab.RECENT && allBooks.isNotEmpty()) {
+                    // Imported books exist in All Books, but none opened yet
+                    emptyStateContainer.visibility = View.GONE
+                    bookListScrollView.visibility = View.VISIBLE
+                    val promptCard = LinearLayout(appContext).apply {
+                        orientation = LinearLayout.VERTICAL
+                        gravity = Gravity.CENTER
+                        setPadding(dp(16), dp(28), dp(16), dp(28))
+                    }
+                    val msg = TextView(appContext).apply {
+                        text = "No recently opened books yet.\nYou have ${allBooks.size} imported book(s) in All Books."
+                        textSize = 13f
+                        setTextColor(Color.parseColor("#A6ADC8"))
+                        gravity = Gravity.CENTER
+                        setPadding(0, 0, 0, dp(12))
+                    }
+                    promptCard.addView(msg)
+                    val switchBtn = Button(appContext).apply {
+                        text = "Open All Books (${allBooks.size})"
+                        textSize = 12f
+                        typeface = Typeface.DEFAULT_BOLD
+                        setTextColor(Color.parseColor("#11111B"))
+                        background = GradientDrawable().apply {
+                            setColor(Color.parseColor("#89B4FA"))
+                            cornerRadius = dpF(8f)
+                        }
+                        setPadding(dp(16), dp(6), dp(16), dp(6))
+                        setOnClickListener {
+                            selectTab(ReaderLibraryTab.ALL_BOOKS)
+                        }
+                    }
+                    promptCard.addView(switchBtn)
+                    booksContainer.addView(promptCard)
+                } else {
+                    emptyTitleView.text = if (activeTab == ReaderLibraryTab.RECENT) {
+                        "No recently opened books"
+                    } else {
+                        "Your library is empty"
+                    }
+                    emptyStateContainer.visibility = View.VISIBLE
+                    bookListScrollView.visibility = View.GONE
+                }
             } else {
                 emptyStateContainer.visibility = View.GONE
                 bookListScrollView.visibility = View.VISIBLE
-                val noMatchView = TextView(context).apply {
+                val noMatchView = TextView(appContext).apply {
                     text = "No books matching '$currentFilterQuery'"
                     textSize = 13f
                     setTextColor(Color.parseColor("#A6ADC8"))
                     gravity = Gravity.CENTER
-                    setPadding(16, 48, 16, 16)
+                    setPadding(dp(16), dp(36), dp(16), dp(16))
                 }
                 booksContainer.addView(noMatchView)
             }
@@ -339,12 +521,12 @@ class ReaderLibraryView(
         val dateFormat = SimpleDateFormat("MMM d, yyyy", Locale.getDefault())
 
         for (book in filtered) {
-            val bookCard = LinearLayout(context).apply {
+            val bookCard = LinearLayout(appContext).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
                 minimumHeight = dp(60)
                 background = GradientDrawable().apply {
-                    setColor(Color.parseColor("#1E1E2E")) // Surface
+                    setColor(Color.parseColor("#1E1E2E"))
                     cornerRadius = dpF(10f)
                     setStroke(1, Color.parseColor("#313244"))
                 }
@@ -358,13 +540,13 @@ class ReaderLibraryView(
                 isClickable = true
                 isFocusable = true
                 setOnClickListener {
-                    searchBox.clearFocus()
+                    clearSearchFocus()
                     onBookSelected(book)
                 }
             }
 
             // Left book badge
-            val bookBadge = TextView(context).apply {
+            val bookBadge = TextView(appContext).apply {
                 text = book.title.take(1).uppercase()
                 textSize = 15f
                 typeface = Typeface.DEFAULT_BOLD
@@ -389,12 +571,12 @@ class ReaderLibraryView(
             bookCard.addView(bookBadge)
 
             // Center details
-            val detailsLayout = LinearLayout(context).apply {
+            val detailsLayout = LinearLayout(appContext).apply {
                 orientation = LinearLayout.VERTICAL
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
             }
 
-            val titleView = TextView(context).apply {
+            val titleView = TextView(appContext).apply {
                 text = book.title
                 textSize = 14f
                 typeface = Typeface.DEFAULT_BOLD
@@ -404,11 +586,22 @@ class ReaderLibraryView(
             }
             detailsLayout.addView(titleView)
 
+            if (book.author.isNotBlank()) {
+                val authorView = TextView(appContext).apply {
+                    text = book.author
+                    textSize = 11f
+                    setTextColor(Color.parseColor("#89B4FA"))
+                    maxLines = 1
+                    ellipsize = android.text.TextUtils.TruncateAt.END
+                }
+                detailsLayout.addView(authorView)
+            }
+
             val totalCh = book.totalChapters.coerceAtLeast(1)
-            val currentCh = (book.lastReadChapter + 1).coerceAtMost(totalCh)
+            val currentCh = (book.lastReadChapter + 1).coerceIn(1, totalCh)
             val progressPercent = ((currentCh.toFloat() / totalCh.toFloat()) * 100).toInt()
 
-            val progressText = TextView(context).apply {
+            val progressText = TextView(appContext).apply {
                 text = if (book.isParsed) {
                     "Ch. $currentCh of $totalCh • $progressPercent%"
                 } else {
@@ -420,8 +613,7 @@ class ReaderLibraryView(
             }
             detailsLayout.addView(progressText)
 
-            // Progress bar
-            val progressBar = ProgressBar(context, null, android.R.attr.progressBarStyleHorizontal).apply {
+            val progressBar = ProgressBar(appContext, null, android.R.attr.progressBarStyleHorizontal).apply {
                 max = 100
                 progress = progressPercent
                 progressDrawable?.setColorFilter(Color.parseColor("#89B4FA"), android.graphics.PorterDuff.Mode.SRC_IN)
@@ -435,8 +627,12 @@ class ReaderLibraryView(
             }
             detailsLayout.addView(progressBar)
 
-            val dateText = TextView(context).apply {
-                text = "Opened ${dateFormat.format(Date(book.lastOpenedTimestamp))}"
+            val dateText = TextView(appContext).apply {
+                text = if (book.lastOpenedTimestamp > 0L) {
+                    "Opened ${dateFormat.format(Date(book.lastOpenedTimestamp))}"
+                } else {
+                    "Added ${dateFormat.format(Date(book.addedTimestamp))}"
+                }
                 textSize = 10f
                 setTextColor(Color.parseColor("#6C7086"))
             }
@@ -445,7 +641,7 @@ class ReaderLibraryView(
             bookCard.addView(detailsLayout)
 
             // Right delete button (44dp touch target)
-            val deleteButton = Button(context).apply {
+            val deleteButton = Button(appContext).apply {
                 text = "✕"
                 textSize = 13f
                 setTextColor(Color.parseColor("#F38BA8"))
@@ -469,9 +665,9 @@ class ReaderLibraryView(
 
     private fun showDeleteConfirmation(book: EpubBook) {
         try {
-            AlertDialog.Builder(context)
+            AlertDialog.Builder(appContext)
                 .setTitle("Delete Book")
-                .setMessage("Remove '${book.title}' and its saved reading progress from your library?")
+                .setMessage("Remove '${book.title}' from Reader? (Linked Book Tracker history will be kept.)")
                 .setPositiveButton("Delete") { _, _ ->
                     viewScope.launch {
                         repository.deleteBook(book)
@@ -481,7 +677,6 @@ class ReaderLibraryView(
                 .setNegativeButton("Cancel", null)
                 .show()
         } catch (_: Throwable) {
-            // Direct delete if Dialog cannot attach to window token
             viewScope.launch {
                 repository.deleteBook(book)
                 loadBooks()
@@ -491,45 +686,40 @@ class ReaderLibraryView(
 
     private fun launchImportActivity() {
         try {
-            val intent = Intent(context, ReaderImportActivity::class.java).apply {
+            val intent = Intent(appContext, ReaderImportActivity::class.java).apply {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
-            context.startActivity(intent)
+            appContext.startActivity(intent)
         } catch (e: Exception) {
-            LogKeeper.log(context, "ReaderLibraryView", "Failed to start ReaderImportActivity: ${e.message}")
-            Toast.makeText(context, "Cannot open file picker.", Toast.LENGTH_SHORT).show()
+            LogKeeper.log(appContext, "ReaderLibraryView", "Failed to start ReaderImportActivity: ${e.message}")
+            Toast.makeText(appContext, "Cannot open file picker.", Toast.LENGTH_SHORT).show()
         }
     }
 
     private fun loadBundledSampleBook() {
         viewScope.launch {
-            Toast.makeText(context, "Creating sample classic...", Toast.LENGTH_SHORT).show()
+            Toast.makeText(appContext, "Creating sample classic...", Toast.LENGTH_SHORT).show()
             val sampleEpub = withContext(Dispatchers.IO) {
                 createSampleClassicEpub()
             }
             if (sampleEpub != null) {
-                repository.importBookFile(sampleEpub, "The Time Machine")
+                repository.importBookFile(sampleEpub, "The Time Machine", markOpenedOnImport = true)
                 loadBooks()
-                Toast.makeText(context, "Sample loaded!", Toast.LENGTH_SHORT).show()
+                Toast.makeText(appContext, "Sample loaded!", Toast.LENGTH_SHORT).show()
             }
         }
     }
 
-    /**
-     * Generates a valid sample EPUB on the fly with proper OPF and chapters to test immediately.
-     */
     private fun createSampleClassicEpub(): File? {
         return try {
-            val sampleFile = File(context.cacheDir, "sample_the_time_machine.epub")
+            val sampleFile = File(appContext.cacheDir, "sample_the_time_machine.epub")
             if (sampleFile.exists()) sampleFile.delete()
 
             ZipOutputStream(FileOutputStream(sampleFile)).use { zos ->
-                // mimetype
                 zos.putNextEntry(ZipEntry("mimetype"))
                 zos.write("application/epub+zip".toByteArray())
                 zos.closeEntry()
 
-                // META-INF/container.xml
                 zos.putNextEntry(ZipEntry("META-INF/container.xml"))
                 val containerXml = """<?xml version="1.0" encoding="UTF-8"?>
 <container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
@@ -540,7 +730,6 @@ class ReaderLibraryView(
                 zos.write(containerXml.toByteArray())
                 zos.closeEntry()
 
-                // OEBPS/content.opf
                 zos.putNextEntry(ZipEntry("OEBPS/content.opf"))
                 val opfContent = """<?xml version="1.0" encoding="UTF-8"?>
 <package xmlns="http://www.idpf.org/2007/opf" unique-identifier="pub-id" version="3.0">
@@ -562,7 +751,6 @@ class ReaderLibraryView(
                 zos.write(opfContent.toByteArray())
                 zos.closeEntry()
 
-                // Chapters
                 val ch1 = """<!DOCTYPE html><html><head><title>Chapter 1: The Machine</title></head><body>
 <h1>Chapter 1: The Machine</h1>
 <p>The Time Traveller was expounding a recondite matter to us. His grey eyes shone and twinkled, and his usually pale face was flushed and animated.</p>
@@ -595,7 +783,6 @@ class ReaderLibraryView(
             }
             sampleFile
         } catch (e: Exception) {
-            e.printStackTrace()
             null
         }
     }
@@ -607,7 +794,6 @@ class ReaderLibraryView(
 
     override fun onDetachedFromWindow() {
         super.onDetachedFromWindow()
-        // Do NOT cancel viewScope here: screen switches detach/reattach this view via removeAllViews().
         ReaderEventManager.unregisterListener(eventListener)
     }
 
@@ -618,4 +804,8 @@ class ReaderLibraryView(
 
     fun isViewScopeActiveForTesting(): Boolean =
         viewScope.coroutineContext[kotlinx.coroutines.Job]?.isActive == true
+
+    fun getRecentBooksForTesting(): List<EpubBook> = recentBooks
+    fun getAllBooksForTesting(): List<EpubBook> = allBooks
+    fun getActiveTabForTesting(): ReaderLibraryTab = activeTab
 }

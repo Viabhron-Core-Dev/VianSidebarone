@@ -768,7 +768,7 @@ class HeavyPageHostManager private constructor(private val context: Context) {
                             }
                         }
                     }
-                    "test_notes", "work_notes", "reader", "floating_pwa", "dictionary", "translation", "test_app", "generic", "note" -> {
+                    "test_notes", "work_notes", "floating_pwa", "dictionary", "translation", "test_app", "generic", "note" -> {
                         LogKeeper.log(context, TAG, "Instantiating mini-app embedded view in :heavy for pageId='$pageId', type='$pageType'")
                         val heavyFloatingHost = com.example.feature.floating.HeavyFloatingHost.getInstance(context)
                         val initialPayload = LinkedHashMap<String, String>()
@@ -789,7 +789,7 @@ class HeavyPageHostManager private constructor(private val context: Context) {
                         }
                     }
                     else -> {
-                        if (params.getBoolean("isMiniApp", false)) {
+                        if (params.getBoolean("isMiniApp", false) && pageType != "reader" && pageType != "ebook_reader") {
                             LogKeeper.log(context, TAG, "Instantiating generic mini-app view in :heavy for pageId='$pageId', type='$pageType'")
                             val heavyFloatingHost = com.example.feature.floating.HeavyFloatingHost.getInstance(context)
                             val initialPayload = LinkedHashMap<String, String>()
@@ -816,7 +816,7 @@ class HeavyPageHostManager private constructor(private val context: Context) {
                     }
                 }
 
-                val isMiniApp = params.getBoolean("isMiniApp", false) || pageType in listOf("test_notes", "work_notes", "reader", "floating_pwa", "dictionary", "translation", "test_app", "generic", "note")
+                val isMiniApp = params.getBoolean("isMiniApp", false) || pageType in listOf("test_notes", "work_notes", "floating_pwa", "dictionary", "translation", "test_app", "generic", "note")
                 val finalHostHeight = if (isMiniApp) {
                     pageView.measure(
                         View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),

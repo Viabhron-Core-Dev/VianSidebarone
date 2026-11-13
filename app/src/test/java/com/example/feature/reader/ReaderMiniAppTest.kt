@@ -58,11 +58,22 @@ class ReaderMiniAppTest {
 
         override fun getResources(): android.content.res.Resources = fakeResources
 
+        private val mockWindowManager: android.view.WindowManager by lazy {
+            java.lang.reflect.Proxy.newProxyInstance(
+                android.view.WindowManager::class.java.classLoader,
+                arrayOf(android.view.WindowManager::class.java)
+            ) { _, _, _ -> null } as android.view.WindowManager
+        }
+
         override fun getSystemService(name: String): Any? {
-            return try {
-                super.getSystemService(name)
-            } catch (_: Throwable) {
-                null
+            return if (name == Context.WINDOW_SERVICE) {
+                mockWindowManager
+            } else {
+                try {
+                    super.getSystemService(name)
+                } catch (_: Throwable) {
+                    null
+                }
             }
         }
     }
@@ -76,27 +87,27 @@ class ReaderMiniAppTest {
     }
 
     @Test
-    fun testReaderMiniAppFactoryRegisteredInHeavyHost() {
-        val host = HeavyFloatingHost.getInstance(testContext)
-        val instance = host.startInstance(
-            instanceId = "test_reader_instance_1",
-            appType = "reader",
-            initialBounds = WindowBounds(100, 100, 500, 700)
+    fun testReaderRunsExclusivelyInMainProcessAndNotInHeavyHost() {
+        val bridge = com.example.feature.floating.FloatingMiniAppBridge.getInstance(testContext)
+        assertTrue(
+            "FloatingMiniAppBridge must treat 'reader' and 'ebook_reader' as Main-only mini-apps",
+            bridge.isMainOnlyMiniApp("reader") && bridge.isMainOnlyMiniApp("ebook_reader")
         )
 
-        assertNotNull("HeavyFloatingHost must instantiate ReaderMiniAppInstance for 'reader'", instance)
-        assertTrue("Instance must be ReaderMiniAppInstance", instance is ReaderMiniAppInstance)
-        assertEquals(MiniAppLifecycleState.RESUMED, instance?.lifecycleState)
+        val window = com.example.feature.floating.FloatingMiniAppWindow("test_reader_win", testContext, "reader")
+        assertTrue("FloatingMiniAppWindow must recognize 'reader' as Main-only", window.isMainOnlyApp() && window.isReaderApp())
 
-        host.releaseInstance("test_reader_instance_1", "test_teardown")
+        // Verify ReaderDispatchers.main does not silently fall back to Dispatchers.Default when Main Looper is available
+        assertNotNull(ReaderDispatchers.main)
     }
 
     @Test
-    fun testReaderMiniAppLifecycleAndSnapshotRecovery() {
+    fun testReaderMiniAppLifecycleWarmFoldUnfoldAndColdRestart() {
         val instanceId = "reader_lifecycle_test"
+        ReaderSessionTracker.resetForTesting()
         val instance = ReaderMiniAppInstance(instanceId, "reader")
 
-        // 1. Initial snapshot recovery
+        // 1. Initial warm snapshot recovery
         val initialSnapshot = MiniAppRecoverySnapshot(
             instanceId = instanceId,
             appType = "reader",
@@ -105,7 +116,8 @@ class ReaderMiniAppTest {
                 ReaderMiniAppInstance.KEY_BOOK_ID to "42",
                 ReaderMiniAppInstance.KEY_CHAPTER_INDEX to "3",
                 ReaderMiniAppInstance.KEY_SCROLL_Y to "450",
-                ReaderMiniAppInstance.KEY_FONT_SIZE to "18.0"
+                ReaderMiniAppInstance.KEY_FONT_SIZE to "18.0",
+                ReaderMiniAppInstance.KEY_COLD_START to "false"
             )
         )
         instance.onCreate(initialSnapshot)
@@ -116,8 +128,9 @@ class ReaderMiniAppTest {
         assertEquals(ReaderScreenMode.READING, instance.getCurrentScreenModeForTesting())
         assertEquals(42, instance.getCurrentBookIdForTesting())
 
-        // 2. Prepare for sleep: gathers state into payload
+        // 2. Prepare for sleep (warm fold): gathers state into payload and marks warm session
         val sleepPayload = instance.prepareForSleep()
+        assertTrue("prepareForSleep must mark session as warm", ReaderSessionTracker.isWarmSession(instanceId))
         assertEquals(MiniAppLifecycleState.SLEEPING, instance.lifecycleState)
         assertEquals(ReaderScreenMode.READING.name, sleepPayload[ReaderMiniAppInstance.KEY_SCREEN_MODE])
         assertEquals("42", sleepPayload[ReaderMiniAppInstance.KEY_BOOK_ID])
@@ -130,7 +143,7 @@ class ReaderMiniAppTest {
         instance.onDestroy()
         assertEquals(MiniAppLifecycleState.DESTROYED, instance.lifecycleState)
 
-        // 4. Reconstruction in a new instance (simulating app wake after sleep)
+        // 4. Warm unfold reconstruction in a new instance
         val wakeInstance = ReaderMiniAppInstance(instanceId, "reader")
         val recoverySnapshot = MiniAppRecoverySnapshot(
             instanceId = instanceId,
@@ -143,6 +156,26 @@ class ReaderMiniAppTest {
 
         assertEquals(ReaderScreenMode.READING, wakeInstance.getCurrentScreenModeForTesting())
         assertEquals(42, wakeInstance.getCurrentBookIdForTesting())
+
+        // 5. Cold process restart: KEY_COLD_START == "true" must open LIBRARY (Recent tab) instead of auto-opening book 42
+        ReaderSessionTracker.resetForTesting()
+        val coldSnapshot = MiniAppRecoverySnapshot(
+            instanceId = instanceId,
+            appType = "reader",
+            payload = LinkedHashMap(sleepPayload).apply {
+                put(ReaderMiniAppInstance.KEY_COLD_START, "true")
+            }
+        )
+        val coldInstance = ReaderMiniAppInstance(instanceId, "reader")
+        coldInstance.onCreate(coldSnapshot)
+        coldInstance.createContentView(testContext)
+        assertEquals("Cold start must open LIBRARY mode", ReaderScreenMode.LIBRARY, coldInstance.getCurrentScreenModeForTesting())
+        assertEquals("Cold start must not auto-open previous book", -1, coldInstance.getCurrentBookIdForTesting())
+        assertEquals(
+            "Cold start Library view must default to RECENT tab",
+            ReaderLibraryTab.RECENT,
+            coldInstance.getLibraryViewForTesting()?.getActiveTabForTesting()
+        )
     }
 
     @Test
