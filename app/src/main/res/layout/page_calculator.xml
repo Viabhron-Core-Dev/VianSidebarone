@@ -1,5 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content">
+
+<LinearLayout
+    android:id="@+id/layout_calculator_main"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:orientation="vertical"
@@ -58,9 +63,26 @@
                 android:padding="6dp"
                 android:background="?android:attr/selectableItemBackgroundBorderless"
                 android:clickable="true"
+                android:focusable="false"
+                android:focusableInTouchMode="false"
                 android:src="@android:drawable/ic_menu_save"
                 android:tint="#80D8FF"
                 android:contentDescription="@string/calculator_copy_result" />
+
+            <ImageView
+                android:id="@+id/btn_convert_quantity"
+                android:layout_width="32dp"
+                android:layout_height="32dp"
+                android:padding="6dp"
+                android:background="?android:attr/selectableItemBackgroundBorderless"
+                android:clickable="true"
+                android:focusable="false"
+                android:focusableInTouchMode="false"
+                android:enabled="false"
+                android:alpha="0.3"
+                android:src="@drawable/ic_straighten"
+                android:tint="#80D8FF"
+                android:contentDescription="@string/calculator_convert_quantity" />
 
             <HorizontalScrollView
                 android:id="@+id/scroll_result"
@@ -233,3 +255,258 @@
     </TableLayout>
 
 </LinearLayout>
+
+    <!-- In-Place Quantity Converter Overlay (fits exact calculator height, no dialogs/popups) -->
+    <LinearLayout
+        android:id="@+id/layout_converter_overlay"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:paddingStart="8dp"
+        android:paddingEnd="8dp"
+        android:paddingTop="4dp"
+        android:paddingBottom="4dp"
+        android:clickable="true"
+        android:focusable="false"
+        android:focusableInTouchMode="false"
+        android:visibility="gone">
+
+        <!-- Header -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="32dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <ImageView
+                android:layout_width="16dp"
+                android:layout_height="16dp"
+                android:layout_marginEnd="6dp"
+                android:src="@drawable/ic_straighten"
+                android:tint="#80D8FF"
+                android:importantForAccessibility="no" />
+
+            <TextView
+                android:id="@+id/tv_converter_header"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Convert"
+                android:textColor="#CFD8DC"
+                android:textSize="13sp"
+                android:textStyle="bold"
+                android:singleLine="true"
+                android:ellipsize="end"
+                android:focusable="false"
+                android:focusableInTouchMode="false" />
+
+            <ImageView
+                android:id="@+id/btn_converter_close"
+                android:layout_width="32dp"
+                android:layout_height="32dp"
+                android:padding="7dp"
+                android:background="?android:attr/selectableItemBackgroundBorderless"
+                android:clickable="true"
+                android:focusable="false"
+                android:focusableInTouchMode="false"
+                android:src="@drawable/ic_close_small"
+                android:tint="#CFD8DC"
+                android:contentDescription="@string/calculator_close_converter" />
+        </LinearLayout>
+
+        <!-- Category Chips -->
+        <HorizontalScrollView
+            android:id="@+id/scroll_converter_categories"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:scrollbars="none"
+            android:focusable="false"
+            android:focusableInTouchMode="false">
+
+            <LinearLayout
+                android:id="@+id/layout_converter_categories"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal" />
+        </HorizontalScrollView>
+
+        <!-- From <-> To Pair Card -->
+        <LinearLayout
+            android:id="@+id/layout_converter_pair_card"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:padding="6dp"
+            android:focusable="false"
+            android:focusableInTouchMode="false">
+
+            <!-- From Slot -->
+            <LinearLayout
+                android:id="@+id/layout_from_slot"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical"
+                android:padding="6dp"
+                android:clickable="true"
+                android:focusable="false"
+                android:focusableInTouchMode="false">
+
+                <TextView
+                    android:id="@+id/tv_from_badge"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="FROM"
+                    android:textColor="#80D8FF"
+                    android:textSize="10sp"
+                    android:textStyle="bold"
+                    android:focusable="false" />
+
+                <TextView
+                    android:id="@+id/tv_from_unit"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="1dp"
+                    android:text="m"
+                    android:textColor="#FFFFFF"
+                    android:textSize="12sp"
+                    android:textStyle="bold"
+                    android:singleLine="true"
+                    android:ellipsize="end"
+                    android:focusable="false" />
+
+                <TextView
+                    android:id="@+id/tv_from_value"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:text="0"
+                    android:textColor="#CFD8DC"
+                    android:textSize="14sp"
+                    android:singleLine="true"
+                    android:ellipsize="end"
+                    android:focusable="false" />
+            </LinearLayout>
+
+            <!-- Swap Button -->
+            <ImageView
+                android:id="@+id/btn_swap_units"
+                android:layout_width="34dp"
+                android:layout_height="34dp"
+                android:layout_marginStart="4dp"
+                android:layout_marginEnd="4dp"
+                android:padding="6dp"
+                android:background="?android:attr/selectableItemBackgroundBorderless"
+                android:clickable="true"
+                android:focusable="false"
+                android:focusableInTouchMode="false"
+                android:src="@drawable/ic_swap_horiz"
+                android:tint="#80D8FF"
+                android:contentDescription="@string/calculator_swap_units" />
+
+            <!-- To Slot -->
+            <LinearLayout
+                android:id="@+id/layout_to_slot"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical"
+                android:padding="6dp"
+                android:clickable="true"
+                android:focusable="false"
+                android:focusableInTouchMode="false">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:id="@+id/tv_to_badge"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="TO"
+                        android:textColor="#90A4AE"
+                        android:textSize="10sp"
+                        android:textStyle="bold"
+                        android:focusable="false" />
+
+                    <ImageView
+                        android:id="@+id/btn_copy_converted"
+                        android:layout_width="24dp"
+                        android:layout_height="24dp"
+                        android:padding="3dp"
+                        android:background="?android:attr/selectableItemBackgroundBorderless"
+                        android:clickable="true"
+                        android:focusable="false"
+                        android:focusableInTouchMode="false"
+                        android:src="@drawable/ic_content_copy"
+                        android:tint="#80D8FF"
+                        android:contentDescription="@string/calculator_copy_result" />
+                </LinearLayout>
+
+                <TextView
+                    android:id="@+id/tv_to_unit"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="1dp"
+                    android:text="ft"
+                    android:textColor="#FFFFFF"
+                    android:textSize="12sp"
+                    android:textStyle="bold"
+                    android:singleLine="true"
+                    android:ellipsize="end"
+                    android:focusable="false" />
+
+                <TextView
+                    android:id="@+id/tv_to_value"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:text="0"
+                    android:textColor="#80D8FF"
+                    android:textSize="15sp"
+                    android:textStyle="bold"
+                    android:singleLine="true"
+                    android:ellipsize="end"
+                    android:focusable="false" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- Active Target Hint -->
+        <TextView
+            android:id="@+id/tv_converter_pick_hint"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="5dp"
+            android:layout_marginBottom="3dp"
+            android:text="Select From unit"
+            android:textColor="#90A4AE"
+            android:textSize="11sp"
+            android:focusable="false" />
+
+        <!-- Unit Grid Selector (3-column rows populated dynamically) -->
+        <ScrollView
+            android:id="@+id/scroll_converter_units"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:scrollbars="none"
+            android:focusable="false"
+            android:focusableInTouchMode="false"
+            android:fillViewport="true">
+
+            <LinearLayout
+                android:id="@+id/layout_unit_grid"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical" />
+        </ScrollView>
+    </LinearLayout>
+
+</FrameLayout>

@@ -612,6 +612,17 @@
   - Updated `ReaderReadingView` (`advanceToNextChapterByUser`, `recordGenuineReadingActivityOnCurrentChapter`, `openChapterJob` cancellation) so TOC/search jumps, chapter restoration, and clicking `Next` on unscrolled normal chapters or immediately on short chapters never inflate `TrackerBook.readChapters`.
 - **3. Verification**: 114/114 targeted JVM unit tests passing (`EpubParserTest`: 14, `ReaderArchitectureAndBackupTest`: 6, `ReaderMiniAppTest`: 6, `FloatingMiniAppFrameworkTest`: 82, `FloatingPwaMiniAppTest`: 6); `compile_applet` succeeded.
 
+### Phase 14.12: Sidebar Calculator Quantity Converter & Expanded Settings Shortcuts (COMPLETED)
+- **1. Sidebar Calculator In-Place Quantity Converter (`QuantityConverter.kt`, `page_calculator.xml`, `CalculatorPageView.kt`, `ic_swap_horiz.xml`, `strings.xml`)**:
+  - Added `btn_convert_quantity` beside `btn_copy_result` on `CalculatorPageView` with strict eligibility gating (`resolveConvertibleValue`): enabled only when the calculator holds a single finite numeric literal OR a finalized finite `=` total (explicitly excluding empty `"0"`, unfinalized expressions, `Infinity`/`∞`, `NaN`, and `Error`).
+  - Added in-place `layout_converter_overlay` inside `page_calculator.xml` (no `AlertDialog`/`PopupWindow` inside `:heavy` `SurfaceControlViewHost`), toggling `layout_calculator_main` to `View.INVISIBLE` to preserve exact sidebar height without flicker or resizing while keeping all existing calculator state intact on close.
+  - Supported 8 categories (`Length`, `Weight`, `Temp`, `Volume`, `Area`, `Time`, `Data` using 1024-based `B`/`KB`/`MB`/`GB`/`TB`, `Speed`), interactive **From ↔ To** pair selector with central **Swap**, 3-column scrollable unit selector chips, dedicated numeric-only **Copy** (`formatConvertedValue` using `Locale.US` decimal / scientific fallback), and `FloatingReaderPrefs` persistence per category.
+- **2. Expanded Settings Shortcuts & Unified Dispatch (`SidebarItem.kt`, `ElementActionDispatcher.kt`, `AppsPageView.kt`, `HybridGridPageView.kt`, `ActionPickerActivity.kt`)**:
+  - Added 18 new `SettingsShortcut` entries covering Battery Optimization (`ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS`), Special App Access & Permission pages (`overlay_permission`, `modify_system_settings`, `usage_access`, `notification_access`, `dnd_access`, `all_files_access`, `install_unknown_apps`, `alarms_reminders`, `picture_in_picture`), and additional Android settings screens (`wireless_network`, `app_usage`, `default_home`, `voice_input`, `physical_keyboard`, `printing`, `screen_saver`, `webview_impl`) with zero new dangerous manifest permissions.
+  - Added `resolveSettingsActionCandidates` + `resolveWithFallbacks` in `ElementActionDispatcher` for safe API-level gating and OEM resolution fallbacks, and unified `AppsPageView` and `HybridGridPageView` (grid + folder popups) to delegate to `ElementActionDispatcher.handleSettingsShortcut` (removing duplicated 9-case `when` blocks).
+  - Expanded search keyword synonyms in `ActionPickerActivity.matchesQuery` to cover all battery optimization, permission, and system access shortcuts.
+- **3. Verification**: 129/129 targeted JVM unit tests passing (`QuantityConverterTest`: 6, `HeavyCalculatorSplitTest`: 23, `FloatingMiniAppFrameworkTest`: 83, `ElementSystemTest`: 4, `UnifiedPageSystemTest`: 13); `compile_applet` build succeeded.
+
 ---
 
 ## Phase 14: PWA Engine & External AI App Integration (Tier 5 - Highest Complexity)

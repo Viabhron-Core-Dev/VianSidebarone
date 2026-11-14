@@ -2754,6 +2754,112 @@ class FloatingMiniAppFrameworkTest {
     }
 
     @Test
+    fun testBatteryOptimizationAndPermissionShortcutsIntentResolution() {
+        val shortcuts = com.example.feature.sidebar.ALL_SETTINGS_SHORTCUTS.map { it.action }.toSet()
+        val expectedNewActions = listOf(
+            "battery_optimization",
+            "overlay_permission",
+            "modify_system_settings",
+            "usage_access",
+            "notification_access",
+            "dnd_access",
+            "all_files_access",
+            "install_unknown_apps",
+            "alarms_reminders",
+            "picture_in_picture",
+            "wireless_network",
+            "app_usage",
+            "default_home",
+            "voice_input",
+            "physical_keyboard",
+            "printing",
+            "screen_saver",
+            "webview_impl"
+        )
+        for (act in expectedNewActions) {
+            assertTrue("Missing settings shortcut '$act'", shortcuts.contains(act))
+        }
+
+        val dispatcher = com.example.feature.element.ElementActionDispatcher
+        assertEquals(
+            android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS,
+            dispatcher.resolveSettingsActionCandidates("battery_optimization")[0]
+        )
+        assertEquals(
+            android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+            dispatcher.resolveSettingsActionCandidates("overlay_permission")[0]
+        )
+        assertEquals(
+            android.provider.Settings.ACTION_MANAGE_WRITE_SETTINGS,
+            dispatcher.resolveSettingsActionCandidates("modify_system_settings")[0]
+        )
+        assertEquals(
+            android.provider.Settings.ACTION_USAGE_ACCESS_SETTINGS,
+            dispatcher.resolveSettingsActionCandidates("usage_access")[0]
+        )
+        assertEquals(
+            android.provider.Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS,
+            dispatcher.resolveSettingsActionCandidates("notification_access")[0]
+        )
+        assertEquals(
+            android.provider.Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS,
+            dispatcher.resolveSettingsActionCandidates("dnd_access")[0]
+        )
+        assertEquals(
+            android.provider.Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION,
+            dispatcher.resolveSettingsActionCandidates("all_files_access", android.os.Build.VERSION_CODES.R)[0]
+        )
+        assertEquals(
+            android.provider.Settings.ACTION_INTERNAL_STORAGE_SETTINGS,
+            dispatcher.resolveSettingsActionCandidates("all_files_access", android.os.Build.VERSION_CODES.Q)[0]
+        )
+        assertEquals(
+            android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+            dispatcher.resolveSettingsActionCandidates("install_unknown_apps", android.os.Build.VERSION_CODES.O)[0]
+        )
+        assertEquals(
+            android.provider.Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM,
+            dispatcher.resolveSettingsActionCandidates("alarms_reminders", android.os.Build.VERSION_CODES.S)[0]
+        )
+        assertEquals(
+            android.provider.Settings.ACTION_MANAGE_ALL_APPLICATIONS_SETTINGS,
+            dispatcher.resolveSettingsActionCandidates("alarms_reminders", android.os.Build.VERSION_CODES.R)[0]
+        )
+        assertEquals(
+            "android.settings.PICTURE_IN_PICTURE_SETTINGS",
+            dispatcher.resolveSettingsActionCandidates("picture_in_picture")[0]
+        )
+        assertEquals(
+            android.provider.Settings.ACTION_APP_USAGE_SETTINGS,
+            dispatcher.resolveSettingsActionCandidates("app_usage", android.os.Build.VERSION_CODES.P)[0]
+        )
+        assertEquals(
+            android.provider.Settings.ACTION_HOME_SETTINGS,
+            dispatcher.resolveSettingsActionCandidates("default_home")[0]
+        )
+        assertEquals(
+            android.provider.Settings.ACTION_VOICE_INPUT_SETTINGS,
+            dispatcher.resolveSettingsActionCandidates("voice_input")[0]
+        )
+        assertEquals(
+            android.provider.Settings.ACTION_HARD_KEYBOARD_SETTINGS,
+            dispatcher.resolveSettingsActionCandidates("physical_keyboard")[0]
+        )
+        assertEquals(
+            android.provider.Settings.ACTION_PRINT_SETTINGS,
+            dispatcher.resolveSettingsActionCandidates("printing")[0]
+        )
+        assertEquals(
+            android.provider.Settings.ACTION_DREAM_SETTINGS,
+            dispatcher.resolveSettingsActionCandidates("screen_saver")[0]
+        )
+        assertEquals(
+            android.provider.Settings.ACTION_WEBVIEW_SETTINGS,
+            dispatcher.resolveSettingsActionCandidates("webview_impl")[0]
+        )
+    }
+
+    @Test
     fun testDailyDataUsageManualCorrectionAndAccumulation() {
         val helper = com.example.core.DailyDataUsageHelper
         helper.clearDailyDataUsageCorrection(testContext)

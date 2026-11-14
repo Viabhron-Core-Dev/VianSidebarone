@@ -169,3 +169,39 @@
 * Any deviation from what was requested, and why: Added `Toast.makeText(...)?.show()` `try/catch` guard and coroutine `Job` tracking (`openChapterJob`, `highWaterJob`, `undoJob`) in `ReaderReadingView.kt` after initial test execution exposed a Room `Dispatchers.IO` race condition and null `Toast` return in headless JVM tests.
 * Any known issue or follow-up needed: Physical device verification recommended for multi-MB TXT scroll responsiveness, short-chapter dwell feel, and Android 12+ Room/SAF integration.
 
+---
+
+### Receipt 115
+* Timestamp: 2026-11-14 19:40 UTC
+* One-line summary of what was requested: Add an in-place quantity converter (single number or `=` total gating, `From ↔ To` with Swap, `1024`-based Data, copy-number-only) to the Sidebar Calculator page while keeping existing calculator behavior intact, and expand Settings shortcuts to include Battery Optimization, Permission/Special App Access pages, and unified dispatch.
+* Exact files touched:
+  - `app/src/main/res/drawable/ic_swap_horiz.xml` (created)
+  - `app/src/main/res/values/strings.xml`
+  - `app/src/main/java/com/example/feature/sidebar/QuantityConverter.kt` (created)
+  - `app/src/main/res/layout/page_calculator.xml`
+  - `app/src/main/java/com/example/feature/sidebar/CalculatorPageView.kt`
+  - `app/src/main/java/com/example/feature/sidebar/SidebarItem.kt`
+  - `app/src/main/java/com/example/feature/element/ElementActionDispatcher.kt`
+  - `app/src/main/java/com/example/feature/sidebar/AppsPageView.kt`
+  - `app/src/main/java/com/example/feature/sidebar/HybridGridPageView.kt`
+  - `app/src/main/java/com/example/feature/settings/ActionPickerActivity.kt`
+  - `app/src/test/java/com/example/feature/sidebar/QuantityConverterTest.kt` (created)
+  - `app/src/test/java/com/example/feature/floating/FloatingMiniAppFrameworkTest.kt`
+  - `blueprint/BLUEPRINT.md`
+  - `receipts/RECEIPTS_101.md`
+* What was actually done — factual, not persuasive:
+  1. Sidebar Calculator Quantity Converter:
+     - Created `QuantityConverter.kt` implementing `QuantityCategory` (`LENGTH`, `WEIGHT`, `TEMPERATURE`, `VOLUME`, `AREA`, `TIME`, `DATA` with `1024` binary scale `B`/`KB`/`MB`/`GB`/`TB`, `SPEED`), temperature affine transforms, `Locale.US` numeric formatting (`formatConvertedValue`), and `resolveConvertibleValue` gating (enabled only for a single finite numeric literal or finalized `=` finite total; rejects empty `"0"`, unfinalized expressions, `Infinity`/`∞`, `NaN`, and `Error`).
+     - Added `btn_convert_quantity` beside `btn_copy_result` and an in-place `layout_converter_overlay` inside `page_calculator.xml` (avoiding `AlertDialog`/`PopupWindow` inside `:heavy` `SurfaceControlViewHost`), keeping `layout_calculator_main` `View.INVISIBLE` while open to preserve exact height and leaving existing calculator state untouched on close.
+     - Wired category chips, interactive `From ↔ To` pair cards with `btn_swap_units`, 3-column unit chip grid, copy-number-only clipboard action, and `FloatingReaderPrefs` persistence per category in `CalculatorPageView.kt`.
+  2. Expanded Settings Shortcuts & Unified Dispatch:
+     - Appended 18 `SettingsShortcut` entries to `ALL_SETTINGS_SHORTCUTS` (`battery_optimization`, `overlay_permission`, `modify_system_settings`, `usage_access`, `notification_access`, `dnd_access`, `all_files_access`, `install_unknown_apps`, `alarms_reminders`, `picture_in_picture`, `wireless_network`, `app_usage`, `default_home`, `voice_input`, `physical_keyboard`, `printing`, `screen_saver`, `webview_impl`) with zero new manifest permissions.
+     - Added `resolveSettingsActionCandidates` and `resolveWithFallbacks` in `ElementActionDispatcher.kt`, exposed `handleSettingsShortcut`, and replaced the stale 9-case `when` blocks in `AppsPageView.kt` and `HybridGridPageView.kt` (main grid + folder popup) to delegate directly to `ElementActionDispatcher.handleSettingsShortcut`.
+     - Expanded `ActionPickerActivity.matchesQuery` keyword synonyms for the new shortcuts.
+  3. Tests:
+     - Created `QuantityConverterTest.kt` (6 tests) and added `testBatteryOptimizationAndPermissionShortcutsIntentResolution` in `FloatingMiniAppFrameworkTest.kt`.
+* How it was verified: Local build and JVM unit tests only — `gradle :app:testDebugUnitTest` across 5 targeted suites (`QuantityConverterTest`: 6, `HeavyCalculatorSplitTest`: 23, `FloatingMiniAppFrameworkTest`: 83, `ElementSystemTest`: 4, `UnifiedPageSystemTest`: 13 — `129/129` passed, 0 failures/errors) and `compile_applet` (`Build succeeded`). On-device Android behavior (touches inside `:heavy` `SurfaceControlViewHost`, clipboard copy toast/content, and OEM `Settings` Intent resolution across Android versions) was not tested on a physical device or emulator.
+* Any deviation from what was requested, and why: Extracted `resolveSettingsActionCandidates(action, sdkInt)` as a helper in `ElementActionDispatcher.kt` so unit tests running on mockable `android.jar` (where `Intent.getAction()` and `PackageManager` calls are stubbed) can assert exact primary SDK action strings and API-level branches directly.
+* Any known issue or follow-up needed: Physical device testing needed to confirm `SurfaceControlViewHost` touch scrolling in the converter chip strips and real OEM Intent target resolution for special app access shortcuts (`overlay_permission`, `modify_system_settings`, `picture_in_picture`, `battery_optimization`).
+
+

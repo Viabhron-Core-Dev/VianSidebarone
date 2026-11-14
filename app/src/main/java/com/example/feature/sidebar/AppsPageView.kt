@@ -640,30 +640,14 @@ class AppsPageView(
                     currentFolderPopup?.dismiss()
                         onCloseSidebar()
                 } else if (item is SidebarItem.SettingsShortcut) {
-                    val intent = when (item.action) {
-                        "wifi" -> android.content.Intent(android.provider.Settings.ACTION_WIFI_SETTINGS)
-                        "bluetooth" -> android.content.Intent(android.provider.Settings.ACTION_BLUETOOTH_SETTINGS)
-                        "display" -> android.content.Intent(android.provider.Settings.ACTION_DISPLAY_SETTINGS)
-                        "sound" -> android.content.Intent(android.provider.Settings.ACTION_SOUND_SETTINGS)
-                        "location" -> android.content.Intent(android.provider.Settings.ACTION_LOCATION_SOURCE_SETTINGS)
-                        "apps" -> android.content.Intent(android.provider.Settings.ACTION_APPLICATION_SETTINGS)
-                        "security" -> android.content.Intent(android.provider.Settings.ACTION_SECURITY_SETTINGS)
-                        "battery" -> android.content.Intent(android.provider.Settings.ACTION_BATTERY_SAVER_SETTINGS) // Generic fallback
-                        "date" -> android.content.Intent(android.provider.Settings.ACTION_DATE_SETTINGS)
-                        else -> android.content.Intent(android.provider.Settings.ACTION_SETTINGS)
-                    }
-                    intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                    try {
-                        context.startActivity(intent)
-                        context.sendBroadcast(android.content.Intent("com.example.CLOSE_SIDEBAR"))
-                    } catch (e: Exception) {
+                    val handled = com.example.feature.element.ElementActionDispatcher.handleSettingsShortcut(context, item.action)
+                    if (handled) {
+                        currentFolderPopup?.dismiss()
+                        onCloseSidebar()
+                    } else {
                         android.widget.Toast.makeText(context, "Cannot open settings", android.widget.Toast.LENGTH_SHORT).show()
                     }
-                } else if (item is SidebarItem.SettingsShortcut) {
-                icon.setBackgroundColor(android.graphics.Color.TRANSPARENT)
-                icon.setImageResource(item.iconResId)
-                icon.setColorFilter(android.graphics.Color.WHITE)
-            } else if (item is SidebarItem.DisplayAction) {
+                } else if (item is SidebarItem.DisplayAction) {
                     try {
                         com.example.core.LogKeeper.writeLog("Sidebar", "Display action: ${item.action}")
                         DisplayHandler.handleDisplayAction(context, item.action)

@@ -1393,3 +1393,22 @@ java.lang.IllegalStateException: Hardware engine crashed unexpectedly
 [2026-11-14 06:33:41.376] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_BRING_TO_FRONT id=win_a alreadyTop=false hasVisibleAttachedAbove=true orderChanged=true zOrder=2 refreshPerformed=true
 [2026-11-14 06:33:41.376] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_FOCUS id=win_visible focused=false
 [2026-11-14 06:33:41.376] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_FOCUS id=win_a focused=true
+[2026-11-14 19:39:04.571] [pid-0] [Test worker] [PageManager] Saved 3 pages for container 'handle_1_swipe_left' to key 'handle_handle_1_swipe_left_pages'
+[2026-11-14 19:39:04.593] [pid-0] [Test worker] [PageManager] Saved opening face 'default_hybrid' for container 'handle_1_swipe_left'
+[2026-11-14 19:39:04.593] [pid-0] [Test worker] [PageManager] Saved opening face 'widget_page' for container 'handle_1_swipe_left'
+[2026-11-14 19:39:04.594] [pid-0] [Test worker] [PageManager] Saved selected page 'apps_page' for container 'handle_1_swipe_left'
+[2026-11-14 19:39:04.595] [pid-0] [Test worker] [PageManager] Saved 3 pages for container 'handle_2_tap' to key 'handle_handle_2_tap_pages'
+[2026-11-14 19:39:04.595] [pid-0] [Test worker] [PageManager] Saved opening face 'apps_page' for container 'handle_2_tap'
+[2026-11-14 19:39:04.597] [pid-0] [Test worker] [PageManager] Saved selected page 'page_a_selected' for container 'handle_1_swipe_left'
+[2026-11-14 19:39:04.597] [pid-0] [Test worker] [PageManager] Saved selected page 'page_b_selected' for container 'handle_1_tap'
+[2026-11-14 19:39:04.602] [pid-0] [Test worker] [PageManager] Saved 1 pages for container 'handle_5_swipe_left' to key 'handle_handle_5_swipe_left_pages'
+[2026-11-14 19:39:04.604] [pid-0] [Test worker] [PageManager] Saved 2 pages for container 'handle_4_swipe_left' to key 'handle_handle_4_swipe_left_pages'
+[2026-11-14 19:39:04.617] [pid-0] [Test worker] [PageManager] Saved 4 pages for container 'handle_2_tap' to key 'handle_handle_2_tap_pages'
+[2026-11-14 19:39:04.619] [pid-0] [Test worker] [PageManager] Saved selected page 'p2' for container 'handle_6_swipe_left'
+[2026-11-14 19:39:04.632] [pid-0] [Test worker] [PageManager] Saved 2 pages for container 'handle_1_swipe_left' to key 'handle_handle_1_swipe_left_pages'
+[2026-11-14 19:39:04.634] [pid-0] [Test worker] [PageManager] Saved 3 pages for container 'handle_1_swipe_left' to key 'handle_handle_1_swipe_left_pages'
+[2026-11-14 19:39:04.636] [pid-0] [Test worker] [PageManager] Saved 3 pages for container 'handle_1_swipe_left' to key 'handle_handle_1_swipe_left_pages'
+[2026-11-14 19:39:04.639] [pid-0] [Test worker] [PageManager] Saved 2 pages for container 'handle_1_swipe_left' to key 'handle_handle_1_swipe_left_pages'
+[2026-11-14 19:39:04.639] [pid-0] [Test worker] [PageManager] Saved opening face 'compass_page' for container 'handle_1_swipe_left'
+[2026-11-14 19:39:04.675] [pid-0] [Test worker] [MiniAppLaunchRouting] ROUTING_DIAG: NAVIGATE_TO_EDIT_SCREEN targetActivity=null pageType=apps pageId=page-1 containerId=sidebar
+[2026-11-14 19:39:05.812] [pid-0] [Test worker] [PageManager] Saved 1 pages for container 'handle_1_double_tap' to key 'handle_handle_1_double_tap_pages'

@@ -91,32 +91,36 @@ class ActionPickerActivity : ComponentActivity() {
                 if (action.contains(query)) return true
                 // Keyword synonyms mapping
                 val keywords = when (action) {
-                    "wifi", "network_provider", "data_usage", "hotspot", "airplane", "vpn", "nfc" ->
+                    "wifi", "network_provider", "wireless_network", "data_usage", "hotspot", "airplane", "vpn", "nfc" ->
                         listOf("network", "internet", "cellular", "mobile", "sim", "tether", "wireless", "broadband")
                     "bluetooth", "cast" ->
                         listOf("device", "pair", "connect", "screen", "mirror", "wireless", "tv")
-                    "display", "night_display", "wallpaper" ->
-                        listOf("screen", "brightness", "eye", "dark", "theme", "light", "background")
-                    "sound", "do_not_disturb" ->
-                        listOf("volume", "ring", "audio", "vibrate", "mute", "silent", "dnd", "media")
-                    "notifications", "notification_history" ->
-                        listOf("alerts", "messages", "status", "history")
-                    "apps", "all_apps", "default_apps", "permissions" ->
-                        listOf("applications", "install", "manage", "access", "privacy", "defaults")
-                    "battery", "battery_saver" ->
-                        listOf("power", "charge", "energy", "drain", "saver")
+                    "display", "night_display", "wallpaper", "screen_saver" ->
+                        listOf("screen", "brightness", "eye", "dark", "theme", "light", "background", "dream", "daydream", "ambient")
+                    "sound", "do_not_disturb", "dnd_access" ->
+                        listOf("volume", "ring", "audio", "vibrate", "mute", "silent", "dnd", "media", "permission", "special access")
+                    "notifications", "notification_history", "notification_access" ->
+                        listOf("alerts", "messages", "status", "history", "listener", "permission", "special access")
+                    "apps", "all_apps", "default_apps", "default_home", "permissions", "app_usage" ->
+                        listOf("applications", "install", "manage", "access", "privacy", "defaults", "launcher", "home", "wellbeing")
+                    "overlay_permission", "modify_system_settings", "usage_access", "all_files_access", "install_unknown_apps", "alarms_reminders", "picture_in_picture" ->
+                        listOf("permission", "permissions", "special access", "overlay", "floating", "draw over", "write settings", "files", "storage", "sideload", "apk", "exact alarm", "pip")
+                    "battery", "battery_saver", "battery_optimization" ->
+                        listOf("power", "charge", "energy", "drain", "saver", "unrestricted", "background", "doze", "optimization")
                     "storage" ->
                         listOf("disk", "memory", "space", "files", "sd")
                     "security", "privacy", "biometrics" ->
                         listOf("lock", "pin", "fingerprint", "face", "password", "screen lock", "protect")
                     "accounts" ->
                         listOf("sync", "google", "login", "profile", "user")
-                    "language", "keyboard" ->
-                        listOf("input", "typing", "ime", "locale", "text", "spell")
+                    "language", "keyboard", "physical_keyboard", "voice_input" ->
+                        listOf("input", "typing", "ime", "locale", "text", "spell", "assistant", "speech", "mic", "hardware")
+                    "printing" ->
+                        listOf("print", "printer", "pdf")
                     "accessibility", "captioning" ->
                         listOf("vision", "hearing", "subtitles", "talkback", "assist", "captions")
-                    "developer_options", "device_info", "system_update" ->
-                        listOf("about", "phone", "version", "build", "debug", "usb", "os", "firmware")
+                    "developer_options", "webview_impl", "device_info", "system_update" ->
+                        listOf("about", "phone", "version", "build", "debug", "usb", "os", "firmware", "webview", "chrome")
                     else -> emptyList()
                 }
                 return keywords.any { it.contains(query) || query.contains(it) }

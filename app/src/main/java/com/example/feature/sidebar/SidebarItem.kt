@@ -315,20 +315,38 @@ val ALL_SETTINGS_SHORTCUTS = listOf(
     SidebarItem.SettingsShortcut("permissions", "Permission Manager", android.R.drawable.ic_menu_preferences),
     // Battery & Storage
     SidebarItem.SettingsShortcut("battery_saver", "Battery Saver", android.R.drawable.ic_lock_idle_low_battery),
+    SidebarItem.SettingsShortcut("battery_optimization", "Battery Optimization", android.R.drawable.ic_lock_idle_low_battery),
     SidebarItem.SettingsShortcut("storage", "Storage", android.R.drawable.ic_menu_save),
-    // Privacy & Security
+    // Privacy, Security & Special App Access / Permissions
     SidebarItem.SettingsShortcut("privacy", "Privacy", android.R.drawable.ic_menu_preferences),
     SidebarItem.SettingsShortcut("biometrics", "Biometrics & Screen Lock", android.R.drawable.ic_lock_power_off),
-    // Accounts, Language & Input
+    SidebarItem.SettingsShortcut("overlay_permission", "Display Over Other Apps", android.R.drawable.ic_menu_view),
+    SidebarItem.SettingsShortcut("modify_system_settings", "Modify System Settings", android.R.drawable.ic_menu_manage),
+    SidebarItem.SettingsShortcut("usage_access", "Usage Access", android.R.drawable.ic_menu_recent_history),
+    SidebarItem.SettingsShortcut("notification_access", "Notification Access", android.R.drawable.ic_menu_info_details),
+    SidebarItem.SettingsShortcut("dnd_access", "Do Not Disturb Access", android.R.drawable.ic_lock_silent_mode),
+    SidebarItem.SettingsShortcut("all_files_access", "All Files Access", android.R.drawable.ic_menu_save),
+    SidebarItem.SettingsShortcut("install_unknown_apps", "Install Unknown Apps", android.R.drawable.ic_dialog_alert),
+    SidebarItem.SettingsShortcut("alarms_reminders", "Alarms & Reminders", android.R.drawable.ic_lock_idle_alarm),
+    SidebarItem.SettingsShortcut("picture_in_picture", "Picture-in-Picture", android.R.drawable.ic_menu_gallery),
+    // Accounts, Language, Input & System
     SidebarItem.SettingsShortcut("accounts", "Accounts & Sync", android.R.drawable.ic_menu_share),
     SidebarItem.SettingsShortcut("language", "Languages", android.R.drawable.ic_menu_preferences),
     SidebarItem.SettingsShortcut("keyboard", "Keyboard & Input Methods", android.R.drawable.ic_menu_edit),
+    SidebarItem.SettingsShortcut("physical_keyboard", "Physical Keyboard", android.R.drawable.ic_menu_edit),
     SidebarItem.SettingsShortcut("backup", "Backup & Reset", android.R.drawable.ic_menu_save),
+    SidebarItem.SettingsShortcut("wireless_network", "Network & Internet", android.R.drawable.ic_menu_preferences),
+    SidebarItem.SettingsShortcut("app_usage", "App Usage & Wellbeing", android.R.drawable.ic_menu_recent_history),
+    SidebarItem.SettingsShortcut("default_home", "Default Home / Launcher", android.R.drawable.ic_menu_compass),
+    SidebarItem.SettingsShortcut("voice_input", "Voice Input & Assistant", android.R.drawable.ic_btn_speak_now),
+    SidebarItem.SettingsShortcut("printing", "Printing Settings", android.R.drawable.ic_menu_agenda),
+    SidebarItem.SettingsShortcut("screen_saver", "Screen Saver", android.R.drawable.ic_menu_view),
     // Accessibility
     SidebarItem.SettingsShortcut("accessibility", "Accessibility", android.R.drawable.ic_menu_preferences),
     SidebarItem.SettingsShortcut("captioning", "Captions", android.R.drawable.ic_menu_info_details),
     // Developer & System Info
     SidebarItem.SettingsShortcut("developer_options", "Developer Options", android.R.drawable.ic_menu_manage),
+    SidebarItem.SettingsShortcut("webview_impl", "WebView Implementation", android.R.drawable.ic_menu_manage),
     SidebarItem.SettingsShortcut("device_info", "About Device", android.R.drawable.ic_menu_info_details),
     SidebarItem.SettingsShortcut("system_update", "System Update", android.R.drawable.ic_popup_sync)
 )

@@ -316,144 +316,236 @@ object ElementActionDispatcher {
         }
     }
 
-    private fun handleSettingsShortcut(context: Context, action: String): Boolean {
-        val settingsIntent = when (action) {
-            "call_recorder" -> Intent(context, com.example.SettingsActivity::class.java).apply {
-                putExtra("start_route", "call_recorder")
+    private fun resolveWithFallbacks(context: Context, vararg actions: String): Intent {
+        val pm = context.packageManager
+        for (act in actions) {
+            val candidate = Intent(act)
+            if (pm != null && candidate.resolveActivity(pm) != null) {
+                return candidate
             }
-            "wifi" -> Intent(Settings.ACTION_WIFI_SETTINGS)
-            "bluetooth" -> Intent(Settings.ACTION_BLUETOOTH_SETTINGS)
-            "display" -> Intent(Settings.ACTION_DISPLAY_SETTINGS)
-            "sound" -> Intent(Settings.ACTION_SOUND_SETTINGS)
-            "apps" -> Intent(Settings.ACTION_APPLICATION_SETTINGS)
-            "battery" -> Intent(Intent.ACTION_POWER_USAGE_SUMMARY)
-            "storage" -> Intent(Settings.ACTION_INTERNAL_STORAGE_SETTINGS)
-            "location" -> Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS)
-            "accessibility" -> Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
-            "date" -> Intent(Settings.ACTION_DATE_SETTINGS)
-            "security" -> Intent(Settings.ACTION_SECURITY_SETTINGS)
-            "privacy" -> Intent(Settings.ACTION_PRIVACY_SETTINGS)
-            "device_info" -> Intent(Settings.ACTION_DEVICE_INFO_SETTINGS)
+        }
+        return Intent(actions.lastOrNull() ?: Settings.ACTION_SETTINGS)
+    }
+
+    internal fun resolveSettingsActionCandidates(
+        action: String,
+        sdkInt: Int = Build.VERSION.SDK_INT
+    ): Array<String> {
+        return when (action) {
+            "wifi" -> arrayOf(Settings.ACTION_WIFI_SETTINGS)
+            "bluetooth" -> arrayOf(Settings.ACTION_BLUETOOTH_SETTINGS)
+            "display" -> arrayOf(Settings.ACTION_DISPLAY_SETTINGS)
+            "sound" -> arrayOf(Settings.ACTION_SOUND_SETTINGS)
+            "apps" -> arrayOf(Settings.ACTION_APPLICATION_SETTINGS)
+            "battery" -> arrayOf(Intent.ACTION_POWER_USAGE_SUMMARY, Settings.ACTION_SETTINGS)
+            "storage" -> arrayOf(Settings.ACTION_INTERNAL_STORAGE_SETTINGS)
+            "location" -> arrayOf(Settings.ACTION_LOCATION_SOURCE_SETTINGS)
+            "accessibility" -> arrayOf(Settings.ACTION_ACCESSIBILITY_SETTINGS)
+            "date" -> arrayOf(Settings.ACTION_DATE_SETTINGS)
+            "security" -> arrayOf(Settings.ACTION_SECURITY_SETTINGS)
+            "privacy" -> arrayOf(Settings.ACTION_PRIVACY_SETTINGS)
+            "device_info" -> arrayOf(Settings.ACTION_DEVICE_INFO_SETTINGS)
 
             // Extended Network & Wireless
             "network_provider" -> {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    Intent(Settings.ACTION_NETWORK_OPERATOR_SETTINGS)
+                if (sdkInt >= Build.VERSION_CODES.Q) {
+                    arrayOf(Settings.ACTION_NETWORK_OPERATOR_SETTINGS, Settings.ACTION_WIRELESS_SETTINGS)
                 } else {
-                    Intent(Settings.ACTION_WIRELESS_SETTINGS)
+                    arrayOf(Settings.ACTION_WIRELESS_SETTINGS)
                 }
             }
-            "data_usage" -> Intent(Settings.ACTION_DATA_USAGE_SETTINGS)
-            "hotspot" -> {
-                Intent("android.settings.TETHER_SETTINGS").apply {
-                    if (resolveActivity(context.packageManager) == null) {
-                        this.action = Settings.ACTION_WIRELESS_SETTINGS
-                    }
-                }
-            }
-            "airplane" -> Intent(Settings.ACTION_AIRPLANE_MODE_SETTINGS)
-            "vpn" -> Intent(Settings.ACTION_VPN_SETTINGS)
-            "nfc" -> Intent(Settings.ACTION_NFC_SETTINGS)
+            "wireless_network" -> arrayOf(Settings.ACTION_WIRELESS_SETTINGS, Settings.ACTION_SETTINGS)
+            "data_usage" -> arrayOf(Settings.ACTION_DATA_USAGE_SETTINGS)
+            "hotspot" -> arrayOf("android.settings.TETHER_SETTINGS", Settings.ACTION_WIRELESS_SETTINGS)
+            "airplane" -> arrayOf(Settings.ACTION_AIRPLANE_MODE_SETTINGS)
+            "vpn" -> arrayOf(Settings.ACTION_VPN_SETTINGS)
+            "nfc" -> arrayOf(Settings.ACTION_NFC_SETTINGS)
 
             // Connected Devices
-            "cast" -> Intent(Settings.ACTION_CAST_SETTINGS)
+            "cast" -> arrayOf(Settings.ACTION_CAST_SETTINGS)
 
             // Display & Themes
             "night_display" -> {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    Intent(Settings.ACTION_NIGHT_DISPLAY_SETTINGS)
+                if (sdkInt >= Build.VERSION_CODES.Q) {
+                    arrayOf(Settings.ACTION_NIGHT_DISPLAY_SETTINGS, Settings.ACTION_DISPLAY_SETTINGS)
                 } else {
-                    Intent(Settings.ACTION_DISPLAY_SETTINGS)
+                    arrayOf(Settings.ACTION_DISPLAY_SETTINGS)
                 }
             }
-            "wallpaper" -> {
-                Intent(Intent.ACTION_SET_WALLPAPER).apply {
-                    if (resolveActivity(context.packageManager) == null) {
-                        this.action = Settings.ACTION_DISPLAY_SETTINGS
-                    }
-                }
-            }
+            "wallpaper" -> arrayOf(Intent.ACTION_SET_WALLPAPER, Settings.ACTION_DISPLAY_SETTINGS)
+            "screen_saver" -> arrayOf(Settings.ACTION_DREAM_SETTINGS, Settings.ACTION_DISPLAY_SETTINGS)
 
             // Sound & DND
-            "do_not_disturb" -> Intent(Settings.ACTION_ZEN_MODE_PRIORITY_SETTINGS)
+            "do_not_disturb" -> arrayOf(Settings.ACTION_ZEN_MODE_PRIORITY_SETTINGS)
 
             // Notifications
-            "notifications" -> {
-                Intent("android.settings.ALL_APPS_NOTIFICATION_SETTINGS").apply {
-                    if (resolveActivity(context.packageManager) == null) {
-                        this.action = Settings.ACTION_APPLICATION_SETTINGS
-                    }
-                }
-            }
-            "notification_history" -> {
-                Intent("android.settings.NOTIFICATION_HISTORY").apply {
-                    if (resolveActivity(context.packageManager) == null) {
-                        this.action = "android.settings.ALL_APPS_NOTIFICATION_SETTINGS"
-                        if (resolveActivity(context.packageManager) == null) {
-                            this.action = Settings.ACTION_APPLICATION_SETTINGS
-                        }
-                    }
-                }
-            }
+            "notifications" -> arrayOf(
+                "android.settings.ALL_APPS_NOTIFICATION_SETTINGS",
+                Settings.ACTION_APPLICATION_SETTINGS
+            )
+            "notification_history" -> arrayOf(
+                "android.settings.NOTIFICATION_HISTORY",
+                "android.settings.ALL_APPS_NOTIFICATION_SETTINGS",
+                Settings.ACTION_APPLICATION_SETTINGS
+            )
 
-            // Apps & Permissions
-            "all_apps" -> Intent(Settings.ACTION_MANAGE_ALL_APPLICATIONS_SETTINGS)
+            // Apps & Permissions / Special App Access
+            "all_apps" -> arrayOf(Settings.ACTION_MANAGE_ALL_APPLICATIONS_SETTINGS)
             "default_apps" -> {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                    Intent(Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS)
+                if (sdkInt >= Build.VERSION_CODES.N) {
+                    arrayOf(Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS, Settings.ACTION_APPLICATION_SETTINGS)
                 } else {
-                    Intent(Settings.ACTION_APPLICATION_SETTINGS)
+                    arrayOf(Settings.ACTION_APPLICATION_SETTINGS)
                 }
             }
-            "permissions" -> {
-                Intent("android.intent.action.MANAGE_PERMISSIONS").apply {
-                    if (resolveActivity(context.packageManager) == null) {
-                        this.action = Settings.ACTION_APPLICATION_SETTINGS
-                    }
+            "default_home" -> arrayOf(
+                Settings.ACTION_HOME_SETTINGS,
+                Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS,
+                Settings.ACTION_APPLICATION_SETTINGS
+            )
+            "permissions" -> arrayOf(
+                "android.intent.action.MANAGE_PERMISSIONS",
+                Settings.ACTION_PRIVACY_SETTINGS,
+                Settings.ACTION_APPLICATION_SETTINGS
+            )
+            "overlay_permission" -> arrayOf(
+                Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                Settings.ACTION_MANAGE_ALL_APPLICATIONS_SETTINGS
+            )
+            "modify_system_settings" -> arrayOf(
+                Settings.ACTION_MANAGE_WRITE_SETTINGS,
+                Settings.ACTION_MANAGE_ALL_APPLICATIONS_SETTINGS
+            )
+            "usage_access" -> arrayOf(
+                Settings.ACTION_USAGE_ACCESS_SETTINGS,
+                Settings.ACTION_SECURITY_SETTINGS,
+                Settings.ACTION_MANAGE_ALL_APPLICATIONS_SETTINGS
+            )
+            "app_usage" -> {
+                if (sdkInt >= Build.VERSION_CODES.P) {
+                    arrayOf(
+                        Settings.ACTION_APP_USAGE_SETTINGS,
+                        Settings.ACTION_USAGE_ACCESS_SETTINGS,
+                        Settings.ACTION_MANAGE_ALL_APPLICATIONS_SETTINGS
+                    )
+                } else {
+                    arrayOf(
+                        Settings.ACTION_USAGE_ACCESS_SETTINGS,
+                        Settings.ACTION_MANAGE_ALL_APPLICATIONS_SETTINGS
+                    )
                 }
             }
+            "notification_access" -> arrayOf(
+                Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS,
+                Settings.ACTION_MANAGE_ALL_APPLICATIONS_SETTINGS
+            )
+            "dnd_access" -> arrayOf(
+                Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS,
+                Settings.ACTION_ZEN_MODE_PRIORITY_SETTINGS,
+                Settings.ACTION_SOUND_SETTINGS
+            )
+            "all_files_access" -> {
+                if (sdkInt >= Build.VERSION_CODES.R) {
+                    arrayOf(
+                        Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION,
+                        Settings.ACTION_INTERNAL_STORAGE_SETTINGS
+                    )
+                } else {
+                    arrayOf(Settings.ACTION_INTERNAL_STORAGE_SETTINGS)
+                }
+            }
+            "install_unknown_apps" -> {
+                if (sdkInt >= Build.VERSION_CODES.O) {
+                    arrayOf(
+                        Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                        Settings.ACTION_SECURITY_SETTINGS,
+                        Settings.ACTION_MANAGE_ALL_APPLICATIONS_SETTINGS
+                    )
+                } else {
+                    arrayOf(Settings.ACTION_SECURITY_SETTINGS)
+                }
+            }
+            "alarms_reminders" -> {
+                if (sdkInt >= Build.VERSION_CODES.S) {
+                    arrayOf(
+                        Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM,
+                        Settings.ACTION_MANAGE_ALL_APPLICATIONS_SETTINGS
+                    )
+                } else {
+                    arrayOf(Settings.ACTION_MANAGE_ALL_APPLICATIONS_SETTINGS)
+                }
+            }
+            "picture_in_picture" -> arrayOf(
+                "android.settings.PICTURE_IN_PICTURE_SETTINGS",
+                Settings.ACTION_MANAGE_ALL_APPLICATIONS_SETTINGS
+            )
 
-            // Battery Saver
-            "battery_saver" -> Intent(Settings.ACTION_BATTERY_SAVER_SETTINGS)
+            // Battery Saver & Optimization
+            "battery_saver" -> arrayOf(Settings.ACTION_BATTERY_SAVER_SETTINGS)
+            "battery_optimization" -> arrayOf(
+                Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS,
+                Intent.ACTION_POWER_USAGE_SUMMARY,
+                Settings.ACTION_SETTINGS
+            )
 
             // Biometrics & Screen Lock
             "biometrics" -> {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                    Intent(Settings.ACTION_BIOMETRIC_ENROLL)
+                if (sdkInt >= Build.VERSION_CODES.R) {
+                    arrayOf(Settings.ACTION_BIOMETRIC_ENROLL, Settings.ACTION_SECURITY_SETTINGS)
                 } else {
-                    Intent(Settings.ACTION_SECURITY_SETTINGS)
+                    arrayOf(Settings.ACTION_SECURITY_SETTINGS)
                 }
             }
 
             // Accounts & Sync
-            "accounts" -> Intent(Settings.ACTION_SYNC_SETTINGS)
+            "accounts" -> arrayOf(Settings.ACTION_SYNC_SETTINGS)
 
-            // Languages & Keyboard
-            "language" -> Intent(Settings.ACTION_LOCALE_SETTINGS)
-            "keyboard" -> Intent(Settings.ACTION_INPUT_METHOD_SETTINGS)
-            "backup" -> {
-                Intent(Settings.ACTION_PRIVACY_SETTINGS).apply {
-                    if (resolveActivity(context.packageManager) == null) {
-                        this.action = Settings.ACTION_SETTINGS
-                    }
-                }
-            }
+            // Languages, Keyboard & Input
+            "language" -> arrayOf(Settings.ACTION_LOCALE_SETTINGS)
+            "keyboard" -> arrayOf(Settings.ACTION_INPUT_METHOD_SETTINGS)
+            "physical_keyboard" -> arrayOf(
+                Settings.ACTION_HARD_KEYBOARD_SETTINGS,
+                Settings.ACTION_INPUT_METHOD_SETTINGS
+            )
+            "voice_input" -> arrayOf(
+                Settings.ACTION_VOICE_INPUT_SETTINGS,
+                Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS,
+                Settings.ACTION_INPUT_METHOD_SETTINGS
+            )
+            "printing" -> arrayOf(Settings.ACTION_PRINT_SETTINGS, Settings.ACTION_SETTINGS)
+            "backup" -> arrayOf(Settings.ACTION_PRIVACY_SETTINGS, Settings.ACTION_SETTINGS)
 
             // Accessibility & Captions
-            "captioning" -> Intent(Settings.ACTION_CAPTIONING_SETTINGS)
+            "captioning" -> arrayOf(Settings.ACTION_CAPTIONING_SETTINGS)
 
-            // Developer options & System update
-            "developer_options" -> Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS)
-            "system_update" -> {
-                Intent("android.settings.SYSTEM_UPDATE_SETTINGS").apply {
-                    if (resolveActivity(context.packageManager) == null) {
-                        this.action = Settings.ACTION_DEVICE_INFO_SETTINGS
-                    }
-                }
-            }
+            // Developer options, WebView & System update
+            "developer_options" -> arrayOf(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS)
+            "webview_impl" -> arrayOf(
+                Settings.ACTION_WEBVIEW_SETTINGS,
+                Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS,
+                Settings.ACTION_SETTINGS
+            )
+            "system_update" -> arrayOf(
+                "android.settings.SYSTEM_UPDATE_SETTINGS",
+                Settings.ACTION_DEVICE_INFO_SETTINGS
+            )
 
-            else -> Intent(Settings.ACTION_SETTINGS)
+            else -> arrayOf(Settings.ACTION_SETTINGS)
         }
+    }
+
+    internal fun resolveSettingsShortcutIntent(context: Context, action: String): Intent {
+        if (action == "call_recorder") {
+            return Intent(context, com.example.SettingsActivity::class.java).apply {
+                putExtra("start_route", "call_recorder")
+            }
+        }
+        val candidates = resolveSettingsActionCandidates(action)
+        return resolveWithFallbacks(context, *candidates)
+    }
+
+    fun handleSettingsShortcut(context: Context, action: String): Boolean {
+        val settingsIntent = resolveSettingsShortcutIntent(context, action)
         settingsIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         return try {
             context.startActivity(settingsIntent)

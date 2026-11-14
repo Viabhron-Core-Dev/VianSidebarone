@@ -625,25 +625,8 @@ class HybridGridPageView(
                                         }
                                     }
                                     is SidebarItem.SettingsShortcut -> {
-                                        val settingsIntent = when (parsed.action) {
-                                            "wifi" -> Intent(android.provider.Settings.ACTION_WIFI_SETTINGS)
-                                            "bluetooth" -> Intent(android.provider.Settings.ACTION_BLUETOOTH_SETTINGS)
-                                            "display" -> Intent(android.provider.Settings.ACTION_DISPLAY_SETTINGS)
-                                            "sound" -> Intent(android.provider.Settings.ACTION_SOUND_SETTINGS)
-                                            "location" -> Intent(android.provider.Settings.ACTION_LOCATION_SOURCE_SETTINGS)
-                                            "apps" -> Intent(android.provider.Settings.ACTION_APPLICATION_SETTINGS)
-                                            "security" -> Intent(android.provider.Settings.ACTION_SECURITY_SETTINGS)
-                                            "battery" -> Intent(android.provider.Settings.ACTION_BATTERY_SAVER_SETTINGS)
-                                            "date" -> Intent(android.provider.Settings.ACTION_DATE_SETTINGS)
-                                            else -> Intent(android.provider.Settings.ACTION_SETTINGS)
-                                        }
-                                        settingsIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                        try {
-                                            com.example.core.LogKeeper.writeLog("HybridGrid", "Settings shortcut: ${parsed.action}")
-                                            context.startActivity(settingsIntent)
-                                        } catch (e: Exception) {
-                                            com.example.core.LogKeeper.writeLog("HybridGrid", "Settings shortcut err: ${e.message}")
-                                        }
+                                        com.example.core.LogKeeper.writeLog("HybridGrid", "Settings shortcut: ${parsed.action}")
+                                        com.example.feature.element.ElementActionDispatcher.handleSettingsShortcut(context, parsed.action)
                                     }
                                     else -> {}
                                 }
@@ -923,25 +906,8 @@ class HybridGridPageView(
                             popupWindow?.dismiss()
                         }
                         is SidebarItem.SettingsShortcut -> {
-                            val settingsIntent = when (parsed.action) {
-                                "wifi" -> Intent(android.provider.Settings.ACTION_WIFI_SETTINGS)
-                                "bluetooth" -> Intent(android.provider.Settings.ACTION_BLUETOOTH_SETTINGS)
-                                "display" -> Intent(android.provider.Settings.ACTION_DISPLAY_SETTINGS)
-                                "sound" -> Intent(android.provider.Settings.ACTION_SOUND_SETTINGS)
-                                "location" -> Intent(android.provider.Settings.ACTION_LOCATION_SOURCE_SETTINGS)
-                                "apps" -> Intent(android.provider.Settings.ACTION_APPLICATION_SETTINGS)
-                                "security" -> Intent(android.provider.Settings.ACTION_SECURITY_SETTINGS)
-                                "battery" -> Intent(android.provider.Settings.ACTION_BATTERY_SAVER_SETTINGS)
-                                "date" -> Intent(android.provider.Settings.ACTION_DATE_SETTINGS)
-                                else -> Intent(android.provider.Settings.ACTION_SETTINGS)
-                            }
-                            settingsIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                            try {
-                                com.example.core.LogKeeper.writeLog("HybridGrid", "Folder Settings shortcut: ${parsed.action}")
-                                context.startActivity(settingsIntent)
-                            } catch (e: Exception) {
-                                com.example.core.LogKeeper.writeLog("HybridGrid", "Folder Settings shortcut err: ${e.message}")
-                            }
+                            com.example.core.LogKeeper.writeLog("HybridGrid", "Folder Settings shortcut: ${parsed.action}")
+                            com.example.feature.element.ElementActionDispatcher.handleSettingsShortcut(context, parsed.action)
                             popupWindow?.dismiss()
                         }
                         else -> {}

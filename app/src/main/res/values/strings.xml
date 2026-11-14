@@ -3,4 +3,8 @@
     <string name="accessibility_service_description">VianSide uses the Accessibility Service to perform global system actions like Back, Home, and Recents from the side menu.</string>
     <string name="calculator_copy_result">Copy result</string>
     <string name="calculator_result_copied">Result copied to clipboard</string>
+    <string name="calculator_convert_quantity">Convert quantity</string>
+    <string name="calculator_converted_copied">Converted value copied</string>
+    <string name="calculator_swap_units">Swap units</string>
+    <string name="calculator_close_converter">Close converter</string>
 </resources>
