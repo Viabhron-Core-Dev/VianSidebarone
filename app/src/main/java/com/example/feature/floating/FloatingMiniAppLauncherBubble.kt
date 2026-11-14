@@ -6,6 +6,7 @@ import android.graphics.drawable.GradientDrawable
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
+import android.view.WindowManager
 import android.widget.FrameLayout
 import android.widget.TextView
 import com.example.core.FloatingWindow
@@ -37,6 +38,8 @@ class FloatingMiniAppLauncherBubble(
     private val bubbleSizePx = (36 * context.resources.displayMetrics.density).toInt()
 
     init {
+        layoutParams.flags =
+            layoutParams.flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
         // Enforce exact compact dimensions in both bounds and WindowManager.LayoutParams
         setWindowBounds(WindowBounds(initialX, initialY, bubbleSizePx, bubbleSizePx))
     }

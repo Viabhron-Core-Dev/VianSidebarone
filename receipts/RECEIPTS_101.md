@@ -204,4 +204,21 @@
 * Any deviation from what was requested, and why: Extracted `resolveSettingsActionCandidates(action, sdkInt)` as a helper in `ElementActionDispatcher.kt` so unit tests running on mockable `android.jar` (where `Intent.getAction()` and `PackageManager` calls are stubbed) can assert exact primary SDK action strings and API-level branches directly.
 * Any known issue or follow-up needed: Physical device testing needed to confirm `SurfaceControlViewHost` touch scrolling in the converter chip strips and real OEM Intent target resolution for special app access shortcuts (`overlay_permission`, `modify_system_settings`, `picture_in_picture`, `battery_optimization`).
 
+---
+
+### Receipt 116
+* Timestamp: 2026-11-14 23:00 UTC
+* One-line summary of what was requested: Apply the folded launcher bubble keyboard-focus fix by setting `WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE` in `FloatingMiniAppLauncherBubble.init` while leaving `FloatingWindow`, `FloatingMiniAppWindow`, `FloatingMiniAppBridge`, and `:heavy` behavior untouched.
+* Exact files touched:
+  - `app/src/main/java/com/example/feature/floating/FloatingMiniAppLauncherBubble.kt`
+  - `app/src/test/java/com/example/feature/floating/FloatingMiniAppFrameworkTest.kt`
+  - `blueprint/BLUEPRINT.md`
+  - `receipts/RECEIPTS_101.md`
+* What was actually done — factual, not persuasive:
+  1. Imported `android.view.WindowManager` in `FloatingMiniAppLauncherBubble.kt` and added `layoutParams.flags = layoutParams.flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE` inside `init`, keeping `setWindowBounds(WindowBounds(initialX, initialY, bubbleSizePx, bubbleSizePx))` and all touch/drag/tap/wake/accent-color behavior unchanged.
+  2. Did not modify `FloatingWindow.kt`, `FloatingMiniAppWindow.kt`, `FloatingMiniAppBridge.kt`, or any `:heavy`, Reader, or PWA code, and did not set `FLAG_NOT_TOUCHABLE`.
+  3. Added `testFoldedLauncherBubbleFlagsDragWakeAndRestore` in `FloatingMiniAppFrameworkTest.kt` verifying direct bubble creation, folding multiple active mini-apps via `sleepMiniApp`, drag/bounds updates via `updateBounds`, waking the target mini-app via `onBubbleTapped`, and startup restoration of sleeping mini-apps via `restoreActiveMiniApps()`.
+* How it was verified: Local JVM unit tests (`FloatingMiniAppFrameworkTest`: 84/84 passed, `FloatingMiniAppLogFilterTest`: 7/7 passed, `SidebarImeInteractionTest`: 3/3 passed, and targeted Gradle `--tests` run across `FloatingMiniAppFrameworkTest` + `ReaderMiniAppTest` + `FloatingPwaMiniAppTest` + `FloatingMiniAppLogFilterTest`: 103/103 passed) and `compile_applet` (`Build succeeded`). Physical-device behavior was not tested on a device or emulator in this environment.
+* Any deviation from what was requested, and why: Added `bridge.closeMiniApp(id1/id2, deleteDurable = true)` before step 5 of `testFoldedLauncherBubbleFlagsDragWakeAndRestore` so the previously woken `id1` (`ACTIVE`) snapshot did not remain in `DurableMiniAppStore` during the sleeping-snapshot restoration check.
+* Any known issue or follow-up needed: Physical-device validation required to confirm the runtime keyboard opens in other Android apps with one and multiple folded bubbles, bubble dragging/tapping/waking works cleanly, keyboard works inside active mini-apps, and repeated fold/wake cycles remain stable.
 

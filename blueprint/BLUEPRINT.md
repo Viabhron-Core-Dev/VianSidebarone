@@ -623,6 +623,12 @@
   - Expanded search keyword synonyms in `ActionPickerActivity.matchesQuery` to cover all battery optimization, permission, and system access shortcuts.
 - **3. Verification**: 129/129 targeted JVM unit tests passing (`QuantityConverterTest`: 6, `HeavyCalculatorSplitTest`: 23, `FloatingMiniAppFrameworkTest`: 83, `ElementSystemTest`: 4, `UnifiedPageSystemTest`: 13); `compile_applet` build succeeded.
 
+### Phase 14.13: Folded Launcher Bubble Non-Focusable Overlay Fix (COMPLETED)
+- **1. Launcher Bubble Focus Policy (`FloatingMiniAppLauncherBubble.kt`)**:
+  - Set `layoutParams.flags = layoutParams.flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE` inside `FloatingMiniAppLauncherBubble.init` while preserving `setWindowBounds`, touchability (no `FLAG_NOT_TOUCHABLE`), drag repositioning, tap-to-wake, and accent color rendering.
+  - Left `FloatingWindow.kt` base flags, `FloatingMiniAppWindow.kt` active mini-app focus/IME behavior, `FloatingMiniAppBridge.kt`, and `:heavy` runtime untouched.
+- **2. Verification**: `FloatingMiniAppFrameworkTest` (84/84 passed including `testFoldedLauncherBubbleFlagsDragWakeAndRestore`), `FloatingMiniAppLogFilterTest` (7/7), `SidebarImeInteractionTest` (3/3), `ReaderMiniAppTest` (6/6), `FloatingPwaMiniAppTest` (6/6); `compile_applet` build succeeded. Requires physical-device validation for cross-app soft keyboard opening while bubbles are folded.
+
 ---
 
 ## Phase 14: PWA Engine & External AI App Integration (Tier 5 - Highest Complexity)

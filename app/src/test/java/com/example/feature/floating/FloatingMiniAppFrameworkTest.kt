@@ -3040,7 +3040,171 @@ class FloatingMiniAppFrameworkTest {
         assertTrue("Restored floating window must re-enable rounded clipping", window.isCardClippedToOutline)
         assertEquals(expectedRadius, window.appliedCornerRadiusPx, 0.5f)
     }
+
+    @Test
+    fun testFoldedLauncherBubbleFlagsDragWakeAndRestore() {
+        val store = DurableMiniAppStore.getInstance(testContext)
+        val wm = com.example.core.FloatingWindowManager.getInstance(testContext)
+        val bridge = FloatingMiniAppBridge.getInstance(testContext)
+
+        // 1. Direct construction must include FLAG_NOT_FOCUSABLE and remain touchable
+        val directBubble = FloatingMiniAppLauncherBubble(
+            instanceId = "direct_bubble_flag_test",
+            appType = "note",
+            context = testContext,
+            initialX = 48,
+            initialY = 180,
+            onBubbleTapped = {}
+        )
+        assertNotEquals(
+            "Direct FloatingMiniAppLauncherBubble must include FLAG_NOT_FOCUSABLE",
+            0,
+            directBubble.layoutParams.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+        )
+        assertEquals(
+            "FloatingMiniAppLauncherBubble must NOT set FLAG_NOT_TOUCHABLE",
+            0,
+            directBubble.layoutParams.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+        )
+
+        // 2. Folding active mini-apps creates bubbles with FLAG_NOT_FOCUSABLE & touchability intact
+        val id1 = "bubble_flag_note_1"
+        val id2 = "bubble_flag_note_2"
+        val win1 = FloatingMiniAppWindow(id1, testContext, "note")
+        win1.setWindowBounds(WindowBounds(100, 140, 500, 620))
+        win1.createContentView(testContext)
+        win1.setNoteTextForTesting("First sleeping note")
+        wm.registerWindow(win1)
+
+        val win2 = FloatingMiniAppWindow(id2, testContext, "note")
+        win2.setWindowBounds(WindowBounds(160, 200, 500, 620))
+        win2.createContentView(testContext)
+        win2.setNoteTextForTesting("Second sleeping note")
+        wm.registerWindow(win2)
+
+        bridge.sleepMiniApp(id1)
+        bridge.sleepMiniApp(id2)
+
+        assertNull("Active window 1 must be unregistered when folded", wm.getWindow(id1))
+        assertNull("Active window 2 must be unregistered when folded", wm.getWindow(id2))
+
+        val bubble1 = wm.getWindow("bubble_$id1") as? FloatingMiniAppLauncherBubble
+        val bubble2 = wm.getWindow("bubble_$id2") as? FloatingMiniAppLauncherBubble
+        assertNotNull("Launcher bubble 1 must be registered", bubble1)
+        assertNotNull("Launcher bubble 2 must be registered", bubble2)
+
+        assertNotEquals(
+            "Folded bubble 1 must have FLAG_NOT_FOCUSABLE",
+            0,
+            bubble1!!.layoutParams.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+        )
+        assertEquals(
+            "Folded bubble 1 must remain touchable",
+            0,
+            bubble1.layoutParams.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+        )
+        assertNotEquals(
+            "Folded bubble 2 must have FLAG_NOT_FOCUSABLE",
+            0,
+            bubble2!!.layoutParams.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+        )
+
+        // 3. Drag/bounds update preserves FLAG_NOT_FOCUSABLE, touchability, and compact square size
+        val bubbleW = bubble1.bounds.width
+        val bubbleH = bubble1.bounds.height
+        val draggedBounds = WindowBounds(220, 340, bubbleW, bubbleH)
+        assertTrue(wm.updateBounds(bubble1.windowId, draggedBounds))
+        store.updateButtonPosition(id1, 220, 340)
+
+        assertEquals(220, bubble1.layoutParams.x)
+        assertEquals(340, bubble1.layoutParams.y)
+        assertEquals(bubbleW, bubble1.layoutParams.width)
+        assertEquals(bubbleH, bubble1.layoutParams.height)
+        assertNotEquals(
+            "FLAG_NOT_FOCUSABLE must stay set after bubble drag/bounds update",
+            0,
+            bubble1.layoutParams.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+        )
+        assertEquals(
+            "FLAG_NOT_TOUCHABLE must stay unset after bubble drag/bounds update",
+            0,
+            bubble1.layoutParams.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+        )
+
+        // 4. Tapping bubble 1 wakes ONLY mini-app 1 while bubble 2 remains folded and non-focusable
+        val tappedField = FloatingMiniAppLauncherBubble::class.java.getDeclaredField("onBubbleTapped").apply {
+            isAccessible = true
+        }
+        @Suppress("UNCHECKED_CAST")
+        val onTapCallback = tappedField.get(bubble1) as (String) -> Unit
+        onTapCallback.invoke(id1)
+
+        assertNull("Bubble 1 must be dismissed on wake", wm.getWindow("bubble_$id1"))
+        val woken1 = wm.getWindow(id1) as? FloatingMiniAppWindow
+        assertNotNull("Tapping bubble 1 must wake mini-app 1", woken1)
+        assertEquals("First sleeping note", woken1!!.getAuthoritativeNoteText())
+        assertNotNull("Bubble 2 must remain folded", wm.getWindow("bubble_$id2"))
+
+        // 5. Restored sleeping mini-apps on startup also receive FLAG_NOT_FOCUSABLE
+        bridge.closeMiniApp(id1, deleteDurable = true)
+        bridge.closeMiniApp(id2, deleteDurable = true)
+        wm.unregisterAll()
+        FloatingMiniAppBridge.resetForTesting()
+        store.saveSnapshot(
+            MiniAppRecoverySnapshot(
+                instanceId = "restored_sleep_1",
+                appType = "note",
+                state = MiniAppState.SLEEPING,
+                windowBounds = WindowBounds(100, 120, 500, 620),
+                buttonPosition = Pair(36, 260)
+            )
+        )
+        store.saveSnapshot(
+            MiniAppRecoverySnapshot(
+                instanceId = "restored_sleep_2",
+                appType = "reader",
+                state = MiniAppState.SLEEPING,
+                windowBounds = WindowBounds(140, 160, 520, 640),
+                buttonPosition = Pair(36, 360)
+            )
+        )
+
+        val restoredBridge = FloatingMiniAppBridge.getInstance(testContext)
+        val restoredWindows = restoredBridge.restoreActiveMiniApps()
+        assertTrue(restoredWindows.isEmpty())
+
+        val restoredBubble1 = wm.getWindow("bubble_restored_sleep_1") as? FloatingMiniAppLauncherBubble
+        val restoredBubble2 = wm.getWindow("bubble_restored_sleep_2") as? FloatingMiniAppLauncherBubble
+        assertNotNull(restoredBubble1)
+        assertNotNull(restoredBubble2)
+        assertNotEquals(
+            "Restored sleeping bubble 1 must have FLAG_NOT_FOCUSABLE",
+            0,
+            restoredBubble1!!.layoutParams.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+        )
+        assertEquals(
+            "Restored sleeping bubble 1 must remain touchable",
+            0,
+            restoredBubble1.layoutParams.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+        )
+        assertNotEquals(
+            "Restored sleeping bubble 2 must have FLAG_NOT_FOCUSABLE",
+            0,
+            restoredBubble2!!.layoutParams.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+        )
+        assertEquals(
+            "Restored sleeping bubble 2 must remain touchable",
+            0,
+            restoredBubble2.layoutParams.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+        )
+
+        restoredBridge.closeMiniApp(id1, deleteDurable = true)
+        restoredBridge.closeMiniApp(id2, deleteDurable = true)
+        restoredBridge.closeMiniApp("restored_sleep_1", deleteDurable = true)
+        restoredBridge.closeMiniApp("restored_sleep_2", deleteDurable = true)
+    }
 }
+
 
 
 
