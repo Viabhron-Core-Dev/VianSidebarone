@@ -91,8 +91,19 @@ class ReaderReadingView(
     private var hasGenuineReadingInCurrentChapter = false
     private var userTouchDownInReadingView = false
     private var initialChapterLoadScrollY = 0
+    private var chapterOpenedAtMs: Long = 0L
+    internal var clockMsForTesting: (() -> Long)? = null
     private var lastHighWaterUpdate: HighWaterProgressUpdate? = null
     private var undoBannerHideJob: Job? = null
+
+    private fun nowMs(): Long = clockMsForTesting?.invoke() ?: System.currentTimeMillis()
+
+    private fun getScrollableRangePx(): Int {
+        val child = readingScrollView.getChildAt(0) ?: return 0
+        val viewH = readingScrollView.height
+        if (viewH <= 0 || child.height <= 0) return 0
+        return (child.height - viewH).coerceAtLeast(0)
+    }
 
     // UI elements
     private val mainLayout: LinearLayout
@@ -144,8 +155,11 @@ class ReaderReadingView(
                 val step = (2 * autoScrollSpeedMultiplier).toInt().coerceAtLeast(1)
                 readingScrollView.smoothScrollBy(0, step)
                 autoScrollPixelsAccumulated += step
-                if (autoScrollPixelsAccumulated >= dp(90) && !hasGenuineReadingInCurrentChapter) {
-                    recordGenuineReadingActivityOnCurrentChapter()
+                val scrollableRange = getScrollableRangePx()
+                val autoScrollCompletedShort = scrollableRange in 1 until dp(90) &&
+                    readingScrollView.scrollY >= (scrollableRange * 0.70f).toInt().coerceAtLeast(1)
+                if ((autoScrollPixelsAccumulated >= dp(90) || autoScrollCompletedShort) && !hasGenuineReadingInCurrentChapter) {
+                    recordGenuineReadingActivityOnCurrentChapter(currentChapterIndex)
                 }
                 mainHandler.postDelayed(this, 40L)
             }
@@ -163,8 +177,11 @@ class ReaderReadingView(
     private val searchMatches = mutableListOf<Int>()
     private var currentSearchMatchIndex = -1
 
-    // Debounced scroll persistence
+    // Debounced scroll persistence & lifecycle job tracking
     private var scrollSaveJob: Job? = null
+    private var openChapterJob: Job? = null
+    private var highWaterJob: Job? = null
+    private var undoJob: Job? = null
 
     private val settingsListener = {
         applyReaderPreferences()
@@ -542,11 +559,17 @@ class ReaderReadingView(
             }
             setOnScrollChangeListener { _, _, scrollY, _, _ ->
                 currentScrollY = scrollY
-                if (!isProgrammaticScrollOrLoad && userTouchDownInReadingView) {
-                    val delta = kotlin.math.abs(scrollY - initialChapterLoadScrollY)
-                    if (delta >= dp(80) && !hasGenuineReadingInCurrentChapter) {
-                        recordGenuineReadingActivityOnCurrentChapter()
-                    }
+                if (!hasGenuineReadingInCurrentChapter &&
+                    ReaderProgressPolicy.isScrollActivityMeaningful(
+                        scrollY = scrollY,
+                        initialScrollY = initialChapterLoadScrollY,
+                        scrollableRangePx = getScrollableRangePx(),
+                        scrollThresholdPx = dp(80),
+                        userTouched = userTouchDownInReadingView,
+                        isProgrammatic = isProgrammaticScrollOrLoad
+                    )
+                ) {
+                    recordGenuineReadingActivityOnCurrentChapter(currentChapterIndex)
                 }
                 scheduleDebouncedProgressSave()
             }
@@ -642,13 +665,7 @@ class ReaderReadingView(
             }
             setPadding(dp(10), dp(4), dp(10), dp(4))
             setOnClickListener {
-                if (currentChapterIndex < chaptersList.size - 1) {
-                    // Advancing via Next after completing a short or scrolled chapter counts as completing current chapter
-                    if (!hasGenuineReadingInCurrentChapter) {
-                        recordGenuineReadingActivityOnCurrentChapter()
-                    }
-                    openChapter(currentChapterIndex + 1, initialScrollY = 0, isDirectJump = false)
-                }
+                advanceToNextChapterByUser()
             }
         }
         bottomRow.addView(nextChapterButton)
@@ -912,6 +929,7 @@ class ReaderReadingView(
         hasGenuineReadingInCurrentChapter = false
         userTouchDownInReadingView = false
         initialChapterLoadScrollY = initialScrollY
+        chapterOpenedAtMs = nowMs()
         autoScrollPixelsAccumulated = 0
 
         if (!wasTtsSpeaking) {
@@ -942,12 +960,18 @@ class ReaderReadingView(
         nextChapterButton.isEnabled = chapterIndex < chaptersList.size - 1
         tocAdapter.submitChapters(chaptersList, currentChapterIndex)
 
-        viewScope.launch {
+        openChapterJob?.cancel()
+        openChapterJob = viewScope.launch {
             // Maintain 21-chapter rolling cache window and load chapter text
             rawChapterText = repository.getChapterText(book.id, chapterIndex)
             readingContentTextView.text = rawChapterText
+            chapterOpenedAtMs = nowMs()
 
-            readingScrollView.post {
+            val posted = readingScrollView.post {
+                readingScrollView.scrollTo(0, initialScrollY)
+                isProgrammaticScrollOrLoad = false
+            }
+            if (!posted) {
                 readingScrollView.scrollTo(0, initialScrollY)
                 isProgrammaticScrollOrLoad = false
             }
@@ -967,17 +991,63 @@ class ReaderReadingView(
         }
     }
 
+    fun advanceToNextChapterByUser(scrollableRangeOverridePx: Int? = null) {
+        if (currentChapterIndex >= chaptersList.size - 1) return
+        val metaWords = chaptersList.getOrNull(currentChapterIndex)?.wordCount ?: 0
+        val wordCount = if (metaWords > 0) metaWords else ReaderProgressPolicy.countWords(rawChapterText)
+        val scrollableRange = scrollableRangeOverridePx ?: getScrollableRangePx()
+
+        if (ReaderProgressPolicy.shouldAdvanceProgressOnNextClick(
+                hasGenuineReadingInChapter = hasGenuineReadingInCurrentChapter,
+                chapterEnteredAtMs = chapterOpenedAtMs,
+                nowMs = nowMs(),
+                wordCount = wordCount,
+                charCount = rawChapterText.length,
+                scrollableRangePx = scrollableRange,
+                scrollThresholdPx = dp(80)
+            )
+        ) {
+            recordGenuineReadingActivityOnCurrentChapter(currentChapterIndex)
+        }
+        openChapter(currentChapterIndex + 1, initialScrollY = 0, isDirectJump = false)
+    }
+
+    fun simulateUserScrollForTesting(scrollY: Int, scrollableRangePx: Int = dp(800)) {
+        userTouchDownInReadingView = true
+        isProgrammaticScrollOrLoad = false
+        currentScrollY = scrollY
+        if (!hasGenuineReadingInCurrentChapter &&
+            ReaderProgressPolicy.isScrollActivityMeaningful(
+                scrollY = scrollY,
+                initialScrollY = initialChapterLoadScrollY,
+                scrollableRangePx = scrollableRangePx,
+                scrollThresholdPx = dp(80),
+                userTouched = true,
+                isProgrammatic = false
+            )
+        ) {
+            recordGenuineReadingActivityOnCurrentChapter(currentChapterIndex)
+        }
+        repository.saveReadingProgressAsync(
+            bookId = currentBook?.id ?: return,
+            chapterIndex = currentChapterIndex,
+            scrollY = currentScrollY,
+            updateOpenRecency = true
+        )
+    }
+
     /**
-     * Records genuine reading activity in the current chapter and shows the Undo banner if
+     * Records genuine reading activity in [chapterIndex] and shows the Undo banner if
      * Tracker high-water progress (`TrackerBook.readChapters`) increased.
      */
-    fun recordGenuineReadingActivityOnCurrentChapter() {
+    fun recordGenuineReadingActivityOnCurrentChapter(chapterIndex: Int = currentChapterIndex) {
         val book = currentBook ?: return
         if (hasGenuineReadingInCurrentChapter) return
         hasGenuineReadingInCurrentChapter = true
+        val targetChapter = chapterIndex
 
-        viewScope.launch {
-            val update = repository.recordGenuineReadingProgress(book.id, currentChapterIndex)
+        highWaterJob = viewScope.launch {
+            val update = repository.recordGenuineReadingProgress(book.id, targetChapter)
             if (update != null) {
                 showHighWaterUndoBanner(update)
             }
@@ -1002,14 +1072,16 @@ class ReaderReadingView(
         undoBannerLayout.visibility = View.GONE
         lastHighWaterUpdate = null
 
-        viewScope.launch {
+        undoJob = viewScope.launch {
             val ok = repository.undoHighWaterProgress(update)
             if (ok) {
-                Toast.makeText(
-                    appContext,
-                    "Reverted Tracker progress to Ch. ${update.previousReadChapters}",
-                    Toast.LENGTH_SHORT
-                ).show()
+                try {
+                    Toast.makeText(
+                        appContext,
+                        "Reverted Tracker progress to Ch. ${update.previousReadChapters}",
+                        Toast.LENGTH_SHORT
+                    )?.show()
+                } catch (_: Throwable) {}
             }
         }
     }
@@ -1372,6 +1444,9 @@ class ReaderReadingView(
         } catch (_: Throwable) {}
         textToSpeech = null
         scrollSaveJob?.cancel()
+        openChapterJob?.cancel()
+        highWaterJob?.cancel()
+        undoJob?.cancel()
         undoBannerHideJob?.cancel()
         rawChapterText = ""
         readingContentTextView.text = ""
@@ -1385,6 +1460,12 @@ class ReaderReadingView(
 
     fun isViewScopeActiveForTesting(): Boolean =
         viewScope.coroutineContext[kotlinx.coroutines.Job]?.isActive == true
+
+    internal suspend fun awaitPendingJobsForTesting() {
+        openChapterJob?.join()
+        highWaterJob?.join()
+        undoJob?.join()
+    }
 
     fun isAutoScrollRunningForTesting(): Boolean = isAutoScrollRunning
     fun isTtsSpeakingForTesting(): Boolean = isTtsSpeaking

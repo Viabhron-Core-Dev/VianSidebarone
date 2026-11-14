@@ -200,6 +200,45 @@ class ReaderArchitectureAndBackupTest {
         override fun getSharedPreferences(name: String?, mode: Int): SharedPreferences = prefs
         override fun getFilesDir(): File = baseDir
         override fun getCacheDir(): File = baseDir
+
+        private val fakeResources: android.content.res.Resources by lazy {
+            val dm = android.util.DisplayMetrics().apply {
+                density = 2f
+                widthPixels = 800
+                heightPixels = 1600
+            }
+            val conf = android.content.res.Configuration()
+            val am = try {
+                android.content.res.AssetManager::class.java.getConstructor().newInstance()
+            } catch (_: Throwable) {
+                android.content.res.AssetManager::class.java.getDeclaredConstructor().apply { isAccessible = true }.newInstance()
+            }
+            @Suppress("DEPRECATION")
+            object : android.content.res.Resources(am, dm, conf) {
+                override fun getDisplayMetrics(): android.util.DisplayMetrics = dm
+            }
+        }
+
+        override fun getResources(): android.content.res.Resources = fakeResources
+
+        private val mockWindowManager: android.view.WindowManager by lazy {
+            Proxy.newProxyInstance(
+                android.view.WindowManager::class.java.classLoader,
+                arrayOf(android.view.WindowManager::class.java)
+            ) { _, _, _ -> null } as android.view.WindowManager
+        }
+
+        override fun getSystemService(name: String): Any? {
+            return if (name == Context.WINDOW_SERVICE) {
+                mockWindowManager
+            } else {
+                try {
+                    super.getSystemService(name)
+                } catch (_: Throwable) {
+                    null
+                }
+            }
+        }
     }
 
     @Before
@@ -540,5 +579,124 @@ class ReaderArchitectureAndBackupTest {
         val corruptReport = LiteReaderBackupManager.importZipBackup(context, corruptZip)
         assertFalse("Corrupt ZIP must fail cleanly", corruptReport.success)
         assertEquals("Existing Tracker records must remain intact after failed import", countAfterMoon1, fakeDb.trackerDao().getAllBooks().size)
+    }
+
+    /**
+     * Tests Next-click & reading progress rules end-to-end in ReaderReadingView:
+     * - Direct jump to an unread chapter followed immediately by Next must NOT advance Tracker high-water progress.
+     * - Waiting on a normal long chapter without scrolling/TTS/auto-scroll followed by Next must NOT advance progress.
+     * - Meaningful reading activity (scrolling past threshold) advances Tracker high-water progress and shows Undo.
+     * - Short chapters advance fairly on Next once meaningful dwell time (or bottom scroll) is met, without false immediate skips.
+     * - Undo restores previous high-water value while keeping Reader resume chapter/scroll completely separate.
+     */
+    @Test
+    fun testPreventFalseNextProgressShortChapterCompletionAndResumeSeparation() = runBlocking {
+        // Build a TXT book mixing normal long chapters and a genuine short chapter
+        val srcTxt = File(tempFolder.newFolder("progress_policy_book"), "mixed_chapters.txt")
+        val longBody = "This is a substantive paragraph that represents a full normal chapter requiring real reading and scrolling activity before completion. ".repeat(35)
+        val shortBody = "Brief interlude note from the narrator containing just twenty words so it comfortably fits on a single screen."
+        srcTxt.writeText(
+            buildString {
+                for (i in 0 until 20) {
+                    append("Chapter ${i + 1}: Title $i\n")
+                    if (i == 12) {
+                        append(shortBody).append("\n\n")
+                    } else {
+                        append(longBody).append("\n\n")
+                    }
+                }
+            }
+        )
+
+        val imported = repo.importBookFile(srcTxt, "Mixed Length Novel", markOpenedOnImport = true)
+        assertNotNull(imported)
+        val bookId = imported!!.id
+        assertEquals(20, imported.totalChapters)
+
+        // Seed initial high-water progress at chapter 2 (1-based)
+        repo.recordGenuineReadingProgress(bookId, currentChapterZeroBased = 1)
+        assertEquals(2, fakeDb.trackerDao().getByLinkedEpubId(bookId)!!.readChapters)
+
+        var fakeNowMs = 1_000_000L
+        val readingView = ReaderReadingView(
+            context = context,
+            instanceId = "progress_test",
+            onBackToLibrary = {}
+        )
+        readingView.clockMsForTesting = { fakeNowMs }
+
+        try {
+            readingView.loadBook(repo.getBook(bookId)!!, initialChapter = 0, initialScrollY = 0)
+            readingView.awaitPendingJobsForTesting()
+
+            // 1. Direct jump to unread long Chapter 10 (index 9), then IMMEDIATELY press Next -> must NOT advance Tracker!
+            readingView.openChapter(9, initialScrollY = 0, isDirectJump = true)
+            readingView.awaitPendingJobsForTesting()
+            fakeNowMs += 150L
+            readingView.advanceToNextChapterByUser(scrollableRangeOverridePx = 1200)
+            readingView.awaitPendingJobsForTesting()
+            assertEquals("Reader should advance to Chapter 10 (0-based)", 10, readingView.currentChapterIndex)
+            assertEquals("Reader resume chapter must update to 10", 10, fakeDb.epubDao().getBookById(bookId)!!.lastReadChapter)
+            assertEquals(
+                "Immediate Next after jumping to unread Chapter 9 must NOT advance Tracker high-water",
+                2,
+                fakeDb.trackerDao().getByLinkedEpubId(bookId)!!.readChapters
+            )
+
+            // 2. Sit on unread normal Chapter 10 (scrollable) for 15s WITHOUT scrolling, then press Next -> must NOT advance!
+            fakeNowMs += 15_000L
+            readingView.advanceToNextChapterByUser(scrollableRangeOverridePx = 1200)
+            readingView.awaitPendingJobsForTesting()
+            assertEquals(11, readingView.currentChapterIndex)
+            assertEquals(
+                "Pressing Next on unread normal chapter without scrolling must NOT advance Tracker high-water",
+                2,
+                fakeDb.trackerDao().getByLinkedEpubId(bookId)!!.readChapters
+            )
+
+            // 3. Jump to short Chapter 12 (index 12), press Next IMMEDIATELY (+200ms) -> must NOT count as read!
+            readingView.openChapter(12, initialScrollY = 0, isDirectJump = true)
+            readingView.awaitPendingJobsForTesting()
+            fakeNowMs += 200L
+            readingView.advanceToNextChapterByUser(scrollableRangeOverridePx = 0)
+            readingView.awaitPendingJobsForTesting()
+            assertEquals(13, readingView.currentChapterIndex)
+            assertEquals(
+                "Immediate Next on an unread short chapter must NOT count as read",
+                2,
+                fakeDb.trackerDao().getByLinkedEpubId(bookId)!!.readChapters
+            )
+
+            // 4. Jump back to short Chapter 12, genuinely dwell past short-chapter threshold (+5000ms), then press Next -> MUST count!
+            readingView.openChapter(12, initialScrollY = 0, isDirectJump = true)
+            readingView.awaitPendingJobsForTesting()
+            fakeNowMs += 5_000L
+            readingView.advanceToNextChapterByUser(scrollableRangeOverridePx = 0)
+            readingView.awaitPendingJobsForTesting()
+            assertEquals(13, readingView.currentChapterIndex)
+            assertEquals(
+                "Short chapter read past completion threshold before Next must advance Tracker to 13 (1-based)",
+                13,
+                fakeDb.trackerDao().getByLinkedEpubId(bookId)!!.readChapters
+            )
+            assertTrue("Undo banner must appear after short-chapter high-water increase", readingView.isUndoBannerVisibleForTesting())
+
+            // 5. Undo reverts high-water back to 2 while keeping Reader resume at Chapter 13
+            readingView.performHighWaterProgressUndo()
+            readingView.awaitPendingJobsForTesting()
+            assertEquals(2, fakeDb.trackerDao().getByLinkedEpubId(bookId)!!.readChapters)
+            assertEquals(13, fakeDb.epubDao().getBookById(bookId)!!.lastReadChapter)
+
+            // 6. Meaningful manual scrolling on Chapter 13 (normal chapter) advances Tracker to 14 and updates scrollY
+            readingView.simulateUserScrollForTesting(scrollY = 420, scrollableRangePx = 1200)
+            readingView.awaitPendingJobsForTesting()
+            Thread.sleep(150) // allow persistentIoScope to finish async saveResumePosition
+            assertEquals(14, fakeDb.trackerDao().getByLinkedEpubId(bookId)!!.readChapters)
+            val savedEpub = fakeDb.epubDao().getBookById(bookId)!!
+            assertEquals(13, savedEpub.lastReadChapter)
+            assertEquals(420, savedEpub.lastReadScrollY)
+        } finally {
+            readingView.releaseResources()
+        }
     }
 }

@@ -9,11 +9,17 @@ import org.json.JSONObject
 import org.xmlpull.v1.XmlPullParser
 import org.xmlpull.v1.XmlPullParserFactory
 import java.io.BufferedReader
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileInputStream
 import java.io.InputStreamReader
+import java.io.RandomAccessFile
 import java.io.StringReader
 import java.net.URLDecoder
+import java.nio.ByteBuffer
+import java.nio.CharBuffer
+import java.nio.charset.Charset
+import java.nio.charset.CodingErrorAction
 import java.util.concurrent.ConcurrentHashMap
 import java.util.zip.ZipEntry
 import java.util.zip.ZipFile
@@ -22,7 +28,7 @@ import kotlin.math.min
 
 /**
  * Metadata representation for an individual book chapter.
- * [sourceRef] stores the internal ZIP entry path for EPUBs or "txt_chars:<start>:<end>" for TXT books.
+ * [sourceRef] stores the internal ZIP entry path for EPUBs or "txt_bytes:<start>:<end>:<charset>" (or legacy "txt_chars:<start>:<end>") for TXT books.
  */
 data class ChapterMeta(
     val index: Int,
@@ -40,7 +46,8 @@ data class BookCacheManifest(
     val sourceFilePath: String,
     val sourceLastModified: Long,
     val sourceSize: Long,
-    val totalChapters: Int
+    val totalChapters: Int,
+    val charsetName: String = "UTF-8"
 )
 
 /**
@@ -76,6 +83,19 @@ object EpubParser {
     // Active center chapter per bookId
     private val activeWindowCenter = ConcurrentHashMap<Int, Int>()
     private val bookLocks = ConcurrentHashMap<Int, Any>()
+
+    // Instrumentation counters for unit tests to verify bounded byte-range TXT materialization
+    @Volatile
+    var lastTxtMaterializeBytesReadForTesting: Long = 0L
+        private set
+    @Volatile
+    var txtMaterializeReadCallCountForTesting: Int = 0
+        private set
+
+    fun resetTxtTestCounters() {
+        lastTxtMaterializeBytesReadForTesting = 0L
+        txtMaterializeReadCallCountForTesting = 0
+    }
 
     private fun lockFor(bookId: Int): Any = bookLocks.getOrPut(bookId) { Any() }
 
@@ -254,93 +274,130 @@ object EpubParser {
     }
 
     /**
-     * Parses a plain TXT file lazily into segmented chapter metadata (`toc.json` + `cache_manifest.json`)
-     * using character offsets (`txt_chars:<start>:<end>`), without writing all chapter `.txt` files upfront.
+     * Parses a plain TXT file in a single streaming pass into segmented chapter metadata
+     * (`toc.json` + `cache_manifest.json`) using exact byte ranges (`txt_bytes:<start>:<end>:<charset>`).
+     * Never loads the full TXT file into memory.
      */
-    suspend fun parseTxtToText(context: Context, bookId: Int, txtFile: File): Int = withContext(Dispatchers.IO) {
+    suspend fun parseTxtToText(
+        context: Context,
+        bookId: Int,
+        txtFile: File
+    ): Int = parseTxtToTextInternal(context, bookId, txtFile, bufferSize = 65536)
+
+    internal suspend fun parseTxtToTextInternal(
+        context: Context,
+        bookId: Int,
+        txtFile: File,
+        bufferSize: Int = 65536
+    ): Int = withContext(Dispatchers.IO) {
         try {
             if (!txtFile.exists() || !txtFile.isFile) return@withContext -1
             val bookDir = File(context.filesDir, "book_$bookId")
             if (!bookDir.exists()) bookDir.mkdirs()
 
             val chapterPattern = Regex("(?im)^\\s*(Chapter|CHAPTER|Section|SECTION|Part|PART)\\s+([0-9IVXLCDM]+|[A-Za-z]+)(\\s*[:\\-\\u2014].*)?$")
+            val (charset, bomOffset) = detectTxtEncoding(txtFile)
+            val charsetTag = charset.name()
 
-            // Pass 1: stream lines to count headings without holding duplicate copies
+            // Single-pass streaming trackers: both heading-based and size-based (~15,000 chars) segments
             var detectedHeadingCount = 0
-            BufferedReader(InputStreamReader(FileInputStream(txtFile), Charsets.UTF_8)).use { reader ->
-                var line = reader.readLine()
-                while (line != null) {
-                    if (chapterPattern.matches(line.trim())) {
-                        detectedHeadingCount++
-                    }
-                    line = reader.readLine()
-                }
-            }
+            val headingSegments = mutableListOf<ChapterMeta>()
+            var hStartByte = bomOffset
+            var hEndByte = bomOffset
+            var hTitle = "Chapter 1"
+            var hWordCount = 0
+            var hHasNonBlank = false
 
-            // Normalize text with \n line endings so character offsets are deterministic
-            val normalizedText = BufferedReader(InputStreamReader(FileInputStream(txtFile), Charsets.UTF_8)).use { reader ->
-                reader.readLines().joinToString("\n")
-            }
+            val sectionSegments = mutableListOf<ChapterMeta>()
+            var sStartByte = bomOffset
+            var sEndByte = bomOffset
+            var sCharCount = 0
+            var sWordCount = 0
+            var sHasNonBlank = false
 
-            val chaptersMeta = mutableListOf<ChapterMeta>()
-            var chapterCount = 0
-
-            fun recordSegment(startOffset: Int, endOffset: Int, title: String) {
-                if (endOffset <= startOffset) return
-                val slice = normalizedText.substring(startOffset, endOffset).trim()
-                if (slice.isNotBlank()) {
-                    val wc = countWordsFast(slice)
-                    val cleanTitle = title.takeIf { it.isNotBlank() } ?: "Chapter ${chapterCount + 1}"
-                    chaptersMeta.add(
+            fun flushHeadingSegment() {
+                if (hHasNonBlank && hEndByte > hStartByte) {
+                    val idx = headingSegments.size
+                    val cleanTitle = hTitle.takeIf { it.isNotBlank() } ?: "Chapter ${idx + 1}"
+                    headingSegments.add(
                         ChapterMeta(
-                            index = chapterCount,
+                            index = idx,
                             title = cleanTitle,
-                            wordCount = wc,
-                            sourceRef = "txt_chars:$startOffset:$endOffset"
+                            wordCount = hWordCount,
+                            sourceRef = "txt_bytes:$hStartByte:$hEndByte:$charsetTag"
                         )
                     )
-                    chapterCount++
                 }
             }
 
-            if (detectedHeadingCount >= 2) {
-                var pos = 0
-                var currentStart = 0
-                var currentTitle = "Chapter 1"
-                val lines = normalizedText.split('\n')
-                for (i in lines.indices) {
-                    val line = lines[i]
-                    val trimmed = line.trim()
-                    if (chapterPattern.matches(trimmed)) {
-                        if (pos > currentStart) {
-                            recordSegment(currentStart, pos, currentTitle)
-                        }
-                        currentStart = pos
-                        currentTitle = trimmed
-                    }
-                    pos += line.length + (if (i < lines.lastIndex) 1 else 0)
-                }
-                if (normalizedText.length > currentStart) {
-                    recordSegment(currentStart, normalizedText.length, currentTitle)
-                }
-            } else {
-                var pos = 0
-                var currentStart = 0
-                val lines = normalizedText.split('\n')
-                for (i in lines.indices) {
-                    val line = lines[i]
-                    val nextPos = pos + line.length + (if (i < lines.lastIndex) 1 else 0)
-                    if (nextPos - currentStart >= 15000 && line.isBlank()) {
-                        recordSegment(currentStart, nextPos, "Section ${chapterCount + 1}")
-                        currentStart = nextPos
-                    }
-                    pos = nextPos
-                }
-                if (normalizedText.length > currentStart || chapterCount == 0) {
-                    val fallbackTitle = if (chapterCount == 0) "Complete Text" else "Section ${chapterCount + 1}"
-                    recordSegment(currentStart, normalizedText.length, fallbackTitle)
+            fun flushSectionSegment(isFinal: Boolean) {
+                if (sHasNonBlank && sEndByte > sStartByte) {
+                    val idx = sectionSegments.size
+                    val title = if (isFinal && idx == 0) "Complete Text" else "Section ${idx + 1}"
+                    sectionSegments.add(
+                        ChapterMeta(
+                            index = idx,
+                            title = title,
+                            wordCount = sWordCount,
+                            sourceRef = "txt_bytes:$sStartByte:$sEndByte:$charsetTag"
+                        )
+                    )
                 }
             }
+
+            streamTxtLinesWithByteOffsets(
+                file = txtFile,
+                charset = charset,
+                bomOffset = bomOffset,
+                bufferSize = bufferSize
+            ) { line, lineStartByte, nextLineStartByte ->
+                val trimmed = line.trim()
+                val lineWords = countWordsFast(trimmed)
+
+                // Track heading-based segmentation
+                if (chapterPattern.matches(trimmed)) {
+                    detectedHeadingCount++
+                    if (lineStartByte > hStartByte) {
+                        flushHeadingSegment()
+                    }
+                    hStartByte = lineStartByte
+                    hEndByte = nextLineStartByte
+                    hTitle = trimmed
+                    hWordCount = lineWords
+                    hHasNonBlank = lineWords > 0
+                } else {
+                    hEndByte = nextLineStartByte
+                    if (lineWords > 0) {
+                        hWordCount += lineWords
+                        hHasNonBlank = true
+                    }
+                }
+
+                // Track fallback ~15,000-character section segmentation
+                sEndByte = nextLineStartByte
+                sCharCount += line.length + 1
+                if (lineWords > 0) {
+                    sWordCount += lineWords
+                    sHasNonBlank = true
+                }
+                if (sCharCount >= 15000 && line.isBlank() && sHasNonBlank) {
+                    flushSectionSegment(isFinal = false)
+                    sStartByte = nextLineStartByte
+                    sCharCount = 0
+                    sWordCount = 0
+                    sHasNonBlank = false
+                }
+            }
+
+            flushHeadingSegment()
+            flushSectionSegment(isFinal = true)
+
+            val chaptersMeta = if (detectedHeadingCount >= 2 && headingSegments.size >= 2) {
+                headingSegments
+            } else {
+                sectionSegments
+            }
+            val chapterCount = chaptersMeta.size
 
             synchronized(lockFor(bookId)) {
                 cleanupAllCachedChaptersOnDisk(bookDir)
@@ -356,7 +413,8 @@ object EpubParser {
                         sourceFilePath = txtFile.absolutePath,
                         sourceLastModified = txtFile.lastModified(),
                         sourceSize = txtFile.length(),
-                        totalChapters = chapterCount
+                        totalChapters = chapterCount,
+                        charsetName = charsetTag
                     )
                 )
             }
@@ -365,6 +423,208 @@ object EpubParser {
         } catch (e: Exception) {
             LogKeeper.log(context, "EpubParserTxt", "TXT parse error: ${e.message}")
             return@withContext -1
+        }
+    }
+
+    internal fun detectTxtEncoding(file: File): Pair<Charset, Long> {
+        val sample = ByteArray(65536)
+        var bytesRead = 0
+        try {
+            FileInputStream(file).use { fis ->
+                while (bytesRead < sample.size) {
+                    val r = fis.read(sample, bytesRead, sample.size - bytesRead)
+                    if (r <= 0) break
+                    bytesRead += r
+                }
+            }
+        } catch (_: Throwable) {
+            return Charsets.UTF_8 to 0L
+        }
+
+        if (bytesRead >= 4) {
+            val b0 = sample[0].toInt() and 0xFF
+            val b1 = sample[1].toInt() and 0xFF
+            val b2 = sample[2].toInt() and 0xFF
+            val b3 = sample[3].toInt() and 0xFF
+            if (b0 == 0x00 && b1 == 0x00 && b2 == 0xFE && b3 == 0xFF) {
+                return runCatching { Charset.forName("UTF-32BE") }.getOrDefault(Charsets.UTF_8) to 4L
+            }
+            if (b0 == 0xFF && b1 == 0xFE && b2 == 0x00 && b3 == 0x00) {
+                return runCatching { Charset.forName("UTF-32LE") }.getOrDefault(Charsets.UTF_8) to 4L
+            }
+        }
+        if (bytesRead >= 3) {
+            val b0 = sample[0].toInt() and 0xFF
+            val b1 = sample[1].toInt() and 0xFF
+            val b2 = sample[2].toInt() and 0xFF
+            if (b0 == 0xEF && b1 == 0xBB && b2 == 0xBF) {
+                return Charsets.UTF_8 to 3L
+            }
+        }
+        if (bytesRead >= 2) {
+            val b0 = sample[0].toInt() and 0xFF
+            val b1 = sample[1].toInt() and 0xFF
+            if (b0 == 0xFE && b1 == 0xFF) {
+                return Charsets.UTF_16BE to 2L
+            }
+            if (b0 == 0xFF && b1 == 0xFE) {
+                return Charsets.UTF_16LE to 2L
+            }
+        }
+
+        if (bytesRead > 0) {
+            val decoder = Charsets.UTF_8.newDecoder()
+                .onMalformedInput(CodingErrorAction.REPORT)
+                .onUnmappableCharacter(CodingErrorAction.REPORT)
+            val byteBuf = ByteBuffer.wrap(sample, 0, bytesRead)
+            val charBuf = CharBuffer.allocate(bytesRead)
+            val endOfInput = file.length() <= bytesRead.toLong()
+            val cr = decoder.decode(byteBuf, charBuf, endOfInput)
+            if (cr.isError) {
+                val fallback = if (Charset.isSupported("windows-1252")) {
+                    Charset.forName("windows-1252")
+                } else {
+                    Charsets.ISO_8859_1
+                }
+                return fallback to 0L
+            }
+        }
+        return Charsets.UTF_8 to 0L
+    }
+
+    internal fun streamTxtLinesWithByteOffsets(
+        file: File,
+        charset: Charset,
+        bomOffset: Long,
+        bufferSize: Int = 65536,
+        onLine: (line: String, lineStartByte: Long, nextLineStartByte: Long) -> Unit
+    ) {
+        val upperName = charset.name().uppercase()
+        val stride = when {
+            upperName.contains("UTF-16") -> 2
+            upperName.contains("UTF-32") -> 4
+            else -> 1
+        }
+        val isBigEndian = upperName.contains("BE")
+        val effectiveBufferSize = ((bufferSize.coerceAtLeast(stride * 8)) / stride) * stride
+        val decoder = charset.newDecoder()
+            .onMalformedInput(CodingErrorAction.REPLACE)
+            .onUnmappableCharacter(CodingErrorAction.REPLACE)
+        val lineBuf = ByteArrayOutputStream(1024)
+        var lineStartOffset = bomOffset
+        var lastWasCr = false
+
+        fun emitCurrentLine(nextStartOffset: Long) {
+            val rawBytes = lineBuf.toByteArray()
+            val text = if (rawBytes.isEmpty()) {
+                ""
+            } else {
+                decoder.reset()
+                decoder.decode(ByteBuffer.wrap(rawBytes, 0, rawBytes.size)).toString()
+            }
+            lineBuf.reset()
+            onLine(text, lineStartOffset, nextStartOffset)
+            lineStartOffset = nextStartOffset
+        }
+
+        FileInputStream(file).use { fis ->
+            var toSkip = bomOffset
+            val skipScratch = ByteArray(16)
+            while (toSkip > 0L) {
+                val r = fis.read(skipScratch, 0, minOf(toSkip, skipScratch.size.toLong()).toInt())
+                if (r <= 0) break
+                toSkip -= r.toLong()
+            }
+
+            var currentOffset = bomOffset
+            val readBuf = ByteArray(effectiveBufferSize)
+            var carryLen = 0
+            val carry = ByteArray(stride)
+
+            while (true) {
+                val read = fis.read(readBuf, carryLen, effectiveBufferSize - carryLen)
+                if (read == -1) break
+                if (carryLen > 0) {
+                    System.arraycopy(carry, 0, readBuf, 0, carryLen)
+                }
+                val totalValid = carryLen + read
+                val alignedLimit = (totalValid / stride) * stride
+                carryLen = totalValid - alignedLimit
+                if (carryLen > 0) {
+                    System.arraycopy(readBuf, alignedLimit, carry, 0, carryLen)
+                }
+
+                var i = 0
+                while (i < alignedLimit) {
+                    val isLf: Boolean
+                    val isCr: Boolean
+                    val isAsciiSpaceOrTab: Boolean
+                    when (stride) {
+                        1 -> {
+                            val b = readBuf[i].toInt() and 0xFF
+                            isLf = b == 0x0A
+                            isCr = b == 0x0D
+                            isAsciiSpaceOrTab = b == 0x20 || b == 0x09
+                        }
+                        2 -> {
+                            val b0 = readBuf[i].toInt() and 0xFF
+                            val b1 = readBuf[i + 1].toInt() and 0xFF
+                            val codeUnit = if (isBigEndian) (b0 shl 8) or b1 else (b1 shl 8) or b0
+                            isLf = codeUnit == 0x000A
+                            isCr = codeUnit == 0x000D
+                            isAsciiSpaceOrTab = codeUnit == 0x0020 || codeUnit == 0x0009
+                        }
+                        else -> {
+                            val b0 = readBuf[i].toInt() and 0xFF
+                            val b1 = readBuf[i + 1].toInt() and 0xFF
+                            val b2 = readBuf[i + 2].toInt() and 0xFF
+                            val b3 = readBuf[i + 3].toInt() and 0xFF
+                            val codePoint = if (isBigEndian) {
+                                (b0 shl 24) or (b1 shl 16) or (b2 shl 8) or b3
+                            } else {
+                                (b3 shl 24) or (b2 shl 16) or (b1 shl 8) or b0
+                            }
+                            isLf = codePoint == 0x000A
+                            isCr = codePoint == 0x000D
+                            isAsciiSpaceOrTab = codePoint == 0x0020 || codePoint == 0x0009
+                        }
+                    }
+
+                    currentOffset += stride.toLong()
+                    i += stride
+
+                    if (isCr) {
+                        emitCurrentLine(currentOffset)
+                        lastWasCr = true
+                    } else if (isLf) {
+                        if (lastWasCr) {
+                            lastWasCr = false
+                            lineStartOffset = currentOffset
+                        } else {
+                            emitCurrentLine(currentOffset)
+                        }
+                    } else {
+                        lastWasCr = false
+                        lineBuf.write(readBuf, i - stride, stride)
+                        if (lineBuf.size() >= 32768) {
+                            val canHardBreakUtf8 = stride == 1 && lineBuf.size() >= 65536 &&
+                                i < alignedLimit && ((readBuf[i].toInt() and 0xC0) != 0x80)
+                            val canHardBreakMulti = stride > 1 && lineBuf.size() >= 65536
+                            if (isAsciiSpaceOrTab || canHardBreakUtf8 || canHardBreakMulti) {
+                                emitCurrentLine(currentOffset)
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (carryLen > 0) {
+                lineBuf.write(carry, 0, carryLen)
+                currentOffset += carryLen.toLong()
+            }
+            if (lineBuf.size() > 0) {
+                emitCurrentLine(currentOffset)
+            }
         }
     }
 
@@ -624,19 +884,41 @@ object EpubParser {
         if (indicesToLoad.isEmpty()) return
         try {
             if (format.equals("txt", ignoreCase = true)) {
-                val normalizedText = BufferedReader(InputStreamReader(FileInputStream(sourceFile), Charsets.UTF_8)).use { reader ->
-                    reader.readLines().joinToString("\n")
-                }
+                val manifestCharset = loadCacheManifest(bookDir)?.charsetName
+                val defaultCharset = runCatching {
+                    Charset.forName(manifestCharset ?: "UTF-8")
+                }.getOrDefault(Charsets.UTF_8)
+
                 for (idx in indicesToLoad) {
                     val meta = toc.getOrNull(idx) ?: continue
                     val ref = meta.sourceRef
-                    if (ref.startsWith("txt_chars:")) {
-                        val parts = ref.removePrefix("txt_chars:").split(':')
-                        val start = parts.getOrNull(0)?.toIntOrNull() ?: continue
-                        val end = parts.getOrNull(1)?.toIntOrNull() ?: continue
-                        val safeStart = start.coerceIn(0, normalizedText.length)
-                        val safeEnd = end.coerceIn(safeStart, normalizedText.length)
-                        val text = normalizedText.substring(safeStart, safeEnd).trim()
+                    val text: String? = when {
+                        ref.startsWith("txt_bytes:") -> {
+                            val parts = ref.removePrefix("txt_bytes:").split(':', limit = 3)
+                            val startByte = parts.getOrNull(0)?.toLongOrNull()
+                            val endByte = parts.getOrNull(1)?.toLongOrNull()
+                            val refCharset = parts.getOrNull(2)?.takeIf { it.isNotBlank() }?.let {
+                                runCatching { Charset.forName(it) }.getOrNull()
+                            } ?: defaultCharset
+                            if (startByte != null && endByte != null) {
+                                readTxtByteRange(sourceFile, startByte, endByte, refCharset)
+                            } else {
+                                null
+                            }
+                        }
+                        ref.startsWith("txt_chars:") -> {
+                            val parts = ref.removePrefix("txt_chars:").split(':')
+                            val startChar = parts.getOrNull(0)?.toIntOrNull()
+                            val endChar = parts.getOrNull(1)?.toIntOrNull()
+                            if (startChar != null && endChar != null) {
+                                readTxtCharRangeStreaming(sourceFile, startChar, endChar, defaultCharset)
+                            } else {
+                                null
+                            }
+                        }
+                        else -> null
+                    }
+                    if (text != null) {
                         memMap[idx] = text
                         if (persistToDisk) {
                             writeFileAtomic(File(bookDir, "chapter_$idx.txt"), text)
@@ -660,6 +942,126 @@ object EpubParser {
                 }
             }
         } catch (_: Throwable) {}
+    }
+
+    internal fun readTxtByteRange(
+        file: File,
+        startByte: Long,
+        endByte: Long,
+        charset: Charset,
+        chunkSize: Int = 16384
+    ): String {
+        if (!file.exists() || endByte <= startByte) return ""
+        val totalToRead = (endByte - startByte).coerceAtLeast(0L)
+        if (totalToRead == 0L) return ""
+
+        val decoder = charset.newDecoder()
+            .onMalformedInput(CodingErrorAction.REPLACE)
+            .onUnmappableCharacter(CodingErrorAction.REPLACE)
+        val inBuf = ByteBuffer.allocate(chunkSize)
+        val outBuf = CharBuffer.allocate(chunkSize)
+        val sb = StringBuilder(minOf(totalToRead, 262144L).toInt().coerceAtLeast(64))
+
+        RandomAccessFile(file, "r").use { raf ->
+            val channel = raf.channel
+            channel.position(startByte)
+            var remaining = totalToRead
+            while (remaining > 0L) {
+                val maxFill = minOf(inBuf.remaining().toLong(), remaining).toInt()
+                if (maxFill <= 0) break
+                val oldLimit = inBuf.limit()
+                inBuf.limit(inBuf.position() + maxFill)
+                val read = channel.read(inBuf)
+                inBuf.limit(oldLimit)
+                if (read <= 0) {
+                    remaining = 0L
+                    break
+                }
+                remaining -= read.toLong()
+                lastTxtMaterializeBytesReadForTesting += read.toLong()
+
+                inBuf.flip()
+                val isEof = remaining <= 0L
+                while (true) {
+                    val cr = decoder.decode(inBuf, outBuf, isEof)
+                    outBuf.flip()
+                    if (outBuf.hasRemaining()) {
+                        sb.append(outBuf)
+                    }
+                    outBuf.clear()
+                    if (cr.isOverflow) continue
+                    break
+                }
+                inBuf.compact()
+            }
+            if (inBuf.position() > 0) {
+                inBuf.flip()
+                while (true) {
+                    val cr = decoder.decode(inBuf, outBuf, true)
+                    outBuf.flip()
+                    if (outBuf.hasRemaining()) {
+                        sb.append(outBuf)
+                    }
+                    outBuf.clear()
+                    if (cr.isOverflow) continue
+                    break
+                }
+            }
+            while (true) {
+                val cr = decoder.flush(outBuf)
+                outBuf.flip()
+                if (outBuf.hasRemaining()) {
+                    sb.append(outBuf)
+                }
+                outBuf.clear()
+                if (!cr.isOverflow) break
+            }
+        }
+        txtMaterializeReadCallCountForTesting++
+        return normalizeLineEndings(sb.toString()).trim()
+    }
+
+    /**
+     * Streaming fallback for legacy `txt_chars:<start>:<end>` entries from prior installs
+     * so even unmigrated books never materialize the entire TXT file into memory.
+     */
+    private fun readTxtCharRangeStreaming(
+        file: File,
+        startChar: Int,
+        endChar: Int,
+        charset: Charset
+    ): String {
+        if (!file.exists() || endChar <= startChar) return ""
+        val sb = StringBuilder((endChar - startChar).coerceIn(64, 262144))
+        BufferedReader(InputStreamReader(FileInputStream(file), charset)).use { reader ->
+            var pos = 0
+            var firstLine = true
+            while (pos < endChar) {
+                val line = reader.readLine() ?: break
+                val lineWithSepStart = if (firstLine) pos else pos
+                if (!firstLine) {
+                    // '\n' separator between lines
+                    if (pos in startChar until endChar) {
+                        sb.append('\n')
+                    }
+                    pos += 1
+                }
+                firstLine = false
+                val lineEnd = pos + line.length
+                if (lineEnd > startChar && pos < endChar) {
+                    val sliceStart = (startChar - pos).coerceIn(0, line.length)
+                    val sliceEnd = (endChar - pos).coerceIn(sliceStart, line.length)
+                    sb.append(line, sliceStart, sliceEnd)
+                }
+                pos = lineEnd
+            }
+        }
+        return sb.toString().trim()
+    }
+
+    private fun normalizeLineEndings(s: String): String {
+        if (!s.contains('\r')) return s
+        return s.replace("\r\n", "\n").replace('\r', '\n')
     }
 
     private fun resolveSourceFile(
@@ -716,6 +1118,7 @@ object EpubParser {
                 put("sourceLastModified", manifest.sourceLastModified)
                 put("sourceSize", manifest.sourceSize)
                 put("totalChapters", manifest.totalChapters)
+                put("charsetName", manifest.charsetName)
             }
             writeFileAtomic(File(bookDir, "cache_manifest.json"), obj.toString(2))
         } catch (_: Throwable) {}
@@ -732,7 +1135,8 @@ object EpubParser {
                 sourceFilePath = obj.optString("sourceFilePath", ""),
                 sourceLastModified = obj.optLong("sourceLastModified", 0L),
                 sourceSize = obj.optLong("sourceSize", 0L),
-                totalChapters = obj.optInt("totalChapters", 0)
+                totalChapters = obj.optInt("totalChapters", 0),
+                charsetName = obj.optString("charsetName", "UTF-8").ifBlank { "UTF-8" }
             )
         } catch (_: Throwable) {
             null

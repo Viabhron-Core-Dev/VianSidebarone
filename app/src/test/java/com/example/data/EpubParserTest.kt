@@ -473,6 +473,133 @@ Winston Smith, his chin nuzzled into his breast in an effort to escape the vile 
         assertEquals((0..14).toSet(), EpubParser.getCachedChapterIndicesOnDisk(testContext, smallBookId))
     }
 
+    /**
+     * Case 13: Very large TXT file (~6 MB across 120 chapters) parses via streaming byte-offsets
+     * without materializing chapters upfront, decodes UTF-8 multi-byte characters split across tiny
+     * read boundaries cleanly, and materializes only the requested rolling window byte range.
+     */
+    @Test
+    fun testLargeTxtStreamingAndUtf8BoundarySafetyWithoutFullFileMaterialization() = runBlocking {
+        val largeTxt = File(tempDir, "large_novel_utf8.txt")
+        val chapterCount = 120
+        val sampleParagraph = "Multi-byte test: café — 世界 😀 keeps streaming across buffer cuts cleanly. ".repeat(65)
+        largeTxt.bufferedWriter(Charsets.UTF_8).use { writer ->
+            for (i in 0 until chapterCount) {
+                writer.write("Chapter ${i + 1}: Starlight_${i}\r\n")
+                writer.write("$sampleParagraph [TOKEN_CH_$i]\r\n\r\n")
+            }
+        }
+        val fileBytes = largeTxt.length()
+        assertTrue("Generated TXT should be multi-megabyte (> 500 KB)", fileBytes > 500_000L)
+
+        val bookId = 301
+        // Force a 37-byte prime buffer size so multi-byte UTF-8 and CRLF split across buffer boundaries
+        val count = EpubParser.parseTxtToTextInternal(testContext, bookId, largeTxt, bufferSize = 37)
+        assertEquals(chapterCount, count)
+
+        val toc = EpubParser.getChapterList(testContext, bookId)
+        assertEquals(chapterCount, toc.size)
+        assertTrue("TOC must record byte-range sourceRefs", toc[0].sourceRef.startsWith("txt_bytes:"))
+        assertEquals(
+            "Zero chapter_*.txt files may be extracted upfront on TXT import",
+            0,
+            EpubParser.getCachedChapterIndicesOnDisk(testContext, bookId).size
+        )
+
+        // Verify loading chapter 90 reads ONLY the 21-chapter rolling window (~17% of file), NOT the whole file
+        EpubParser.resetTxtTestCounters()
+        val ch90 = EpubParser.getChapterText(testContext, bookId, 90)
+        assertTrue(ch90.contains("Chapter 91: Starlight_90"))
+        assertTrue(ch90.contains("[TOKEN_CH_90]"))
+        assertTrue(ch90.contains("café — 世界 😀"))
+        assertTrue("Must not produce replacement character U+FFFD", !ch90.contains('\uFFFD'))
+        assertEquals((80..100).toSet(), EpubParser.getCachedChapterIndicesOnDisk(testContext, bookId))
+        assertTrue(
+            "Materializing 21-chapter window must read far less than full file (read=${EpubParser.lastTxtMaterializeBytesReadForTesting}, total=$fileBytes)",
+            EpubParser.lastTxtMaterializeBytesReadForTesting < fileBytes / 3
+        )
+
+        // Also test readTxtByteRange with tiny 19-byte chunkSize across multi-byte UTF-8 characters
+        val parts90 = toc[90].sourceRef.removePrefix("txt_bytes:").split(':')
+        val directRead = EpubParser.readTxtByteRange(
+            file = largeTxt,
+            startByte = parts90[0].toLong(),
+            endByte = parts90[1].toLong(),
+            charset = Charsets.UTF_8,
+            chunkSize = 19
+        )
+        assertTrue(directRead.contains("café — 世界 😀"))
+        assertTrue(!directRead.contains('\uFFFD'))
+
+        // Verify UTF-16LE BOM + split code units parse and decode cleanly
+        val utf16File = File(tempDir, "utf16le_book.txt")
+        val utf16Body = "\uFEFFChapter 1: Dawn — 世界\r\nFirst UTF-16 chapter content.\r\n\r\nChapter 2: Dusk — café\r\nSecond UTF-16 chapter content."
+        utf16File.writeBytes(utf16Body.toByteArray(Charsets.UTF_16LE))
+        val utf16Count = EpubParser.parseTxtToTextInternal(testContext, 302, utf16File, bufferSize = 16)
+        assertEquals(2, utf16Count)
+        val uCh2 = EpubParser.getChapterText(testContext, 302, 1)
+        assertTrue(uCh2.contains("Chapter 2: Dusk — café"))
+        assertTrue(uCh2.contains("Second UTF-16 chapter content."))
+    }
+
+    /**
+     * Case 14: Repeated rolling chapter-window shifts on a large TXT file read ONLY the newly entered
+     * missing chapters' byte ranges and NEVER re-read the entire file.
+     */
+    @Test
+    fun testRepeatedTxtWindowChangesDoNotReReadWholeFile() = runBlocking {
+        val largeTxt = File(tempDir, "rolling_window_txt.txt")
+        val chapterCount = 120
+        val bodyBlock = "Rolling window streaming verification paragraph. ".repeat(100)
+        largeTxt.bufferedWriter(Charsets.UTF_8).use { writer ->
+            for (i in 0 until chapterCount) {
+                writer.write("Chapter ${i + 1}\n")
+                writer.write("$bodyBlock UNIQUE_SECTION_$i\n\n")
+            }
+        }
+        val totalBytes = largeTxt.length()
+        val bookId = 303
+        assertEquals(chapterCount, EpubParser.parseTxtToText(testContext, bookId, largeTxt))
+
+        // Open Chapter 50 -> caches 40..60
+        EpubParser.getChapterText(testContext, bookId, 50)
+        assertEquals((40..60).toSet(), EpubParser.getCachedChapterIndicesOnDisk(testContext, bookId))
+
+        // Reset counters, then move forward by 1 chapter to Chapter 51 -> only Chapter 61 is missing!
+        EpubParser.resetTxtTestCounters()
+        val ch51 = EpubParser.getChapterText(testContext, bookId, 51)
+        assertTrue(ch51.contains("UNIQUE_SECTION_51"))
+        assertEquals((41..61).toSet(), EpubParser.getCachedChapterIndicesOnDisk(testContext, bookId))
+        assertEquals(
+            "Advancing window by 1 chapter must read ONLY the 1 newly entered chapter",
+            1,
+            EpubParser.txtMaterializeReadCallCountForTesting
+        )
+        assertTrue(
+            "Bytes read for 1-chapter shift must be < 3% of whole file (read=${EpubParser.lastTxtMaterializeBytesReadForTesting}, total=$totalBytes)",
+            EpubParser.lastTxtMaterializeBytesReadForTesting < (totalBytes / 30)
+        )
+
+        // Reset counters, move backward by 2 chapters to Chapter 49 (window 39..59) -> only chapters 39 and 40 are missing!
+        EpubParser.resetTxtTestCounters()
+        val ch49 = EpubParser.getChapterText(testContext, bookId, 49)
+        assertTrue(ch49.contains("UNIQUE_SECTION_49"))
+        assertEquals((39..59).toSet(), EpubParser.getCachedChapterIndicesOnDisk(testContext, bookId))
+        assertEquals(
+            "Stepping backward 2 chapters must read ONLY the 2 missing chapters (39 and 40)",
+            2,
+            EpubParser.txtMaterializeReadCallCountForTesting
+        )
+
+        // Reset counters, run transient search read on distant Chapter 5 -> reads ONLY Chapter 5 without polluting 39..59
+        EpubParser.resetTxtTestCounters()
+        val ch5 = EpubParser.readChapterTextTransient(testContext, bookId, 5)
+        assertTrue(ch5.contains("UNIQUE_SECTION_5"))
+        assertEquals(1, EpubParser.txtMaterializeReadCallCountForTesting)
+        assertEquals((39..59).toSet(), EpubParser.getCachedChapterIndicesOnDisk(testContext, bookId))
+        assertEquals((39..59).toSet(), EpubParser.getCachedChapterIndicesInMemory(bookId))
+    }
+
     private fun createMultiChapterEpub(target: File, count: Int) {
         createZip(target) { zos ->
             writeEntry(zos, "META-INF/container.xml", containerXml("OEBPS/content.opf"))

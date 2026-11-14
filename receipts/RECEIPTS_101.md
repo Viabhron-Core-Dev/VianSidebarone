@@ -140,3 +140,32 @@
 * Any deviation from what was requested, and why: None requested. In `LiteReaderBackupManager`, added a JSON manifest snapshot alongside `litereader_db` SQLite tables inside exported backup archives so archive round-trips execute deterministically in both pure JVM unit tests (without SQLite native libs) and Android runtime.
 * Any known issue or follow-up needed: Physical device verification required for Main↔`:heavy` multi-process Intent/IPC round-trips (`Open in Reader`, top-bar `Edit`), Android SAF ZIP/TSV/MRSTD import/export, and Room v10→v11 on-device migration.
 
+---
+
+### Receipt 114
+* Timestamp: 2026-11-14 06:34 UTC
+* One-line summary of what was requested: Apply targeted quick fixes to Sidebar Reader: genuine streaming/byte-indexed loading for large TXT files without full-file materialization, and preventing `Next` button navigation from falsely advancing `TrackerBook.readChapters` high-water progress while keeping short chapters fairly countable.
+* Exact files touched:
+  - `app/src/main/java/com/example/data/EpubParser.kt`
+  - `app/src/main/java/com/example/feature/reader/ReaderModels.kt`
+  - `app/src/main/java/com/example/feature/reader/ReaderReadingView.kt`
+  - `app/src/test/java/com/example/data/EpubParserTest.kt`
+  - `app/src/test/java/com/example/feature/reader/ReaderArchitectureAndBackupTest.kt`
+  - `blueprint/BLUEPRINT.md`
+  - `receipts/RECEIPTS_101.md`
+* What was actually done — factual, not persuasive:
+  1. Large TXT Genuine Streaming & Byte-Range Indexing (`EpubParser.kt`):
+     - Added `charsetName` to `BookCacheManifest` and replaced whole-file `readLines()` / whole-string slicing with `detectTxtEncoding` (BOM detection for UTF-32BE/LE, UTF-8, UTF-16BE/LE plus streaming UTF-8 validation falling back to `windows-1252` / `ISO-8859-1`) and `streamTxtLinesWithByteOffsets` (chunked `FileInputStream` single-pass scanner tracking exact byte offsets and line endings `\n`, `\r\n`, `\r`, plus safe UTF-8/multi-byte character-boundary soft-wrapping for >32KB/64KB newline-free lines).
+     - Recorded `"txt_bytes:<startByte>:<endByte>:<charsetName>"` in `toc.json` during import without extracting `chapter_*.txt` files upfront.
+     - Updated `materializeChaptersFromSource` to load only requested chapters' byte ranges via `readTxtByteRange` (`RandomAccessFile` + `FileChannel` + `CharsetDecoder` with `inBuf.compact()` across chunk boundaries) so rolling 21-chapter window shifts and transient searches read only missing chapters and never rebuild the full file. Preserved `readTxtCharRangeStreaming` fallback for legacy `txt_chars:` entries.
+  2. Prevent False Progress on `Next` (`ReaderModels.kt`, `ReaderReadingView.kt`):
+     - Added `ReaderProgressPolicy` defining normal vs short-chapter thresholds (`SHORT_CHAPTER_MAX_WORDS = 220`, `SHORT_CHAPTER_MAX_CHARS = 1400`, `MIN_SHORT_CHAPTER_DWELL_MS = 2500L`, `MAX_SHORT_CHAPTER_DWELL_MS = 10000L`, proportional bottom scroll detection for small scrollable ranges `< dp(80)`).
+     - Removed unconditional `recordGenuineReadingActivityOnCurrentChapter()` from `nextChapterButton` in `ReaderReadingView.kt`, routing through `advanceToNextChapterByUser()` which checks `ReaderProgressPolicy.shouldAdvanceProgressOnNextClick(...)` before recording progress.
+     - Captured `targetChapter` before launching `viewScope.launch` in `recordGenuineReadingActivityOnCurrentChapter()`, added `openChapterJob`/`highWaterJob`/`undoJob` tracking to cancel stale chapter loads on rapid navigation, handled `readingScrollView.post` returning `false` in headless tests, and guarded `Toast.makeText(...)?.show()` in Undo feedback.
+  3. Regression Tests (`EpubParserTest.kt`, `ReaderArchitectureAndBackupTest.kt`):
+     - Added Cases 13 & 14 to `EpubParserTest`: `testLargeTxtStreamingAndUtf8BoundarySafetyWithoutFullFileMaterialization` (multi-MB UTF-8 + CRLF with prime 37-byte / 19-byte buffer cuts and UTF-16LE BOM) and `testRepeatedTxtWindowChangesDoNotReReadWholeFile` (verifying 1-chapter / 2-chapter window shifts and transient out-of-window search read strictly the missing chapters).
+     - Added `testPreventFalseNextProgressShortChapterCompletionAndResumeSeparation` to `ReaderArchitectureAndBackupTest`: verifying immediate `Next` after TOC jump, waiting 15s on an unscrolled normal chapter + `Next`, immediate `Next` on a short chapter, dwell-completed `Next` on a short chapter, Undo rollback, and meaningful scroll updates.
+* How it was verified: Local JVM unit tests (`gradle :app:testDebugUnitTest` across 5 targeted suites: `EpubParserTest` 14/14, `ReaderArchitectureAndBackupTest` 6/6, `ReaderMiniAppTest` 6/6, `FloatingMiniAppFrameworkTest` 82/82, `FloatingPwaMiniAppTest` 6/6 — `114/114` passed, 0 failures/errors) and full debug build via `compile_applet` (`Build succeeded`). On-device Android behavior (physical large TXT reading scroll performance, IME focus, TTS/auto-scroll timing) was not tested on a physical device or emulator.
+* Any deviation from what was requested, and why: Added `Toast.makeText(...)?.show()` `try/catch` guard and coroutine `Job` tracking (`openChapterJob`, `highWaterJob`, `undoJob`) in `ReaderReadingView.kt` after initial test execution exposed a Room `Dispatchers.IO` race condition and null `Toast` return in headless JVM tests.
+* Any known issue or follow-up needed: Physical device verification recommended for multi-MB TXT scroll responsiveness, short-chapter dwell feel, and Android 12+ Room/SAF integration.
+

@@ -603,6 +603,15 @@
   - Implemented `LiteReaderBackupManager` in `:heavy` supporting Full ZIP, NoBooks ZIP, Tracker TSV import/export, and Moon+ `.mrstd` import via safe non-destructive temp-dir merging.
 - **6. Verification**: 111/111 JVM tests passing (`EpubParserTest`: 12, `ReaderMiniAppTest`: 6, `ReaderArchitectureAndBackupTest`: 5, `FloatingMiniAppFrameworkTest`: 82, `FloatingPwaMiniAppTest`: 6); `compile_applet` build succeeded.
 
+### Phase 14.11: Reader Quick Fixes — Streaming Large TXT & High-Water Progress Policy (COMPLETED)
+- **1. Genuine Streaming & Byte-Indexed Large TXT Loading (`EpubParser.kt`)**:
+  - Replaced whole-file TXT memory reads and string slicing with `detectTxtEncoding` (BOM + streaming UTF-8 validation with `windows-1252` / `ISO-8859-1` fallback) and `streamTxtLinesWithByteOffsets` recording exact `"txt_bytes:<start>:<end>:<charset>"` offsets in `toc.json` and `charsetName` in `cache_manifest.json`.
+  - `materializeChaptersFromSource` reads only requested chapters via `readTxtByteRange` (`RandomAccessFile` + `FileChannel` + `CharsetDecoder` preserving multi-byte character boundaries across chunk reads), with streaming `readTxtCharRangeStreaming` fallback for legacy `txt_chars:` entries.
+- **2. Prevent False Progress on `Next` (`ReaderModels.kt`, `ReaderReadingView.kt`)**:
+  - Added `ReaderProgressPolicy` distinguishing normal chapters from short chapters (`<= 220` words / `<= 1400` chars or small/unscrollable ranges), requiring `2500ms..10000ms` dwell or meaningful proportional scroll before `Next` counts a short chapter as read.
+  - Updated `ReaderReadingView` (`advanceToNextChapterByUser`, `recordGenuineReadingActivityOnCurrentChapter`, `openChapterJob` cancellation) so TOC/search jumps, chapter restoration, and clicking `Next` on unscrolled normal chapters or immediately on short chapters never inflate `TrackerBook.readChapters`.
+- **3. Verification**: 114/114 targeted JVM unit tests passing (`EpubParserTest`: 14, `ReaderArchitectureAndBackupTest`: 6, `ReaderMiniAppTest`: 6, `FloatingMiniAppFrameworkTest`: 82, `FloatingPwaMiniAppTest`: 6); `compile_applet` succeeded.
+
 ---
 
 ## Phase 14: PWA Engine & External AI App Integration (Tier 5 - Highest Complexity)

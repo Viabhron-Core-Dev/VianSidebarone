@@ -345,3 +345,97 @@ object ReaderEventManager {
         }
     }
 }
+
+/**
+ * Policy governing genuine high-water reading progress (`TrackerBook.readChapters`) vs navigation.
+ *
+ * Guarantees:
+ * - Direct TOC/search jumps, restoring a chapter, reopening a book, and clicking Next/Prev immediately
+ *   without meaningful reading activity NEVER advance high-water Tracker progress.
+ * - Normal scrollable chapters require actual scroll, auto-scroll, or TTS progress.
+ * - Short chapters (fitting on screen / unscrollable or <= [SHORT_CHAPTER_MAX_WORDS]) require a
+ *   sensible reading dwell duration before advancing via Next so they are neither skipped falsely
+ *   nor impossible to count.
+ */
+object ReaderProgressPolicy {
+    const val SHORT_CHAPTER_MAX_WORDS = 220
+    const val SHORT_CHAPTER_MAX_CHARS = 1400
+    const val MIN_SHORT_CHAPTER_DWELL_MS = 2500L
+    const val MAX_SHORT_CHAPTER_DWELL_MS = 10000L
+
+    fun countWords(text: String): Int {
+        var count = 0
+        var inWord = false
+        for (i in 0 until text.length) {
+            if (text[i].isWhitespace()) {
+                inWord = false
+            } else if (!inWord) {
+                inWord = true
+                count++
+            }
+        }
+        return count
+    }
+
+    fun requiredShortChapterDwellMs(wordCount: Int): Long {
+        val safeWords = wordCount.coerceAtLeast(1)
+        return (safeWords * 100L).coerceIn(MIN_SHORT_CHAPTER_DWELL_MS, MAX_SHORT_CHAPTER_DWELL_MS)
+    }
+
+    fun isShortChapter(
+        wordCount: Int,
+        charCount: Int,
+        scrollableRangePx: Int,
+        scrollThresholdPx: Int
+    ): Boolean {
+        if (charCount <= 0 && wordCount <= 0) return false
+        if (scrollableRangePx > scrollThresholdPx) {
+            return false
+        }
+        if (scrollableRangePx in 1..scrollThresholdPx) {
+            return true
+        }
+        return wordCount <= SHORT_CHAPTER_MAX_WORDS && charCount <= SHORT_CHAPTER_MAX_CHARS
+    }
+
+    fun isScrollActivityMeaningful(
+        scrollY: Int,
+        initialScrollY: Int,
+        scrollableRangePx: Int,
+        scrollThresholdPx: Int,
+        userTouched: Boolean,
+        isProgrammatic: Boolean
+    ): Boolean {
+        if (isProgrammatic || !userTouched) return false
+        val delta = kotlin.math.abs(scrollY - initialScrollY)
+        if (delta >= scrollThresholdPx) return true
+        if (scrollableRangePx in 1 until scrollThresholdPx) {
+            val minFractionDelta = (scrollableRangePx * 0.50f).toInt().coerceAtLeast(1)
+            val bottomZoneY = (scrollableRangePx * 0.70f).toInt().coerceAtLeast(1)
+            if (delta >= minFractionDelta && scrollY >= bottomZoneY) {
+                return true
+            }
+        }
+        return false
+    }
+
+    fun shouldAdvanceProgressOnNextClick(
+        hasGenuineReadingInChapter: Boolean,
+        chapterEnteredAtMs: Long,
+        nowMs: Long,
+        wordCount: Int,
+        charCount: Int,
+        scrollableRangePx: Int,
+        scrollThresholdPx: Int
+    ): Boolean {
+        if (hasGenuineReadingInChapter) {
+            return false
+        }
+        if (!isShortChapter(wordCount, charCount, scrollableRangePx, scrollThresholdPx)) {
+            return false
+        }
+        val elapsedMs = (nowMs - chapterEnteredAtMs).coerceAtLeast(0L)
+        return elapsedMs >= requiredShortChapterDwellMs(wordCount)
+    }
+}
+

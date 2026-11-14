@@ -1333,3 +1333,63 @@ java.lang.IllegalStateException: Hardware engine crashed unexpectedly
 [2026-11-13 22:32:07.036] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_BRING_TO_FRONT id=win_a alreadyTop=false hasVisibleAttachedAbove=true orderChanged=true zOrder=2 refreshPerformed=true
 [2026-11-13 22:32:07.036] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_FOCUS id=win_visible focused=false
 [2026-11-13 22:32:07.036] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_FOCUS id=win_a focused=true
+[2026-11-14 06:31:21.158] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_REGISTER id=win_a type=test bounds=WindowBounds(x=100, y=100, width=600, height=800) zOrder=0 total=1
+[2026-11-14 06:31:21.158] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_ATTACH id=win_a bounds=WindowBounds(x=100, y=100, width=600, height=800) type=test
+[2026-11-14 06:31:21.158] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_BRING_TO_FRONT id=win_a alreadyTop=true hasVisibleAttachedAbove=false orderChanged=false zOrder=0 refreshPerformed=false
+[2026-11-14 06:31:21.158] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_FOCUS id=win_a focused=true
+[2026-11-14 06:31:21.158] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_REGISTER id=win_hidden type=test bounds=WindowBounds(x=100, y=100, width=600, height=800) zOrder=1 total=2
+[2026-11-14 06:31:21.159] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_ATTACH id=win_hidden bounds=WindowBounds(x=100, y=100, width=600, height=800) type=test
+[2026-11-14 06:31:21.159] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_BRING_TO_FRONT id=win_hidden alreadyTop=true hasVisibleAttachedAbove=false orderChanged=false zOrder=1 refreshPerformed=false
+[2026-11-14 06:31:21.159] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_FOCUS id=win_a focused=false
+[2026-11-14 06:31:21.159] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_FOCUS id=win_hidden focused=true
+[2026-11-14 06:31:21.159] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_FOCUS id=win_hidden focused=false
+[2026-11-14 06:31:21.159] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_FOCUS id=win_a focused=true
+[2026-11-14 06:31:21.159] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_BRING_TO_FRONT id=win_a alreadyTop=false hasVisibleAttachedAbove=false orderChanged=true zOrder=1 refreshPerformed=false
+[2026-11-14 06:31:21.160] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_REGISTER id=win_visible type=test bounds=WindowBounds(x=100, y=100, width=600, height=800) zOrder=2 total=3
+[2026-11-14 06:31:21.160] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_ATTACH id=win_visible bounds=WindowBounds(x=100, y=100, width=600, height=800) type=test
+[2026-11-14 06:31:21.160] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_BRING_TO_FRONT id=win_visible alreadyTop=true hasVisibleAttachedAbove=false orderChanged=false zOrder=2 refreshPerformed=false
+[2026-11-14 06:31:21.160] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_FOCUS id=win_a focused=false
+[2026-11-14 06:31:21.160] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_FOCUS id=win_visible focused=true
+[2026-11-14 06:31:21.160] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_BRING_TO_FRONT id=win_a alreadyTop=false hasVisibleAttachedAbove=true orderChanged=true zOrder=2 refreshPerformed=true
+[2026-11-14 06:31:21.160] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_FOCUS id=win_visible focused=false
+[2026-11-14 06:31:21.160] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_FOCUS id=win_a focused=true
+[2026-11-14 06:33:06.896] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_REGISTER id=win_a type=test bounds=WindowBounds(x=100, y=100, width=600, height=800) zOrder=0 total=1
+[2026-11-14 06:33:06.896] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_ATTACH id=win_a bounds=WindowBounds(x=100, y=100, width=600, height=800) type=test
+[2026-11-14 06:33:06.896] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_BRING_TO_FRONT id=win_a alreadyTop=true hasVisibleAttachedAbove=false orderChanged=false zOrder=0 refreshPerformed=false
+[2026-11-14 06:33:06.897] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_FOCUS id=win_a focused=true
+[2026-11-14 06:33:06.897] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_REGISTER id=win_hidden type=test bounds=WindowBounds(x=100, y=100, width=600, height=800) zOrder=1 total=2
+[2026-11-14 06:33:06.897] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_ATTACH id=win_hidden bounds=WindowBounds(x=100, y=100, width=600, height=800) type=test
+[2026-11-14 06:33:06.898] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_BRING_TO_FRONT id=win_hidden alreadyTop=true hasVisibleAttachedAbove=false orderChanged=false zOrder=1 refreshPerformed=false
+[2026-11-14 06:33:06.898] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_FOCUS id=win_a focused=false
+[2026-11-14 06:33:06.898] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_FOCUS id=win_hidden focused=true
+[2026-11-14 06:33:06.898] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_FOCUS id=win_hidden focused=false
+[2026-11-14 06:33:06.898] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_FOCUS id=win_a focused=true
+[2026-11-14 06:33:06.898] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_BRING_TO_FRONT id=win_a alreadyTop=false hasVisibleAttachedAbove=false orderChanged=true zOrder=1 refreshPerformed=false
+[2026-11-14 06:33:06.899] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_REGISTER id=win_visible type=test bounds=WindowBounds(x=100, y=100, width=600, height=800) zOrder=2 total=3
+[2026-11-14 06:33:06.899] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_ATTACH id=win_visible bounds=WindowBounds(x=100, y=100, width=600, height=800) type=test
+[2026-11-14 06:33:06.899] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_BRING_TO_FRONT id=win_visible alreadyTop=true hasVisibleAttachedAbove=false orderChanged=false zOrder=2 refreshPerformed=false
+[2026-11-14 06:33:06.899] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_FOCUS id=win_a focused=false
+[2026-11-14 06:33:06.899] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_FOCUS id=win_visible focused=true
+[2026-11-14 06:33:06.899] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_BRING_TO_FRONT id=win_a alreadyTop=false hasVisibleAttachedAbove=true orderChanged=true zOrder=2 refreshPerformed=true
+[2026-11-14 06:33:06.900] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_FOCUS id=win_visible focused=false
+[2026-11-14 06:33:06.900] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_FOCUS id=win_a focused=true
+[2026-11-14 06:33:41.375] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_REGISTER id=win_a type=test bounds=WindowBounds(x=100, y=100, width=600, height=800) zOrder=0 total=1
+[2026-11-14 06:33:41.375] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_ATTACH id=win_a bounds=WindowBounds(x=100, y=100, width=600, height=800) type=test
+[2026-11-14 06:33:41.375] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_BRING_TO_FRONT id=win_a alreadyTop=true hasVisibleAttachedAbove=false orderChanged=false zOrder=0 refreshPerformed=false
+[2026-11-14 06:33:41.375] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_FOCUS id=win_a focused=true
+[2026-11-14 06:33:41.375] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_REGISTER id=win_hidden type=test bounds=WindowBounds(x=100, y=100, width=600, height=800) zOrder=1 total=2
+[2026-11-14 06:33:41.375] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_ATTACH id=win_hidden bounds=WindowBounds(x=100, y=100, width=600, height=800) type=test
+[2026-11-14 06:33:41.375] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_BRING_TO_FRONT id=win_hidden alreadyTop=true hasVisibleAttachedAbove=false orderChanged=false zOrder=1 refreshPerformed=false
+[2026-11-14 06:33:41.375] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_FOCUS id=win_a focused=false
+[2026-11-14 06:33:41.375] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_FOCUS id=win_hidden focused=true
+[2026-11-14 06:33:41.376] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_FOCUS id=win_hidden focused=false
+[2026-11-14 06:33:41.376] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_FOCUS id=win_a focused=true
+[2026-11-14 06:33:41.376] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_BRING_TO_FRONT id=win_a alreadyTop=false hasVisibleAttachedAbove=false orderChanged=true zOrder=1 refreshPerformed=false
+[2026-11-14 06:33:41.376] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_REGISTER id=win_visible type=test bounds=WindowBounds(x=100, y=100, width=600, height=800) zOrder=2 total=3
+[2026-11-14 06:33:41.376] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_ATTACH id=win_visible bounds=WindowBounds(x=100, y=100, width=600, height=800) type=test
+[2026-11-14 06:33:41.376] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_BRING_TO_FRONT id=win_visible alreadyTop=true hasVisibleAttachedAbove=false orderChanged=false zOrder=2 refreshPerformed=false
+[2026-11-14 06:33:41.376] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_FOCUS id=win_a focused=false
+[2026-11-14 06:33:41.376] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_FOCUS id=win_visible focused=true
+[2026-11-14 06:33:41.376] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_BRING_TO_FRONT id=win_a alreadyTop=false hasVisibleAttachedAbove=true orderChanged=true zOrder=2 refreshPerformed=true
+[2026-11-14 06:33:41.376] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_FOCUS id=win_visible focused=false
+[2026-11-14 06:33:41.376] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_FOCUS id=win_a focused=true
