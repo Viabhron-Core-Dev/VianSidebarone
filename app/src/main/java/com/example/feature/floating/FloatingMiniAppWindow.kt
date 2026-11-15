@@ -1632,6 +1632,12 @@ class FloatingMiniAppWindow(
                 }
                 windowTitle = newTitle
                 titleView?.text = newTitle
+            },
+            onOpenTracker = { activeBookId ->
+                FloatingMiniAppBridge.getInstance(context).launchBookTrackerFromReader(instanceId, activeBookId)
+            },
+            onOpenReaderSettings = {
+                FloatingMiniAppBridge.getInstance(context).launchReaderSettingsFromReader(instanceId)
             }
         )
         readerInstance = instance
@@ -2235,11 +2241,7 @@ class FloatingMiniAppWindow(
                 setOnClickListener {
                     if (isReaderApp()) {
                         val activeBookId = readerInstance?.getCurrentBookId() ?: -1
-                        if (activeBookId > 0) {
-                            com.example.feature.reader.BookTrackerActivity.launchForEpubBook(context, activeBookId)
-                        } else {
-                            com.example.feature.reader.BookTrackerActivity.launch(context)
-                        }
+                        FloatingMiniAppBridge.getInstance(context).launchBookTrackerFromReader(instanceId, activeBookId)
                     } else {
                         toggleEditPopover()
                     }
@@ -3387,6 +3389,11 @@ class FloatingMiniAppWindow(
         snapshot.windowBounds = normalBoundsToSave
         snapshot.payload.putAll(readerPayload)
         return durableStore.saveSnapshot(snapshot)
+    }
+
+    fun saveReaderStateForExternalActivity(): Boolean {
+        if (!isReaderApp()) return false
+        return saveReaderSnapshotInternal(MiniAppState.ACTIVE)
     }
 
     fun flushPendingSave(targetState: MiniAppState? = null): Boolean {

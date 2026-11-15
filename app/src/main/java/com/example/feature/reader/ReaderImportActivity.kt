@@ -20,7 +20,14 @@ import kotlinx.coroutines.launch
  */
 class ReaderImportActivity : ComponentActivity() {
 
+    companion object {
+        const val EXTRA_REIMPORT_BOOK_ID = "extra_reimport_book_id"
+        const val EXTRA_OPEN_AFTER_IMPORT = "extra_open_after_import"
+    }
+
     private val activityScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private var reimportBookId: Int = -1
+    private var openAfterImport: Boolean = false
 
     private val openDocumentLauncher = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         if (uri != null) {
@@ -33,16 +40,27 @@ class ReaderImportActivity : ComponentActivity() {
                 // Ignore if permission cannot be persisted across reboots
             }
 
-            Toast.makeText(this, "Importing book...", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, if (reimportBookId > 0) "Re-importing book..." else "Importing book...", Toast.LENGTH_SHORT).show()
 
             activityScope.launch {
                 val repo = LibraryRepository(applicationContext)
-                val book = repo.importBook(uri)
-                if (book != null) {
-                    Toast.makeText(applicationContext, "Imported: ${book.title}", Toast.LENGTH_SHORT).show()
-                    ReaderEventManager.notifyLibraryChanged(applicationContext)
+                val book = if (reimportBookId > 0) {
+                    repo.reimportBook(reimportBookId, uri)
                 } else {
-                    Toast.makeText(applicationContext, "Failed to import book.", Toast.LENGTH_SHORT).show()
+                    repo.importBook(uri, markOpenedOnImport = openAfterImport)
+                }
+                if (book != null) {
+                    Toast.makeText(
+                        applicationContext,
+                        if (reimportBookId > 0) "Restored: ${book.title}" else "Imported: ${book.title}",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                    ReaderEventManager.notifyLibraryChanged(applicationContext)
+                    if (openAfterImport) {
+                        ReaderEventManager.requestOpenBookInReader(applicationContext, book.id)
+                    }
+                } else {
+                    Toast.makeText(applicationContext, "Failed to import book. Existing files kept.", Toast.LENGTH_SHORT).show()
                 }
                 finish()
             }
@@ -53,7 +71,9 @@ class ReaderImportActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        LogKeeper.log(this, "ReaderImportActivity", "Launching document picker for EPUB / TXT")
+        reimportBookId = intent?.getIntExtra(EXTRA_REIMPORT_BOOK_ID, -1) ?: -1
+        openAfterImport = intent?.getBooleanExtra(EXTRA_OPEN_AFTER_IMPORT, false) ?: false
+        LogKeeper.log(this, "ReaderImportActivity", "Launching document picker for EPUB / TXT (reimportBookId=$reimportBookId)")
         try {
             openDocumentLauncher.launch(
                 arrayOf(

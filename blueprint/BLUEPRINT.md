@@ -640,6 +640,25 @@
   - Deleted generated `/debug.keystore`, `/debug.keystore.base64`, and `/.build-outputs/app-debug.apk` and kept them absent (did not invoke APK signing/packaging).
   - Kotlin debug compilation (`:app:compileDebugKotlin`, `:app:compileDebugUnitTestKotlin`) and 107/107 targeted JVM unit tests passed (`FloatingMiniAppFrameworkTest`: 85/85 including `testFoldedLauncherBubbleCircularShapeAndTouchArea`, `ReaderMiniAppTest`: 6/6, `FloatingPwaMiniAppTest`: 6/6, `FloatingMiniAppLogFilterTest`: 7/7, `SidebarImeInteractionTest`: 3/3). Note: public Android SDK (`compileSdk = 34`) has no non-rectangular `WindowManager` overlay touchable-region API, so OS compositor frame bounds remain `36dp x 36dp` while corner touches are ignored before triggering any bubble action.
 
+### Phase 14.15: Sidebar Reader UI Rebuild — Library, Reading View, Book Details & Active-Book-Only Storage (COMPLETED)
+- **1. Library Interface Rebuild (`ReaderLibraryView.kt`, `ReaderModels.kt`, `ReaderFolderBrowserView.kt`)**:
+  - Replaced oversized header with compact `Library` header + compact icon actions: Chart (`BookTrackerActivity` via Reader hide-and-restore), Book Details (current/selected book details panel — no Quick Notes), Wrench (`SettingsActivity` `reader_settings`), and `+` (SAF single-file import).
+  - Tabs: `Recent` (up to 10 distinct opened books by `lastOpenedTimestamp DESC`) and `File Explorer` (embedded `ReaderFolderBrowserView`).
+  - Compact book rows, expandable search bar toggle, and compact sort mode cycling (`Opened`, `Title`, `Progress`).
+- **2. Current-Book Details Panel (`ReaderBookDetailsView.kt`)**:
+  - Single-source-of-truth metadata viewer & editor backed by `LibraryRepository.getOrCreateLinkedTrackerBook` / `saveTrackerMetadataEdit` (`title`, `author`, `genres`, `rating`, `comment`, `readChapters`, `totalChapters`, `isFinished`, `isWebNovel`), clearly separating Reader resume position vs Tracker high-water progress and binary status, and dismissing cleanly to the exact prior Library state.
+- **3. Tracker Hide/Restore Lifecycle (`FloatingMiniAppBridge.kt`, `core/ipc/HeavyProcessConnectionManager.kt`, `BookTrackerActivity.kt`, `SettingsActivity.kt`, `FloatingMiniAppWindow.kt`)**:
+  - Hides floating Reader window without spawning a launcher bubble before opening `BookTrackerActivity` (or Reader Settings from floating Reader), preserving session/book/scroll state and restoring the floating Reader window on return (or opening the selected book directly via `Open in Reader`). Scoped strictly to Reader; leaves global `FloatingWindow.kt` / `FloatingWindowManager.kt` and unrelated mini-apps untouched.
+- **4. Reading View Rebuild (`ReaderReadingView.kt`, `ReaderBookmarkStore`)**:
+  - Near-black reading background (`#08080B` / `#000000`) + crisp white text (`#F5F5F7`) and line spacing, compact header, and thin bottom reading progress indicator.
+  - Bottom action toolbar hidden by default; clean tap on reading area toggles toolbar visibility without disrupting scrolling, text selection, or triggering unintended chapter turns.
+  - Toolbar actions: Library, Chapter list / TOC (`RecyclerView`), Bookmark (toggle/list/jump persisted per book without inflating Tracker progress), TTS, Auto-scroll, Search (in-chapter & in-book), and Reader Settings (`SettingsActivity` + inline `Prev`/`Next` & font `A-/A+` controls).
+- **5. Active-Book-Only Binary Retention (`LibraryRepository.kt`, `ReaderImportActivity.kt`, `ReaderMiniAppInstance.kt`)**:
+  - Retains source binary and extracted cache ONLY for the current/last active book; never deletes the prior active binary until replacement import + parse (`totalChapters > 0`) + Room persistence succeed; keeps `EpubBook` and `TrackerBook` metadata & progress for older books; clearly indicates binary unavailability and supports in-place SAF re-import preserving metadata and resume/high-water progress.
+- **6. Verification**:
+  - Full project build (`compile_applet`) succeeded and `/debug.keystore`, `/debug.keystore.base64`, and `/.build-outputs/app-debug.apk` were removed and verified absent afterward.
+  - Targeted JVM unit tests passed cleanly: **124/124** (`EpubParserTest` 14/14, `ReaderMiniAppTest` 10/10, `ReaderArchitectureAndBackupTest` 8/8, `FloatingMiniAppFrameworkTest` 86/86, `FloatingPwaMiniAppTest` 6/6) with zero uncaught exceptions. Requires physical-device testing for visual overlay rendering, HWUI contrast, touch/scroll feel, and Activity-return overlay restoration.
+
 ---
 
 ## Phase 14: PWA Engine & External AI App Integration (Tier 5 - Highest Complexity)

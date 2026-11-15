@@ -41,9 +41,16 @@ import com.example.feature.settings.handle.HandleSettingsScreen
  */
 class SettingsActivity : ComponentActivity() {
 
+    companion object {
+        const val EXTRA_RESTORE_READER_INSTANCE_ID = "extra_restore_reader_instance_id"
+    }
+
+    private var restoreReaderInstanceId: String? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         LogKeeper.log(this, "SettingsActivity", "onCreate entered")
+        restoreReaderInstanceId = intent?.getStringExtra(EXTRA_RESTORE_READER_INSTANCE_ID)
 
         try {
             // Ensure Main lightweight resident runtime is started if overlay permission is granted
@@ -69,6 +76,27 @@ class SettingsActivity : ComponentActivity() {
             LogKeeper.logError(this, "SettingsActivity", "Exception during onCreate", t)
             throw t
         }
+    }
+
+    override fun onDestroy() {
+        val targetId = restoreReaderInstanceId
+        if (isFinishing && !targetId.isNullOrBlank()) {
+            try {
+                com.example.feature.reader.ReaderEventManager.notifyExternalActivityClosed(this, targetId)
+                com.example.core.ipc.HeavyProcessHost.getInstance(this).requestMainAction(
+                    com.example.core.ipc.MainCommandRequest(
+                        requestId = java.util.UUID.randomUUID().toString(),
+                        action = com.example.core.ipc.MainActionType.CUSTOM,
+                        targetId = "READER_ACTION",
+                        parameters = mapOf(
+                            "subAction" to "RESTORE_READER",
+                            "instanceId" to targetId
+                        )
+                    )
+                )
+            } catch (_: Throwable) {}
+        }
+        super.onDestroy()
     }
 }
 

@@ -699,4 +699,139 @@ class ReaderArchitectureAndBackupTest {
             readingView.releaseResources()
         }
     }
+
+    @Test
+    fun testActiveBookOnlyBinaryRetentionAndSafeReimportPreservingProgress() = runBlocking {
+        val dir = tempFolder.newFolder("binary_retention")
+        val fileA = File(dir, "book_a.txt").apply {
+            writeText(
+                """
+                Chapter 1: Start
+                Content of book A chapter one with plenty of words for parsing cleanly.
+
+                Chapter 2: Middle
+                Content of book A chapter two with plenty of words for parsing cleanly.
+
+                Chapter 3: End
+                Content of book A chapter three with plenty of words for parsing cleanly.
+                """.trimIndent()
+            )
+        }
+        val fileB = File(dir, "book_b.txt").apply {
+            writeText(
+                """
+                Chapter 1: Alpha
+                Content of book B chapter one with distinct narrative text for parsing cleanly.
+
+                Chapter 2: Beta
+                Content of book B chapter two with distinct narrative text for parsing cleanly.
+                """.trimIndent()
+            )
+        }
+        val corruptFile = File(dir, "broken.epub").apply {
+            writeText("NOT_A_VALID_ZIP_OR_EPUB")
+        }
+
+        // 1. Import Book A -> binary + cache retained
+        val bookA = repo.importBookFile(fileA, "Book A", markOpenedOnImport = true)!!
+        repo.saveResumePosition(bookA.id, chapterIndex = 1, scrollY = 320, updateOpenRecency = true)
+        repo.recordGenuineReadingProgress(bookA.id, currentChapterZeroBased = 1)
+        assertTrue("Book A must have active binary", repo.hasBookBinary(repo.getBook(bookA.id)))
+        assertTrue("Book A extracted cache must exist", File(context.filesDir, "book_${bookA.id}").exists())
+
+        // 2. Failed replacement import MUST NOT delete Book A's binary or cache!
+        val failedImport = repo.importBookFile(corruptFile, "Broken Book", markOpenedOnImport = true)
+        assertNull("Corrupt import must fail", failedImport)
+        assertTrue("Book A binary must survive failed replacement import", repo.hasBookBinary(repo.getBook(bookA.id)))
+        assertTrue("Book A cache must survive failed replacement import", File(context.filesDir, "book_${bookA.id}").exists())
+
+        // 3. Successful replacement import (Book B) prunes Book A binary/cache while keeping Book A metadata & Tracker history
+        val bookB = repo.importBookFile(fileB, "Book B", markOpenedOnImport = true)!!
+        assertTrue("Book B must have active binary", repo.hasBookBinary(repo.getBook(bookB.id)))
+        assertTrue("Book B cache must exist", File(context.filesDir, "book_${bookB.id}").exists())
+        assertFalse("Book A source binary must be pruned after switching to Book B", repo.hasBookBinary(repo.getBook(bookA.id)))
+        assertFalse("Book A chapter cache must be pruned after switching to Book B", File(context.filesDir, "book_${bookA.id}").exists())
+
+        val bookAMeta = repo.getBook(bookA.id)!!
+        assertEquals("Book A resume chapter must be preserved", 1, bookAMeta.lastReadChapter)
+        assertEquals("Book A resume scroll must be preserved", 320, bookAMeta.lastReadScrollY)
+        assertEquals("Book A Tracker high-water must be preserved", 2, repo.getLinkedTrackerBook(bookA.id)!!.readChapters)
+
+        // 4. Attempting to open metadata-only Book A via ReaderMiniAppInstance.openBookById must stay in LIBRARY cleanly
+        val instance = ReaderMiniAppInstance("binary_guard_test", "reader")
+        instance.onCreate(null)
+        instance.createContentView(context)
+        instance.openBookById(bookA.id)
+        instance.awaitPendingJobsForTesting()
+        assertEquals(
+            "Opening metadata-only book without binary must route safely to LIBRARY",
+            ReaderScreenMode.LIBRARY,
+            instance.getCurrentScreenModeForTesting()
+        )
+        instance.onDestroy()
+
+        // 5. Re-importing Book A restores its exact ID & binary, preserves resume + Tracker progress, and prunes Book B
+        val reimportedA = repo.reimportBookFile(bookA.id, fileA)!!
+        assertEquals(bookA.id, reimportedA.id)
+        assertTrue("Re-imported Book A must have binary again", repo.hasBookBinary(reimportedA))
+        assertEquals(1, reimportedA.lastReadChapter)
+        assertEquals(320, reimportedA.lastReadScrollY)
+        assertEquals(2, repo.getLinkedTrackerBook(bookA.id)!!.readChapters)
+        assertFalse("Book B binary must now be pruned", repo.hasBookBinary(repo.getBook(bookB.id)))
+    }
+
+    @Test
+    fun testBookDetailsPanelEditsSyncToTrackerPreservingResumePosition() = runBlocking {
+        val dir = tempFolder.newFolder("details_sync")
+        val src = File(dir, "novel.txt").apply {
+            writeText((1..6).joinToString("\n\n") { "Chapter $it: Part $it\nSample body paragraph for chapter $it." })
+        }
+        val book = repo.importBookFile(src, "Original Title", markOpenedOnImport = true)!!
+        repo.saveResumePosition(book.id, chapterIndex = 3, scrollY = 510, updateOpenRecency = false)
+        val beforeEdit = repo.getBook(book.id)!!
+
+        val detailsView = ReaderBookDetailsView(
+            context = context,
+            instanceId = "details_test",
+            onClose = {},
+            onReadBook = {},
+            onRequestReimport = {},
+            onOpenTracker = {}
+        )
+        try {
+            detailsView.bindBook(beforeEdit)
+            detailsView.awaitPendingJobsForTesting()
+            detailsView.setFormFieldsForTesting(
+                title = "Edited Title",
+                author = "Edited Author",
+                readChapters = 5,
+                totalChapters = 12,
+                genres = "Sci-Fi, Mystery",
+                rating = 4.5f,
+                comment = "Great pacing",
+                isFinished = true,
+                isWebNovel = true
+            )
+            val savedTracker = detailsView.saveChangesInternal()!!
+            assertEquals("Edited Title", savedTracker.title)
+            assertEquals("Edited Author", savedTracker.author)
+            assertEquals(5, savedTracker.readChapters)
+            assertEquals(12, savedTracker.totalChapters)
+            assertEquals("Sci-Fi, Mystery", savedTracker.genres)
+            assertEquals(4.5f, savedTracker.rating, 0.01f)
+            assertEquals("Great pacing", savedTracker.comment)
+            assertTrue(savedTracker.isFinished)
+            assertTrue(savedTracker.isWebNovel)
+
+            val afterEditEpub = repo.getBook(book.id)!!
+            assertEquals("Edited Title", afterEditEpub.title)
+            assertEquals("Edited Author", afterEditEpub.author)
+            assertEquals(12, afterEditEpub.totalChapters)
+            assertEquals("Resume chapter must NOT change on metadata edit", 3, afterEditEpub.lastReadChapter)
+            assertEquals("Resume scrollY must NOT change on metadata edit", 510, afterEditEpub.lastReadScrollY)
+            assertEquals("lastOpenedTimestamp must NOT change on metadata edit", beforeEdit.lastOpenedTimestamp, afterEditEpub.lastOpenedTimestamp)
+        } finally {
+            detailsView.releaseResources()
+        }
+    }
 }

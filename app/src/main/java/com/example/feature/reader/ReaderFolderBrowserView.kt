@@ -40,7 +40,8 @@ class ReaderFolderBrowserView(
     private val instanceId: String? = null,
     private val onBackToLibrary: () -> Unit,
     private val onBookImported: (EpubBook) -> Unit,
-    private val onRequestWindowFocusable: ((Boolean) -> Unit)? = null
+    private val onRequestWindowFocusable: ((Boolean) -> Unit)? = null,
+    private val embeddedInLibrary: Boolean = false
 ) : FrameLayout(context) {
 
     private val appContext: Context = context
@@ -100,12 +101,16 @@ class ReaderFolderBrowserView(
     }
 
     init {
-        setBackgroundColor(Color.parseColor("#181825"))
+        setBackgroundColor(Color.parseColor(if (embeddedInLibrary) "#0B0B10" else "#181825"))
 
         val rootLayout = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
-            setPadding(dp(10), dp(8), dp(10), dp(10))
+            if (embeddedInLibrary) {
+                setPadding(dp(2), dp(4), dp(2), 0)
+            } else {
+                setPadding(dp(10), dp(8), dp(10), dp(46))
+            }
         }
 
         // Top Bar
@@ -115,36 +120,43 @@ class ReaderFolderBrowserView(
             setPadding(dp(2), dp(2), dp(2), dp(6))
         }
 
-        val backBtn = Button(context).apply {
-            text = "← Library"
-            textSize = 12f
-            typeface = Typeface.DEFAULT_BOLD
-            setTextColor(Color.parseColor("#89B4FA"))
-            minHeight = dp(40)
-            minimumHeight = dp(40)
-            background = GradientDrawable().apply {
-                setColor(Color.parseColor("#252538"))
-                cornerRadius = dpF(8f)
+        if (!embeddedInLibrary) {
+            val backBtn = Button(context).apply {
+                text = "← Library"
+                textSize = 12f
+                typeface = Typeface.DEFAULT_BOLD
+                setTextColor(Color.parseColor("#89B4FA"))
+                minHeight = dp(40)
+                minimumHeight = dp(40)
+                background = GradientDrawable().apply {
+                    setColor(Color.parseColor("#252538"))
+                    cornerRadius = dpF(8f)
+                }
+                setPadding(dp(10), dp(4), dp(10), dp(4))
+                setOnClickListener {
+                    searchBox.clearFocus()
+                    onBackToLibrary()
+                }
             }
-            setPadding(dp(10), dp(4), dp(10), dp(4))
-            setOnClickListener {
-                searchBox.clearFocus()
-                onBackToLibrary()
-            }
-        }
-        topBar.addView(backBtn)
+            topBar.addView(backBtn)
 
-        val titleView = TextView(context).apply {
-            text = "Folders"
-            textSize = 15f
-            typeface = Typeface.DEFAULT_BOLD
-            setTextColor(Color.parseColor("#CDD6F4"))
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
-                marginStart = dp(8)
-                marginEnd = dp(4)
+            val titleView = TextView(context).apply {
+                text = "Folders"
+                textSize = 15f
+                typeface = Typeface.DEFAULT_BOLD
+                setTextColor(Color.parseColor("#CDD6F4"))
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+                    marginStart = dp(8)
+                    marginEnd = dp(4)
+                }
             }
+            topBar.addView(titleView)
+        } else {
+            val spacer = View(context).apply {
+                layoutParams = LinearLayout.LayoutParams(0, 0, 1f)
+            }
+            topBar.addView(spacer)
         }
-        topBar.addView(titleView)
 
         upButton = Button(context).apply {
             text = "↑ Up"
@@ -183,18 +195,27 @@ class ReaderFolderBrowserView(
             setOnClickListener { launchFolderTreePicker() }
         }
         topBar.addView(pickFolderBtn)
-        rootLayout.addView(topBar)
 
         // Breadcrumb bar
         breadcrumbView = TextView(context).apply {
             text = "No folder selected"
             textSize = 11f
-            setTextColor(Color.parseColor("#A6ADC8"))
+            setTextColor(Color.parseColor("#9BA3B8"))
             maxLines = 1
             ellipsize = android.text.TextUtils.TruncateAt.START
             setPadding(dp(4), dp(2), dp(4), dp(6))
         }
-        rootLayout.addView(breadcrumbView)
+        if (embeddedInLibrary) {
+            topBar.removeViewAt(0)
+            breadcrumbView.layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+                marginEnd = dp(6)
+            }
+            topBar.addView(breadcrumbView, 0)
+            rootLayout.addView(topBar)
+        } else {
+            rootLayout.addView(topBar)
+            rootLayout.addView(breadcrumbView)
+        }
 
         // Search input (uses generic EmbeddedImeBridge)
         searchBox = EmbeddedInputEditText(context) { instanceId }.apply {
@@ -548,23 +569,23 @@ class ReaderFolderBrowserView(
 
     private fun importDocumentFile(name: String, doc: DocumentFile) {
         if (isImporting) {
-            Toast.makeText(appContext, "Import already in progress...", Toast.LENGTH_SHORT).show()
+            try { Toast.makeText(appContext, "Import already in progress...", Toast.LENGTH_SHORT)?.show() } catch (_: Throwable) {}
             return
         }
         isImporting = true
-        Toast.makeText(appContext, "Importing $name...", Toast.LENGTH_SHORT).show()
+        try { Toast.makeText(appContext, "Importing $name...", Toast.LENGTH_SHORT)?.show() } catch (_: Throwable) {}
 
         viewScope.launch {
             try {
-                val imported = repository.importBook(doc.uri)
+                val imported = repository.importBook(doc.uri, markOpenedOnImport = true)
                 if (imported != null) {
-                    Toast.makeText(appContext, "Imported: ${imported.title}", Toast.LENGTH_SHORT).show()
+                    try { Toast.makeText(appContext, "Imported: ${imported.title}", Toast.LENGTH_SHORT)?.show() } catch (_: Throwable) {}
                     ReaderEventManager.notifyLibraryChanged(appContext)
                     EmbeddedImeBridge.clearFocusRecursive(this@ReaderFolderBrowserView)
                     onRequestWindowFocusable?.invoke(false)
                     onBookImported(imported)
                 } else {
-                    Toast.makeText(appContext, "Failed to import '$name'. File may be corrupted or empty.", Toast.LENGTH_SHORT).show()
+                    try { Toast.makeText(appContext, "Failed to import '$name'. File may be corrupted or empty.", Toast.LENGTH_SHORT)?.show() } catch (_: Throwable) {}
                 }
             } finally {
                 isImporting = false

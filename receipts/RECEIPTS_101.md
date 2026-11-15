@@ -262,3 +262,43 @@
 * How it was verified: Local Kotlin compilation and JVM unit tests only — `gradle :app:compileDebugKotlin :app:testDebugUnitTest --tests "com.example.feature.floating.FloatingMiniAppFrameworkTest" --tests "com.example.feature.reader.ReaderMiniAppTest" --tests "com.example.feature.pwa.floating.FloatingPwaMiniAppTest" --console=plain` (`BUILD SUCCESSFUL`; XML results: `FloatingMiniAppFrameworkTest` 86/86, `ReaderMiniAppTest` 6/6, `FloatingPwaMiniAppTest` 6/6 — 98/98 passed, 0 failures/errors/skipped). Actual HWUI `RenderNode` shadow rendering and physical-device corner appearance were not tested in this environment.
 * Any deviation from what was requested, and why: Ran `:app:compileDebugKotlin` and `:app:testDebugUnitTest` directly instead of full APK assembly (`assembleDebug`) so `debug.keystore` and `.build-outputs/app-debug.apk` were not regenerated.
 * Any known issue or follow-up needed: Physical-device testing is still required to confirm whether removing `rootCardView` elevation completely eliminates the bottom-corner square/grey bleed under real HWUI rendering, or if a follow-up isolating `contentContainer`'s outline/background is needed.
+
+---
+
+### Receipt 119
+* Timestamp: 2026-11-15 22:45 UTC
+* One-line summary of what was requested: Rebuild Sidebar Reader UI (compact dark Library, near-black Reading view with hidden-by-default tap-toggled toolbar, Book Details panel synced with Tracker, Reader hide-and-restore lifecycle around Book Tracker/Settings, and active-book-only binary retention with safe re-import).
+* Exact files touched:
+  - `app/src/main/res/drawable/ic_bar_chart.xml` (added)
+  - `app/src/main/res/drawable/ic_build_wrench.xml` (added)
+  - `app/src/main/res/drawable/ic_search.xml` (added)
+  - `app/src/main/res/drawable/ic_sort.xml` (added)
+  - `app/src/main/res/drawable/ic_bookmark_outline.xml` (added)
+  - `app/src/main/java/com/example/feature/reader/ReaderModels.kt`
+  - `app/src/main/java/com/example/data/LibraryRepository.kt`
+  - `app/src/main/java/com/example/feature/reader/ReaderImportActivity.kt`
+  - `app/src/main/java/com/example/feature/floating/FloatingMiniAppBridge.kt`
+  - `app/src/main/java/com/example/core/ipc/HeavyProcessConnectionManager.kt`
+  - `app/src/main/java/com/example/feature/floating/FloatingMiniAppWindow.kt`
+  - `app/src/main/java/com/example/feature/reader/BookTrackerActivity.kt`
+  - `app/src/main/java/com/example/SettingsActivity.kt`
+  - `app/src/main/java/com/example/feature/reader/ReaderBookDetailsView.kt` (added)
+  - `app/src/main/java/com/example/feature/reader/ReaderFolderBrowserView.kt`
+  - `app/src/main/java/com/example/feature/reader/ReaderLibraryView.kt`
+  - `app/src/main/java/com/example/feature/reader/ReaderReadingView.kt`
+  - `app/src/main/java/com/example/feature/reader/ReaderMiniAppInstance.kt`
+  - `app/src/test/java/com/example/feature/reader/ReaderMiniAppTest.kt`
+  - `app/src/test/java/com/example/feature/reader/ReaderArchitectureAndBackupTest.kt`
+  - `blueprint/BLUEPRINT.md`
+  - `receipts/RECEIPTS_101.md`
+  - Cleaned generated `/debug.keystore`, `/debug.keystore.base64`, and `/.build-outputs/app-debug.apk` after `compile_applet` (verified absent afterward).
+* What was actually done — factual, not persuasive:
+  1. Rebuilt `ReaderLibraryView` + `ReaderFolderBrowserView` with compact dark `"Library"` header (`ic_bar_chart` Tracker, `ic_book` Current-Book Details, `ic_build_wrench` Reader Settings, `+` SAF import), `Recent` (last 10 opened) + embedded `File Explorer` tabs, slim Sort cycle (`Opened`/`Title`/`Progress`), expandable Search toggle, and metadata-only badge + re-import prompt.
+  2. Added `ReaderBookDetailsView` backed by `LibraryRepository.getOrCreateLinkedTrackerBook` and `saveTrackerMetadataEdit` (`title`, `author`, `readChapters`, `totalChapters`, `genres`, `rating`, `comment`, `isFinished`, `isWebNovel`), displaying separate Reader Resume vs Tracker High-Water + Binary Status while preserving `lastOpenedTimestamp`, `lastReadChapter`, and `lastReadScrollY`, plus JVM-safe backing state (`form*` / `isDetailsPanelVisible`).
+  3. Implemented Reader-scoped hide/restore lifecycle across `FloatingMiniAppBridge`, `HeavyProcessConnectionManager`, `FloatingMiniAppWindow`, `BookTrackerActivity`, and `SettingsActivity` so opening Tracker or Reader Settings from floating Reader hides the Reader window without spawning a launcher bubble or affecting other floating windows, and restores Reader on finish unless the user selected `Open in Reader`.
+  4. Rebuilt `ReaderReadingView` with near-black surface (`#08080B`), crisp white text (`#F5F5F7`), minimal top title header, bottom progress strip cleared from the `[ × — ↘ ]` sticker (`paddingEnd = 96dp`), hidden-by-default `bottomToolbarLayout` toggled only on clean reading-area taps (ignoring drags `>= touchSlop` and active text selection), and 7-icon toolbar (Library, TOC `RecyclerView`, `ReaderBookmarkStore` Bookmarks overlay/toggle/jump, TTS, Auto-Scroll, Search, Reader Settings) + inline `Prev`/`Next` & `A-/A+`.
+  5. Enforced active-book-only binary & cache retention in `LibraryRepository` (`hasBookBinary`, `pruneInactiveBookBinaries`, `reimportBook`, `reimportBookFile`, `reimportFromInputStream`) and `ReaderImportActivity` / `ReaderMiniAppInstance`, ensuring prior active binaries/caches are pruned only after replacement import or re-import succeeds (`totalChapters > 0` + Room persist) and metadata-only books never load an empty reader screen.
+  6. Added unit tests covering Reader toolbar tap/drag/selection gating, Library tab/sort/search/details state preservation, Bookmark toggle & persistence, Reader hide/restore around Tracker, active-book-only binary retention & re-import, and Book Details Tracker sync.
+* How it was verified: Local build (`compile_applet`) and local JVM unit tests (`gradle :app:compileDebugKotlin :app:compileDebugUnitTestKotlin :app:testDebugUnitTest --tests "com.example.data.EpubParserTest" --tests "com.example.feature.reader.ReaderMiniAppTest" --tests "com.example.feature.reader.ReaderArchitectureAndBackupTest" --tests "com.example.feature.floating.FloatingMiniAppFrameworkTest" --tests "com.example.feature.pwa.floating.FloatingPwaMiniAppTest" --console=plain`) — 124/124 passed (`EpubParserTest` 14/14, `ReaderMiniAppTest` 10/10, `ReaderArchitectureAndBackupTest` 8/8, `FloatingMiniAppFrameworkTest` 86/86, `FloatingPwaMiniAppTest` 6/6), 0 failures/errors/skipped, empty `system-err`. Physical-device runtime rendering, WindowManager focus/overlay hide-restore, SAF file picker dialogs, and touch/scroll gestures were not tested on a device or emulator.
+* Any deviation from what was requested, and why: Non-Android view property getters (`View.getVisibility()`, `EditText.getText()`, `MotionEvent.obtain()`, `ViewConfiguration.scaledTouchSlop`) return stub defaults (`0`/`null`) under `mockable android.jar`, so Kotlin backing properties and `dispatchTouchCoordinatesForTesting` were used for JVM test assertions while keeping standard Android View interactions active on-device.
+* Any known issue or follow-up needed: Requires on-device verification for compact dark visual fidelity, reading tap-to-toggle sensitivity while scrolling/selecting text, Book Tracker hide-and-restore transitions, and active-book-only re-import SAF flow.

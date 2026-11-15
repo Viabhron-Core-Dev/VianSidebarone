@@ -682,6 +682,11 @@ class HeavyProcessConnectionManager internal constructor(
                                         com.example.feature.floating.FloatingMiniAppBridge.getInstance(ctx)
                                             .openBookInFloatingReader(epubBookId)
                                     }
+                                } else if (subAction == "RESTORE_READER") {
+                                    val instanceId = request.parameters["instanceId"]
+                                    safeLog("HeavyProcessConnectionManager", "Executing READER_ACTION RESTORE_READER instanceId=$instanceId from Heavy")
+                                    com.example.feature.floating.FloatingMiniAppBridge.getInstance(ctx)
+                                        .restoreReaderAfterExternalActivity(instanceId)
                                 }
                             }
                         }

@@ -21,10 +21,142 @@ enum class ReaderScreenMode {
 /**
  * Sub-tabs within the Reader LIBRARY home screen.
  * Default is [RECENT] (last 10 distinct opened Reader books).
+ * Older history lives in Book Tracker; [FILE_EXPLORER] provides folder browsing & SAF import.
  */
 enum class ReaderLibraryTab {
     RECENT,
-    ALL_BOOKS
+    FILE_EXPLORER
+}
+
+/**
+ * Compact sort modes for the Library Recent list.
+ */
+enum class ReaderLibrarySortOption(val label: String) {
+    RECENTLY_OPENED("Opened"),
+    TITLE("Title"),
+    PROGRESS("Progress")
+}
+
+data class ReaderBookmark(
+    val id: String,
+    val bookId: Int,
+    val chapterIndex: Int,
+    val chapterTitle: String,
+    val scrollY: Int,
+    val createdAtMs: Long
+)
+
+/**
+ * Lightweight per-book bookmark persistence stored in `FloatingReaderPrefs` (keeps Room v11 intact).
+ */
+object ReaderBookmarkStore {
+    private const val PREFS_NAME = "FloatingReaderPrefs"
+    private const val KEY_PREFIX = "reader_bookmarks_"
+
+    fun getBookmarks(context: Context, bookId: Int): List<ReaderBookmark> {
+        if (bookId <= 0) return emptyList()
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val raw = prefs.getString("$KEY_PREFIX$bookId", null) ?: return emptyList()
+        return try {
+            val arr = org.json.JSONArray(raw)
+            val list = ArrayList<ReaderBookmark>(arr.length())
+            for (i in 0 until arr.length()) {
+                val obj = arr.optJSONObject(i) ?: continue
+                list.add(
+                    ReaderBookmark(
+                        id = obj.optString("id", "${bookId}_${i}"),
+                        bookId = bookId,
+                        chapterIndex = obj.optInt("chapterIndex", 0),
+                        chapterTitle = obj.optString("chapterTitle", ""),
+                        scrollY = obj.optInt("scrollY", 0),
+                        createdAtMs = obj.optLong("createdAtMs", 0L)
+                    )
+                )
+            }
+            list.sortedWith(compareBy<ReaderBookmark> { it.chapterIndex }.thenBy { it.scrollY })
+        } catch (_: Throwable) {
+            emptyList()
+        }
+    }
+
+    fun isChapterBookmarked(context: Context, bookId: Int, chapterIndex: Int): Boolean {
+        return getBookmarks(context, bookId).any { it.chapterIndex == chapterIndex }
+    }
+
+    fun addOrUpdateBookmark(
+        context: Context,
+        bookId: Int,
+        chapterIndex: Int,
+        chapterTitle: String,
+        scrollY: Int
+    ): ReaderBookmark {
+        val current = getBookmarks(context, bookId).toMutableList()
+        val cleanTitle = chapterTitle.ifBlank { "Chapter ${chapterIndex + 1}" }
+        val existingIdx = current.indexOfFirst { it.chapterIndex == chapterIndex }
+        val entry = ReaderBookmark(
+            id = if (existingIdx >= 0) current[existingIdx].id else "${bookId}_${chapterIndex}_${System.currentTimeMillis()}",
+            bookId = bookId,
+            chapterIndex = chapterIndex,
+            chapterTitle = cleanTitle,
+            scrollY = scrollY.coerceAtLeast(0),
+            createdAtMs = System.currentTimeMillis()
+        )
+        if (existingIdx >= 0) {
+            current[existingIdx] = entry
+        } else {
+            current.add(entry)
+        }
+        saveBookmarks(context, bookId, current)
+        return entry
+    }
+
+    fun toggleChapterBookmark(
+        context: Context,
+        bookId: Int,
+        chapterIndex: Int,
+        chapterTitle: String,
+        scrollY: Int
+    ): Boolean {
+        if (bookId <= 0) return false
+        val current = getBookmarks(context, bookId).toMutableList()
+        val existing = current.indexOfFirst { it.chapterIndex == chapterIndex }
+        return if (existing >= 0) {
+            current.removeAt(existing)
+            saveBookmarks(context, bookId, current)
+            false
+        } else {
+            addOrUpdateBookmark(context, bookId, chapterIndex, chapterTitle, scrollY)
+            true
+        }
+    }
+
+    fun removeBookmark(context: Context, bookId: Int, bookmarkId: String) {
+        if (bookId <= 0) return
+        val updated = getBookmarks(context, bookId).filterNot { it.id == bookmarkId }
+        saveBookmarks(context, bookId, updated)
+    }
+
+    fun clearBookmarksForBook(context: Context, bookId: Int) {
+        if (bookId <= 0) return
+        OverlaySyncManager.syncRemove(context, "$KEY_PREFIX$bookId", PREFS_NAME)
+    }
+
+    private fun saveBookmarks(context: Context, bookId: Int, list: List<ReaderBookmark>) {
+        val arr = org.json.JSONArray()
+        for (b in list) {
+            arr.put(
+                org.json.JSONObject().apply {
+                    put("id", b.id)
+                    put("bookId", b.bookId)
+                    put("chapterIndex", b.chapterIndex)
+                    put("chapterTitle", b.chapterTitle)
+                    put("scrollY", b.scrollY)
+                    put("createdAtMs", b.createdAtMs)
+                }
+            )
+        }
+        OverlaySyncManager.syncString(context, "$KEY_PREFIX$bookId", arr.toString(), PREFS_NAME)
+    }
 }
 
 /**
@@ -146,8 +278,8 @@ object ReaderPreferences {
             )
             THEME_AMOLED -> ThemePalette(
                 backgroundColor = android.graphics.Color.parseColor("#000000"),
-                surfaceColor = android.graphics.Color.parseColor("#121218"),
-                textColor = android.graphics.Color.parseColor("#E0E6F0"),
+                surfaceColor = android.graphics.Color.parseColor("#0F0F14"),
+                textColor = android.graphics.Color.parseColor("#FFFFFF"),
                 secondaryTextColor = android.graphics.Color.parseColor("#8A93A6"),
                 accentColor = android.graphics.Color.parseColor("#89B4FA")
             )
@@ -159,10 +291,10 @@ object ReaderPreferences {
                 accentColor = android.graphics.Color.parseColor("#1E66F5")
             )
             else -> ThemePalette(
-                backgroundColor = android.graphics.Color.parseColor("#181825"),
-                surfaceColor = android.graphics.Color.parseColor("#1E1E2E"),
-                textColor = android.graphics.Color.parseColor("#CDD6F4"),
-                secondaryTextColor = android.graphics.Color.parseColor("#A6ADC8"),
+                backgroundColor = android.graphics.Color.parseColor("#08080B"),
+                surfaceColor = android.graphics.Color.parseColor("#121218"),
+                textColor = android.graphics.Color.parseColor("#F5F5F7"),
+                secondaryTextColor = android.graphics.Color.parseColor("#9BA3B8"),
                 accentColor = android.graphics.Color.parseColor("#89B4FA")
             )
         }
@@ -251,7 +383,9 @@ object ReaderFolderPrefs {
 object ReaderEventManager {
     const val ACTION_READER_DB_CHANGED = "com.example.action.READER_DB_CHANGED"
     const val ACTION_OPEN_BOOK_IN_READER = "com.example.action.OPEN_BOOK_IN_READER"
+    const val ACTION_RESTORE_READER_AFTER_ACTIVITY = "com.example.action.RESTORE_READER_AFTER_ACTIVITY"
     const val EXTRA_EPUB_BOOK_ID = "extra_epub_book_id"
+    const val EXTRA_READER_INSTANCE_ID = "extra_reader_instance_id"
 
     private val listeners = mutableListOf<() -> Unit>()
     private val folderListeners = mutableListOf<(String?) -> Unit>()
@@ -294,6 +428,18 @@ object ReaderEventManager {
             val intent = Intent(ACTION_OPEN_BOOK_IN_READER).apply {
                 setPackage(context.packageName)
                 putExtra(EXTRA_EPUB_BOOK_ID, epubBookId)
+            }
+            context.sendBroadcast(intent)
+        } catch (_: Throwable) {}
+    }
+
+    fun notifyExternalActivityClosed(context: Context, readerInstanceId: String? = null) {
+        try {
+            val intent = Intent(ACTION_RESTORE_READER_AFTER_ACTIVITY).apply {
+                setPackage(context.packageName)
+                if (!readerInstanceId.isNullOrBlank()) {
+                    putExtra(EXTRA_READER_INSTANCE_ID, readerInstanceId)
+                }
             }
             context.sendBroadcast(intent)
         } catch (_: Throwable) {}

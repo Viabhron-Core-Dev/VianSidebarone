@@ -111,12 +111,20 @@ class BookTrackerActivity : ComponentActivity() {
     companion object {
         const val EXTRA_EDIT_EPUB_BOOK_ID = "extra_edit_epub_book_id"
         const val EXTRA_OPEN_BACKUP_PANEL = "extra_open_backup_panel"
+        const val EXTRA_RESTORE_READER_INSTANCE_ID = "extra_restore_reader_instance_id"
 
-        fun launch(context: Context, openBackupPanel: Boolean = false) {
+        fun launch(
+            context: Context,
+            openBackupPanel: Boolean = false,
+            restoreReaderInstanceId: String? = null
+        ) {
             try {
                 val intent = Intent(context, BookTrackerActivity::class.java).apply {
                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                     putExtra(EXTRA_OPEN_BACKUP_PANEL, openBackupPanel)
+                    if (!restoreReaderInstanceId.isNullOrBlank()) {
+                        putExtra(EXTRA_RESTORE_READER_INSTANCE_ID, restoreReaderInstanceId)
+                    }
                 }
                 context.startActivity(intent)
             } catch (e: Exception) {
@@ -124,11 +132,18 @@ class BookTrackerActivity : ComponentActivity() {
             }
         }
 
-        fun launchForEpubBook(context: Context, epubBookId: Int) {
+        fun launchForEpubBook(
+            context: Context,
+            epubBookId: Int,
+            restoreReaderInstanceId: String? = null
+        ) {
             try {
                 val intent = Intent(context, BookTrackerActivity::class.java).apply {
                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                     putExtra(EXTRA_EDIT_EPUB_BOOK_ID, epubBookId)
+                    if (!restoreReaderInstanceId.isNullOrBlank()) {
+                        putExtra(EXTRA_RESTORE_READER_INSTANCE_ID, restoreReaderInstanceId)
+                    }
                 }
                 context.startActivity(intent)
             } catch (e: Exception) {
@@ -170,10 +185,15 @@ class BookTrackerActivity : ComponentActivity() {
         }
     }
 
+    private var restoreReaderInstanceId: String? = null
+    private var openedBookInReader: Boolean = false
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val initialEditEpubId = intent?.getIntExtra(EXTRA_EDIT_EPUB_BOOK_ID, -1) ?: -1
         val initialOpenBackup = intent?.getBooleanExtra(EXTRA_OPEN_BACKUP_PANEL, false) ?: false
+        restoreReaderInstanceId = intent?.getStringExtra(EXTRA_RESTORE_READER_INSTANCE_ID)
+        openedBookInReader = false
 
         setContent {
             MaterialTheme(
@@ -193,12 +213,40 @@ class BookTrackerActivity : ComponentActivity() {
                         initialShowBackupDialog = initialOpenBackup,
                         onClose = { finish() },
                         onOpenBookInReader = { epubBookId ->
+                            openedBookInReader = true
                             dispatchOpenBookInMainReader(this, epubBookId)
                             finish()
                         }
                     )
                 }
             }
+        }
+    }
+
+    override fun onDestroy() {
+        val targetId = restoreReaderInstanceId
+        if (isFinishing && !openedBookInReader && !targetId.isNullOrBlank()) {
+            dispatchRestoreReaderInMain(this, targetId)
+        }
+        super.onDestroy()
+    }
+
+    private fun dispatchRestoreReaderInMain(context: Context, instanceId: String) {
+        try {
+            ReaderEventManager.notifyExternalActivityClosed(context, instanceId)
+            HeavyProcessHost.getInstance(context).requestMainAction(
+                MainCommandRequest(
+                    requestId = UUID.randomUUID().toString(),
+                    action = MainActionType.CUSTOM,
+                    targetId = "READER_ACTION",
+                    parameters = mapOf(
+                        "subAction" to "RESTORE_READER",
+                        "instanceId" to instanceId
+                    )
+                )
+            )
+        } catch (t: Throwable) {
+            LogKeeper.log(context, "BookTrackerActivity", "dispatchRestoreReaderInMain warning: ${t.message}")
         }
     }
 

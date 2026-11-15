@@ -32,7 +32,9 @@ class ReaderMiniAppInstance(
     override val instanceId: String,
     override val appType: String = APP_TYPE,
     var onRequestWindowFocusable: ((Boolean) -> Unit)? = null,
-    var onActiveBookChanged: ((EpubBook?) -> Unit)? = null
+    var onActiveBookChanged: ((EpubBook?) -> Unit)? = null,
+    var onOpenTracker: ((Int) -> Unit)? = null,
+    var onOpenReaderSettings: (() -> Unit)? = null
 ) : MiniAppInstance {
 
     companion object {
@@ -58,10 +60,12 @@ class ReaderMiniAppInstance(
     private var currentScrollY: Int = 0
     private var currentFontSizeSp: Float = 16f
 
+    private var hostContext: Context? = null
     private var rootContainer: FrameLayout? = null
     private var libraryView: ReaderLibraryView? = null
     private var readingView: ReaderReadingView? = null
     private var folderBrowserView: ReaderFolderBrowserView? = null
+    private var openBookJob: kotlinx.coroutines.Job? = null
 
     override fun onCreate(savedSnapshot: MiniAppRecoverySnapshot?) {
         lifecycleState = MiniAppLifecycleState.CREATED
@@ -130,6 +134,7 @@ class ReaderMiniAppInstance(
     }
 
     override fun releaseRuntime() {
+        openBookJob?.cancel()
         readingView?.saveCurrentProgressImmediately()
         com.example.feature.floating.EmbeddedImeBridge.clearFocusRecursive(rootContainer)
         onRequestWindowFocusable?.invoke(false)
@@ -138,6 +143,7 @@ class ReaderMiniAppInstance(
         folderBrowserView?.releaseResources()
         rootContainer?.removeAllViews()
         rootContainer = null
+        hostContext = null
         libraryView = null
         readingView = null
         folderBrowserView = null
@@ -202,13 +208,14 @@ class ReaderMiniAppInstance(
     }
 
     override fun createContentView(context: Context): View {
+        hostContext = context
         val defaultFont = ReaderPreferences.getDefaultFontSizeSp(context)
         if (currentFontSizeSp == 16f && defaultFont != 16f) {
             currentFontSizeSp = defaultFont
         }
 
         val container = FrameLayout(context).apply {
-            setBackgroundColor(Color.parseColor("#181825"))
+            setBackgroundColor(Color.parseColor("#0B0B10"))
             layoutParams = FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.MATCH_PARENT
@@ -219,15 +226,21 @@ class ReaderMiniAppInstance(
         libraryView = ReaderLibraryView(
             context = context,
             instanceId = instanceId,
+            onRequestWindowFocusable = { focusable ->
+                onRequestWindowFocusable?.invoke(focusable)
+            },
             onOpenFolderBrowser = {
                 currentScreenMode = ReaderScreenMode.FOLDER_BROWSER
                 showCurrentScreen()
             },
+            onOpenTracker = { epubId ->
+                onOpenTracker?.invoke(epubId)
+            },
+            onOpenReaderSettings = {
+                onOpenReaderSettings?.invoke()
+            },
             onBookSelected = { selectedBook ->
                 openBook(selectedBook)
-            },
-            onRequestWindowFocusable = { focusable ->
-                onRequestWindowFocusable?.invoke(focusable)
             }
         )
 
@@ -236,6 +249,12 @@ class ReaderMiniAppInstance(
             instanceId = instanceId,
             onRequestWindowFocusable = { focusable ->
                 onRequestWindowFocusable?.invoke(focusable)
+            },
+            onActiveBookChanged = { book ->
+                onActiveBookChanged?.invoke(book)
+            },
+            onOpenReaderSettings = {
+                onOpenReaderSettings?.invoke()
             },
             onBackToLibrary = {
                 currentScreenMode = ReaderScreenMode.LIBRARY
@@ -285,23 +304,45 @@ class ReaderMiniAppInstance(
     fun openBookById(epubBookId: Int) {
         if (epubBookId <= 0) return
         ReaderSessionTracker.markWarmSession(instanceId)
+        val ctx = hostContext
         val container = rootContainer
-        if (container == null) {
+        if (container == null || ctx == null) {
             currentBookId = epubBookId
             currentScreenMode = ReaderScreenMode.READING
             return
         }
-        instanceScope.launch {
+        openBookJob?.cancel()
+        openBookJob = instanceScope.launch {
+            val repo = com.example.data.LibraryRepository(ctx)
             val book = withContext(Dispatchers.IO) {
-                AppDatabase.getDatabase(container.context).epubDao().getBookById(epubBookId)
+                AppDatabase.getDatabase(ctx).epubDao().getBookById(epubBookId)
             }
             if (book != null) {
-                openBook(book)
+                if (repo.hasBookBinary(book)) {
+                    repo.markBookBinaryActive(book.id)
+                    openBook(book)
+                } else {
+                    currentScreenMode = ReaderScreenMode.LIBRARY
+                    currentBookId = -1
+                    onActiveBookChanged?.invoke(null)
+                    showCurrentScreen()
+                    libraryView?.promptReimportForBook(book)
+                }
             }
         }
     }
 
     private fun openBook(book: EpubBook) {
+        val ctx = hostContext
+        val repo = ctx?.let { com.example.data.LibraryRepository(it) }
+        if (repo != null && !repo.hasBookBinary(book)) {
+            currentScreenMode = ReaderScreenMode.LIBRARY
+            currentBookId = -1
+            onActiveBookChanged?.invoke(null)
+            showCurrentScreen()
+            libraryView?.promptReimportForBook(book)
+            return
+        }
         ReaderSessionTracker.markWarmSession(instanceId)
         currentBookId = book.id
         currentChapterIndex = book.lastReadChapter
@@ -314,6 +355,7 @@ class ReaderMiniAppInstance(
 
     private fun showCurrentScreen(alreadyLoadedBook: EpubBook? = null) {
         val container = rootContainer ?: return
+        val ctx = hostContext ?: return
         com.example.feature.floating.EmbeddedImeBridge.clearFocusRecursive(container)
         onRequestWindowFocusable?.invoke(false)
         container.removeAllViews()
@@ -327,17 +369,24 @@ class ReaderMiniAppInstance(
                     onActiveBookChanged?.invoke(alreadyLoadedBook)
                     rView.loadBook(alreadyLoadedBook, currentChapterIndex, currentScrollY, currentFontSizeSp)
                 } else {
-                    instanceScope.launch {
+                    openBookJob?.cancel()
+                    openBookJob = instanceScope.launch {
+                        val repo = com.example.data.LibraryRepository(ctx)
                         val book = withContext(Dispatchers.IO) {
-                            AppDatabase.getDatabase(container.context).epubDao().getBookById(currentBookId)
+                            AppDatabase.getDatabase(ctx).epubDao().getBookById(currentBookId)
                         }
-                        if (book != null) {
+                        if (book != null && repo.hasBookBinary(book)) {
+                            repo.markBookBinaryActive(book.id)
                             onActiveBookChanged?.invoke(book)
                             rView.loadBook(book, currentChapterIndex, currentScrollY, currentFontSizeSp)
                         } else {
                             currentScreenMode = ReaderScreenMode.LIBRARY
+                            currentBookId = -1
                             onActiveBookChanged?.invoke(null)
                             showCurrentScreen()
+                            if (book != null) {
+                                libraryView?.promptReimportForBook(book)
+                            }
                         }
                     }
                 }
@@ -358,6 +407,9 @@ class ReaderMiniAppInstance(
     }
 
     // Testing helpers
+    suspend fun awaitPendingJobsForTesting() {
+        openBookJob?.join()
+    }
     fun getLibraryViewForTesting(): ReaderLibraryView? = libraryView
     fun getReadingViewForTesting(): ReaderReadingView? = readingView
     fun getFolderBrowserViewForTesting(): ReaderFolderBrowserView? = folderBrowserView

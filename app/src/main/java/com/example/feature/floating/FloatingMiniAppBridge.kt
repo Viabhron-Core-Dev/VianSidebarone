@@ -29,6 +29,8 @@ class FloatingMiniAppBridge private constructor(private val context: Context) {
     private val durableStore = DurableMiniAppStore.getInstance(context)
     private val activeBubbles = LinkedHashMap<String, FloatingMiniAppLauncherBubble>()
     private var noteStaggerIndex = 0
+    @Volatile
+    private var hiddenReaderInstanceIdForExternal: String? = null
 
     private val readerActionReceiver = object : android.content.BroadcastReceiver() {
         override fun onReceive(ctx: Context?, intent: Intent?) {
@@ -46,6 +48,12 @@ class FloatingMiniAppBridge private constructor(private val context: Context) {
                         com.example.feature.reader.ReaderEventManager.notifyLibraryChanged()
                     }
                 }
+                com.example.feature.reader.ReaderEventManager.ACTION_RESTORE_READER_AFTER_ACTIVITY -> {
+                    val targetId = intent.getStringExtra(com.example.feature.reader.ReaderEventManager.EXTRA_READER_INSTANCE_ID)
+                    android.os.Handler(android.os.Looper.getMainLooper()).post {
+                        restoreReaderAfterExternalActivity(targetId)
+                    }
+                }
             }
         }
     }
@@ -55,6 +63,7 @@ class FloatingMiniAppBridge private constructor(private val context: Context) {
             val filter = android.content.IntentFilter().apply {
                 addAction(com.example.feature.reader.ReaderEventManager.ACTION_OPEN_BOOK_IN_READER)
                 addAction(com.example.feature.reader.ReaderEventManager.ACTION_READER_DB_CHANGED)
+                addAction(com.example.feature.reader.ReaderEventManager.ACTION_RESTORE_READER_AFTER_ACTIVITY)
             }
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
                 context.registerReceiver(readerActionReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
@@ -76,8 +85,10 @@ class FloatingMiniAppBridge private constructor(private val context: Context) {
      */
     fun openBookInFloatingReader(epubBookId: Int, targetInstanceId: String? = null): FloatingMiniAppWindow {
         val instanceId = targetInstanceId
+            ?: hiddenReaderInstanceIdForExternal
             ?: durableStore.getAllSnapshots().firstOrNull { isReaderMiniApp(it.appType) }?.instanceId
             ?: "miniapp_reader"
+        hiddenReaderInstanceIdForExternal = null
         com.example.feature.reader.ReaderSessionTracker.markWarmSession(instanceId)
         val saved = durableStore.loadSnapshot(instanceId)
         if (saved != null) {
@@ -91,6 +102,96 @@ class FloatingMiniAppBridge private constructor(private val context: Context) {
         window.openReaderBookById(epubBookId)
         return window
     }
+
+    /**
+     * Temporarily hides the active floating Reader window before opening full-screen [BookTrackerActivity]
+     * or Reader Settings so the `TYPE_APPLICATION_OVERLAY` window never floats on top of it,
+     * while preserving exact in-memory session, book, scroll, and UI state without spawning a bubble.
+     */
+    fun hideReaderForExternalActivity(instanceId: String? = null): String? {
+        val targetWindow = if (!instanceId.isNullOrBlank()) {
+            windowManager.getWindow(instanceId) as? FloatingMiniAppWindow
+        } else {
+            windowManager.getAllWindows()
+                .filterIsInstance<FloatingMiniAppWindow>()
+                .firstOrNull { isReaderMiniApp(it.appType) && it.isVisible }
+        } ?: return null
+
+        if (!isReaderMiniApp(targetWindow.appType)) return null
+
+        targetWindow.saveReaderStateForExternalActivity()
+        windowManager.hideWindow(targetWindow.windowId)
+        hiddenReaderInstanceIdForExternal = targetWindow.windowId
+        LogKeeper.log(context, TAG, "READER_HIDDEN_FOR_EXTERNAL id=${targetWindow.windowId}")
+        return targetWindow.windowId
+    }
+
+    /**
+     * Restores the previously hidden floating Reader window when [BookTrackerActivity] or
+     * Reader Settings closes, preserving its session, open screen, book, and scroll offset.
+     */
+    fun restoreReaderAfterExternalActivity(targetInstanceId: String? = null): Boolean {
+        val id = targetInstanceId?.takeIf { it.isNotBlank() }
+            ?: hiddenReaderInstanceIdForExternal
+            ?: return false
+        hiddenReaderInstanceIdForExternal = null
+
+        val existing = windowManager.getWindow(id) as? FloatingMiniAppWindow
+        if (existing != null) {
+            if (existing.state != WindowState.VISIBLE) {
+                windowManager.showWindow(id)
+            }
+            windowManager.bringToFront(id)
+            LogKeeper.log(context, TAG, "READER_RESTORED_AFTER_EXTERNAL id=$id fromMemory=true")
+            return true
+        }
+
+        val snapshot = durableStore.loadSnapshot(id)
+        if (snapshot != null && isReaderMiniApp(snapshot.appType) && snapshot.state == MiniAppState.ACTIVE) {
+            openMiniApp(id, snapshot.appType, snapshot.windowBounds.copyBounds())
+            LogKeeper.log(context, TAG, "READER_RESTORED_AFTER_EXTERNAL id=$id fromSnapshot=true")
+            return true
+        }
+        return false
+    }
+
+    fun launchBookTrackerFromReader(instanceId: String? = null, epubBookId: Int = -1) {
+        val hiddenId = hideReaderForExternalActivity(instanceId)
+        if (epubBookId > 0) {
+            com.example.feature.reader.BookTrackerActivity.launchForEpubBook(
+                context = context,
+                epubBookId = epubBookId,
+                restoreReaderInstanceId = hiddenId
+            )
+        } else {
+            com.example.feature.reader.BookTrackerActivity.launch(
+                context = context,
+                openBackupPanel = false,
+                restoreReaderInstanceId = hiddenId
+            )
+        }
+    }
+
+    fun launchReaderSettingsFromReader(instanceId: String? = null) {
+        val hiddenId = hideReaderForExternalActivity(instanceId)
+        try {
+            val intent = Intent(context, com.example.SettingsActivity::class.java).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                putExtra("start_route", "reader_settings")
+                if (!hiddenId.isNullOrBlank()) {
+                    putExtra(com.example.SettingsActivity.EXTRA_RESTORE_READER_INSTANCE_ID, hiddenId)
+                }
+            }
+            context.startActivity(intent)
+        } catch (e: Throwable) {
+            LogKeeper.log(context, TAG, "Failed to launch Reader Settings: ${e.message}")
+            if (!hiddenId.isNullOrBlank()) {
+                restoreReaderAfterExternalActivity(hiddenId)
+            }
+        }
+    }
+
+    internal fun getHiddenReaderInstanceIdForTesting(): String? = hiddenReaderInstanceIdForExternal
 
     /**
      * Creates and opens a brand-new blank Note mini-app instance with a unique persistent instanceId

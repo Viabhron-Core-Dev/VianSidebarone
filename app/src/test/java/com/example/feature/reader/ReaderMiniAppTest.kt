@@ -298,4 +298,153 @@ class ReaderMiniAppTest {
             instanceField.set(null, previousInstance)
         }
     }
+
+    @Test
+    fun testLibraryTabsSortSearchAndDetailsStatePreservation() {
+        val books = listOf(
+            com.example.data.EpubBook(id = 1, title = "Zebra Tales", author = "Alice", filePath = "", totalChapters = 10, lastReadChapter = 8, lastOpenedTimestamp = 100L),
+            com.example.data.EpubBook(id = 2, title = "Alpha Odyssey", author = "Bob", filePath = "", totalChapters = 10, lastReadChapter = 1, lastOpenedTimestamp = 300L),
+            com.example.data.EpubBook(id = 3, title = "Middle Path", author = "Carol", filePath = "", totalChapters = 10, lastReadChapter = 4, lastOpenedTimestamp = 200L)
+        )
+        assertEquals(
+            listOf(2, 3, 1),
+            ReaderLibraryView.filterAndSortBooks(books, "", ReaderLibrarySortOption.RECENTLY_OPENED).map { it.id }
+        )
+        assertEquals(
+            listOf(2, 3, 1),
+            ReaderLibraryView.filterAndSortBooks(books, "", ReaderLibrarySortOption.TITLE).map { it.id }
+        )
+        assertEquals(
+            listOf(1, 3, 2),
+            ReaderLibraryView.filterAndSortBooks(books, "", ReaderLibrarySortOption.PROGRESS).map { it.id }
+        )
+        assertEquals(
+            listOf(3),
+            ReaderLibraryView.filterAndSortBooks(books, "carol", ReaderLibrarySortOption.RECENTLY_OPENED).map { it.id }
+        )
+
+        val libView = ReaderLibraryView(context = testContext, instanceId = "lib_state_test", onBookSelected = {})
+        try {
+            assertEquals(ReaderLibraryTab.RECENT, libView.getActiveTabForTesting())
+            libView.cycleSortOptionForTesting()
+            assertEquals(ReaderLibrarySortOption.TITLE, libView.getSortOptionForTesting())
+            libView.setSearchQueryForTesting("Alpha")
+            assertTrue(libView.isSearchExpandedForTesting())
+
+            libView.openBookDetailsForTesting(books[1])
+            assertTrue(libView.isDetailsOpenForTesting())
+            libView.closeBookDetailsForTesting()
+            assertTrue(!libView.isDetailsOpenForTesting())
+
+            // Exact Library state (tab, sort, search) preserved across Details open/close
+            assertEquals(ReaderLibraryTab.RECENT, libView.getActiveTabForTesting())
+            assertEquals(ReaderLibrarySortOption.TITLE, libView.getSortOptionForTesting())
+            assertTrue(libView.isSearchExpandedForTesting())
+
+            libView.selectTab(ReaderLibraryTab.FILE_EXPLORER)
+            assertEquals(ReaderLibraryTab.FILE_EXPLORER, libView.getActiveTabForTesting())
+        } finally {
+            libView.releaseResources()
+        }
+    }
+
+    @Test
+    fun testReadingToolbarHiddenByDefaultAndCleanTapToggleOnly() {
+        val readView = ReaderReadingView(context = testContext, instanceId = "toolbar_tap_test", onBackToLibrary = {})
+        try {
+            assertTrue("Toolbar must be hidden by default", !readView.isBottomToolbarVisibleForTesting())
+
+            readView.dispatchTouchCoordinatesForTesting(android.view.MotionEvent.ACTION_DOWN, 200f, 300f, 100L)
+            readView.dispatchTouchCoordinatesForTesting(android.view.MotionEvent.ACTION_UP, 202f, 301f, 140L)
+            assertTrue("Clean tap on reading area must show toolbar", readView.isBottomToolbarVisibleForTesting())
+
+            // Drag / scroll beyond touchSlop must NOT toggle toolbar
+            readView.dispatchTouchCoordinatesForTesting(android.view.MotionEvent.ACTION_DOWN, 200f, 300f, 200L)
+            readView.dispatchTouchCoordinatesForTesting(android.view.MotionEvent.ACTION_MOVE, 200f, 450f, 230L)
+            readView.dispatchTouchCoordinatesForTesting(android.view.MotionEvent.ACTION_UP, 200f, 480f, 260L)
+            assertTrue("Scroll drag must NOT accidentally dismiss toolbar", readView.isBottomToolbarVisibleForTesting())
+
+            // Text selection tap must NOT toggle toolbar
+            readView.dispatchTouchCoordinatesForTesting(android.view.MotionEvent.ACTION_DOWN, 200f, 300f, 300L, hasSelection = true)
+            readView.dispatchTouchCoordinatesForTesting(android.view.MotionEvent.ACTION_UP, 201f, 300f, 340L, hasSelection = true)
+            assertTrue("Tap with active text selection must NOT dismiss toolbar", readView.isBottomToolbarVisibleForTesting())
+
+            // Clean second tap hides toolbar again
+            readView.handleCleanTapOnReadingAreaForTesting()
+            assertTrue("Second clean tap must hide toolbar", !readView.isBottomToolbarVisibleForTesting())
+        } finally {
+            readView.releaseResources()
+        }
+    }
+
+    @Test
+    fun testBookmarksToggleAndPersistence() {
+        ReaderBookmarkStore.clearBookmarksForBook(testContext, 77)
+        val added = ReaderBookmarkStore.toggleChapterBookmark(
+            context = testContext,
+            bookId = 77,
+            chapterIndex = 4,
+            chapterTitle = "Chapter 5: The Signal",
+            scrollY = 380
+        )
+        assertTrue("First toggle must add bookmark", added)
+        val saved = ReaderBookmarkStore.getBookmarks(testContext, 77)
+        assertEquals(1, saved.size)
+        assertEquals(4, saved[0].chapterIndex)
+        assertEquals(380, saved[0].scrollY)
+        assertTrue(ReaderBookmarkStore.isChapterBookmarked(testContext, 77, 4))
+
+        val removed = ReaderBookmarkStore.toggleChapterBookmark(
+            context = testContext,
+            bookId = 77,
+            chapterIndex = 4,
+            chapterTitle = "Chapter 5: The Signal",
+            scrollY = 380
+        )
+        assertTrue("Second toggle must remove bookmark", !removed)
+        assertEquals(0, ReaderBookmarkStore.getBookmarks(testContext, 77).size)
+    }
+
+    @Test
+    fun testHideAndRestoreFloatingReaderForExternalActivityPreservesOtherWindows() {
+        val instanceField = com.example.core.FloatingWindowManager::class.java.getDeclaredField("instance").apply {
+            isAccessible = true
+        }
+        val bridgeField = com.example.feature.floating.FloatingMiniAppBridge::class.java.getDeclaredField("instance").apply {
+            isAccessible = true
+        }
+        val prevFwm = instanceField.get(null)
+        val prevBridge = bridgeField.get(null)
+        instanceField.set(null, null)
+        bridgeField.set(null, null)
+        try {
+            val fwm = com.example.core.FloatingWindowManager.getInstance(testContext)
+            val bridge = com.example.feature.floating.FloatingMiniAppBridge.getInstance(testContext)
+
+            val readerWin = com.example.feature.floating.FloatingMiniAppWindow("reader_ext_test", testContext, "reader")
+            val noteWin = object : com.example.core.FloatingWindow("note_keep", testContext, "test_notes") {
+                override fun createContentView(context: Context): android.view.View = android.widget.FrameLayout(context)
+            }
+
+            fwm.registerWindow(noteWin)
+            fwm.showWindow("note_keep")
+            fwm.registerWindow(readerWin)
+            fwm.showWindow("reader_ext_test")
+
+            val hiddenId = bridge.hideReaderForExternalActivity("reader_ext_test")
+            assertEquals("reader_ext_test", hiddenId)
+            assertEquals(com.example.core.WindowState.HIDDEN, readerWin.state)
+            assertEquals(com.example.core.WindowState.VISIBLE, noteWin.state)
+            assertEquals("reader_ext_test", bridge.getHiddenReaderInstanceIdForTesting())
+
+            val restored = bridge.restoreReaderAfterExternalActivity("reader_ext_test")
+            assertTrue("restoreReaderAfterExternalActivity must succeed", restored)
+            assertEquals(com.example.core.WindowState.VISIBLE, readerWin.state)
+            assertEquals(com.example.core.WindowState.VISIBLE, noteWin.state)
+            assertEquals(null, bridge.getHiddenReaderInstanceIdForTesting())
+        } finally {
+            instanceField.set(null, prevFwm)
+            bridgeField.set(null, prevBridge)
+        }
+    }
 }

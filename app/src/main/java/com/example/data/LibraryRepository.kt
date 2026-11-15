@@ -101,6 +101,76 @@ class LibraryRepository(private val context: Context) {
         dao.getBookById(id)
     }
 
+    fun hasBookBinary(book: EpubBook?): Boolean {
+        if (book == null || book.filePath.isBlank()) return false
+        val file = File(book.filePath)
+        return file.exists() && file.isFile && file.length() > 0L
+    }
+
+    suspend fun hasBookBinary(bookId: Int): Boolean = withContext(Dispatchers.IO) {
+        hasBookBinary(dao.getBookById(bookId))
+    }
+
+    fun getActiveBinaryBookId(): Int {
+        return context.getSharedPreferences("FloatingReaderPrefs", Context.MODE_PRIVATE)
+            .getInt("active_binary_book_id", -1)
+    }
+
+    private fun setActiveBinaryBookId(bookId: Int) {
+        context.getSharedPreferences("FloatingReaderPrefs", Context.MODE_PRIVATE)
+            .edit()
+            .putInt("active_binary_book_id", bookId)
+            .apply()
+    }
+
+    private fun isManagedStorageFile(file: File): Boolean {
+        return try {
+            val path = file.canonicalPath
+            val filesRoot = context.filesDir.canonicalPath
+            val cacheRoot = context.cacheDir.canonicalPath
+            path.startsWith(filesRoot) || path.startsWith(cacheRoot)
+        } catch (_: Throwable) {
+            false
+        }
+    }
+
+    /**
+     * Retains the source binary and extracted reading cache ONLY for [keepBookId].
+     * Older books keep their Room [EpubBook] metadata, resume coordinates, and linked [TrackerBook]
+     * progress completely intact without leaving their binary/cache files on disk.
+     */
+    suspend fun pruneInactiveBookBinaries(keepBookId: Int) = withContext(Dispatchers.IO) {
+        if (keepBookId <= 0) return@withContext
+        val all = dao.getAllBooks()
+        for (other in all) {
+            if (other.id == keepBookId) continue
+            EpubParser.releaseInMemoryWindow(other.id)
+            try {
+                val otherDir = File(context.filesDir, "book_${other.id}")
+                if (otherDir.exists()) {
+                    otherDir.deleteRecursively()
+                }
+            } catch (_: Throwable) {}
+            if (other.filePath.isNotBlank()) {
+                try {
+                    val otherFile = File(other.filePath)
+                    if (otherFile.exists() && isManagedStorageFile(otherFile)) {
+                        otherFile.delete()
+                    }
+                } catch (_: Throwable) {}
+            }
+        }
+        setActiveBinaryBookId(keepBookId)
+        LogKeeper.log(context, TAG, "PRUNED_INACTIVE_BINARIES keepBookId=$keepBookId")
+    }
+
+    suspend fun markBookBinaryActive(bookId: Int) = withContext(Dispatchers.IO) {
+        val book = dao.getBookById(bookId) ?: return@withContext
+        if (hasBookBinary(book)) {
+            pruneInactiveBookBinaries(book.id)
+        }
+    }
+
     suspend fun updateBook(book: EpubBook) = withContext(Dispatchers.IO) {
         dao.updateBook(book)
         ReaderEventManager.notifyLibraryChanged(context)
@@ -116,7 +186,10 @@ class LibraryRepository(private val context: Context) {
         val bookDir = File(context.filesDir, "book_${book.id}")
         bookDir.deleteRecursively()
         val origFile = File(book.filePath)
-        if (origFile.exists()) origFile.delete()
+        if (origFile.exists() && isManagedStorageFile(origFile)) origFile.delete()
+        if (getActiveBinaryBookId() == book.id) {
+            setActiveBinaryBookId(-1)
+        }
         LogKeeper.log(context, TAG, "BOOK_DELETED id=${book.id} title='${book.title}' (Tracker unlinked)")
         ReaderEventManager.notifyLibraryChanged(context)
     }
@@ -173,15 +246,17 @@ class LibraryRepository(private val context: Context) {
             updated
         }
 
-        // Sync display title/author to linked EpubBook WITHOUT changing lastOpenedTimestamp or resume chapter/scroll
+        // Sync display title/author/totalChapters to linked EpubBook WITHOUT changing lastOpenedTimestamp or resume chapter/scroll
         val linkedId = finalTracker.linkedEpubBookId
         if (linkedId != null) {
             val epub = dao.getBookById(linkedId)
-            if (epub != null && (epub.title != finalTracker.title || epub.author != finalTracker.author)) {
+            val syncTotal = if (finalTracker.totalChapters > 0) finalTracker.totalChapters else epub?.totalChapters ?: 0
+            if (epub != null && (epub.title != finalTracker.title || epub.author != finalTracker.author || epub.totalChapters != syncTotal)) {
                 dao.updateBook(
                     epub.copy(
                         title = finalTracker.title,
-                        author = finalTracker.author
+                        author = finalTracker.author,
+                        totalChapters = syncTotal
                     )
                 )
             }
@@ -211,6 +286,28 @@ class LibraryRepository(private val context: Context) {
     }
 
     /**
+     * Re-imports a source binary for an existing older metadata-only [EpubBook] (`targetBookId`),
+     * preserving its ID, metadata, Reader resume position, and Tracker high-water history.
+     * Previous active book binaries are pruned ONLY after replacement parse and persistence succeed.
+     */
+    suspend fun reimportBook(targetBookId: Int, uri: Uri): EpubBook? = withContext(Dispatchers.IO) {
+        val rawName = getFileName(uri) ?: "Unknown Book"
+        val mimeType = context.contentResolver.getType(uri)
+        val isTxt = rawName.lowercase().endsWith(".txt") || mimeType?.startsWith("text/") == true
+        val baseTitle = rawName.removeSuffix(".epub").removeSuffix(".EPUB").removeSuffix(".txt").removeSuffix(".TXT")
+
+        try {
+            val stream = context.contentResolver.openInputStream(uri) ?: return@withContext null
+            stream.use { inputStream ->
+                reimportFromInputStream(targetBookId, inputStream, isTxt, baseTitle)
+            }
+        } catch (e: Exception) {
+            LogKeeper.log(context, TAG, "Failed to re-import from Uri for id=$targetBookId: ${e.message}")
+            null
+        }
+    }
+
+    /**
      * Imports a book from a local File.
      */
     suspend fun importBookFile(
@@ -231,6 +328,94 @@ class LibraryRepository(private val context: Context) {
             LogKeeper.log(context, TAG, "Failed to import from File: ${e.message}")
             null
         }
+    }
+
+    /**
+     * Re-imports a local source [file] into an existing [EpubBook] record (`targetBookId`),
+     * keeping all metadata, resume chapter/scroll, and linked [TrackerBook] progress intact.
+     */
+    suspend fun reimportBookFile(targetBookId: Int, file: File): EpubBook? = withContext(Dispatchers.IO) {
+        if (!file.exists()) return@withContext null
+        val rawName = file.name
+        val isTxt = rawName.lowercase().endsWith(".txt")
+        val baseTitle = rawName.removeSuffix(".epub").removeSuffix(".EPUB").removeSuffix(".txt").removeSuffix(".TXT")
+
+        try {
+            file.inputStream().use { inputStream ->
+                reimportFromInputStream(targetBookId, inputStream, isTxt, baseTitle)
+            }
+        } catch (e: Exception) {
+            LogKeeper.log(context, TAG, "Failed to re-import from File for id=$targetBookId: ${e.message}")
+            null
+        }
+    }
+
+    private suspend fun reimportFromInputStream(
+        targetBookId: Int,
+        inputStream: InputStream,
+        isTxt: Boolean,
+        fallbackTitle: String
+    ): EpubBook? {
+        val existing = dao.getBookById(targetBookId)
+            ?: return importFromInputStream(inputStream, isTxt, fallbackTitle, markOpenedOnImport = true)
+
+        val ext = if (isTxt) "txt" else "epub"
+        val now = System.currentTimeMillis()
+        val destFile = File(context.filesDir, "imported_${now}_${System.nanoTime() % 100000}.$ext")
+        FileOutputStream(destFile).use { output ->
+            inputStream.copyTo(output)
+        }
+
+        // Parse and validate before overwriting existing record or pruning previous active binary
+        EpubParser.releaseInMemoryWindow(existing.id)
+        val totalChapters = if (isTxt) {
+            EpubParser.parseTxtToText(context, existing.id, destFile)
+        } else {
+            EpubParser.parseEpub(context, existing.id, destFile).chapterCount
+        }
+
+        if (totalChapters <= 0) {
+            LogKeeper.log(context, TAG, "BOOK_REIMPORT_FAILED id=${existing.id} chapters=$totalChapters")
+            try { destFile.delete() } catch (_: Throwable) {}
+            try { File(context.filesDir, "book_${existing.id}").deleteRecursively() } catch (_: Throwable) {}
+            return null
+        }
+
+        // Delete old managed file of the same book if different
+        if (existing.filePath.isNotBlank() && existing.filePath != destFile.absolutePath) {
+            val oldFile = File(existing.filePath)
+            if (oldFile.exists() && isManagedStorageFile(oldFile)) {
+                oldFile.delete()
+            }
+        }
+
+        val clampedResumeCh = existing.lastReadChapter.coerceIn(0, (totalChapters - 1).coerceAtLeast(0))
+        val updatedBook = existing.copy(
+            filePath = destFile.absolutePath,
+            totalChapters = totalChapters,
+            lastReadChapter = clampedResumeCh,
+            lastOpenedTimestamp = now,
+            lastActivityTimestamp = now,
+            isParsed = true
+        )
+        dao.updateBook(updatedBook)
+
+        val linkedTracker = getOrCreateLinkedTrackerBook(updatedBook.id)
+        if (linkedTracker != null && totalChapters > linkedTracker.totalChapters) {
+            trackerDao.updateBook(
+                linkedTracker.copy(
+                    totalChapters = totalChapters,
+                    lastUpdatedTimestamp = now
+                )
+            )
+        }
+
+        // Replacement succeeded: safely prune previous active book's binary/cache
+        pruneInactiveBookBinaries(keepBookId = updatedBook.id)
+
+        LogKeeper.log(context, TAG, "BOOK_REIMPORTED id=${updatedBook.id} title='${updatedBook.title}' chapters=$totalChapters")
+        ReaderEventManager.notifyLibraryChanged(context)
+        return updatedBook
     }
 
     private suspend fun importFromInputStream(
@@ -256,6 +441,7 @@ class LibraryRepository(private val context: Context) {
         }
         if (existingExactBinary != null) {
             destFile.delete()
+            pruneInactiveBookBinaries(keepBookId = existingExactBinary.id)
             LogKeeper.log(context, TAG, "IMPORT_EXACT_BINARY_DUPLICATE reusing id=${existingExactBinary.id}")
             return existingExactBinary
         }
@@ -285,6 +471,7 @@ class LibraryRepository(private val context: Context) {
         }
 
         if (totalChapters <= 0) {
+            // Replacement import/parse failed -> clean up failed import ONLY; never touch previous active book binary
             LogKeeper.log(context, TAG, "BOOK_IMPORT_FAILED_CLEANUP id=$id chapters=$totalChapters title='$finalTitle'")
             try { dao.deleteBook(finalBook) } catch (_: Throwable) {}
             try { destFile.delete() } catch (_: Throwable) {}
@@ -302,6 +489,9 @@ class LibraryRepository(private val context: Context) {
 
         // Create linked TrackerBook by explicit linkedEpubBookId (never matching by title)
         getOrCreateLinkedTrackerBook(readyBook.id)
+
+        // Replacement import/parse/persist succeeded -> now prune previous active book binaries & caches
+        pruneInactiveBookBinaries(keepBookId = readyBook.id)
 
         LogKeeper.log(context, TAG, "BOOK_IMPORTED id=$id title='$finalTitle' author='$finalAuthor' chapters=$totalChapters")
         ReaderEventManager.notifyLibraryChanged(context)
