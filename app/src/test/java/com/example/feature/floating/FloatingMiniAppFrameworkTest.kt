@@ -3368,8 +3368,61 @@ class FloatingMiniAppFrameworkTest {
         bridge.closeMiniApp(otherId, deleteDurable = true)
         wm.unregisterAll()
     }
+
+    @Test
+    fun testFloatingWindowRootCardZeroElevationAndClipTransitions() {
+        val wm = com.example.core.FloatingWindowManager.getInstance(testContext)
+        wm.unregisterAll()
+        val density = testContext.resources.displayMetrics.density
+        val expectedRadius = 16 * density
+
+        for (appType in listOf("note", "reader")) {
+            val instanceId = "root_elevation_clip_$appType"
+            val window = FloatingMiniAppWindow(instanceId, testContext, appType)
+            val initialBounds = WindowBounds(100, 120, 620, 820)
+            window.setWindowBounds(initialBounds)
+            wm.registerWindow(window)
+
+            try {
+                val rootView = window.createContentView(testContext)
+                assertNotNull("Content view must be created for $appType", rootView)
+
+                val rootCard = window.getRootCardViewForTesting()
+                assertNotNull("Root card view must exist for $appType", rootCard)
+                assertEquals("Root card view elevation must be 0f for $appType", 0f, rootCard!!.elevation, 0.001f)
+                assertNull("Root card stateListAnimator must be null for $appType", rootCard.stateListAnimator)
+                assertEquals("Tracked root elevation must be 0f for $appType", 0f, window.appliedRootElevationPx, 0.001f)
+                assertTrue("Tracked stateListAnimator disabled flag must be true for $appType", window.isRootStateListAnimatorDisabled)
+
+                // Normal floating state: 16dp rounded outline clipping enabled
+                assertFalse("Window should start in normal floating mode for $appType", window.isMaximized)
+                assertTrue("Normal floating state must clip rootCardView to 16dp outline for $appType", window.isCardClippedToOutline)
+                assertEquals("Normal floating state must use 16dp corner radius for $appType", expectedRadius, window.appliedCornerRadiusPx, 0.5f)
+
+                // Maximize: square corners, zero elevation preserved
+                window.toggleMaximize()
+                assertTrue("Window must enter maximized state for $appType", window.isMaximized)
+                assertFalse("Maximized state must disable rounded clipping for $appType", window.isCardClippedToOutline)
+                assertEquals("Maximized state must use 0f corner radius for $appType", 0f, window.appliedCornerRadiusPx, 0.01f)
+                assertEquals("Maximized state must preserve 0f root elevation for $appType", 0f, window.appliedRootElevationPx, 0.001f)
+                assertTrue("Maximized state must preserve disabled stateListAnimator for $appType", window.isRootStateListAnimatorDisabled)
+                assertEquals(0f, rootCard.elevation, 0.001f)
+                assertNull(rootCard.stateListAnimator)
+
+                // Restore: 16dp rounded outline clipping re-enabled, zero elevation preserved
+                window.toggleMaximize()
+                assertFalse("Window must exit maximized state on restore for $appType", window.isMaximized)
+                assertTrue("Restored floating state must re-enable rounded clipping for $appType", window.isCardClippedToOutline)
+                assertEquals("Restored floating state must restore 16dp corner radius for $appType", expectedRadius, window.appliedCornerRadiusPx, 0.5f)
+                assertEquals("Restored state must preserve 0f root elevation for $appType", 0f, window.appliedRootElevationPx, 0.001f)
+                assertTrue("Restored state must preserve disabled stateListAnimator for $appType", window.isRootStateListAnimatorDisabled)
+                assertEquals(0f, rootCard.elevation, 0.001f)
+                assertNull(rootCard.stateListAnimator)
+                assertEquals("Restored bounds must match initial floating bounds for $appType", initialBounds, window.bounds)
+            } finally {
+                wm.unregisterWindow(window.windowId)
+            }
+        }
+        wm.unregisterAll()
+    }
 }
-
-
-
-

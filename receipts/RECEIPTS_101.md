@@ -245,3 +245,20 @@
 * Any deviation from what was requested, and why: Ran `:app:compileDebugKotlin` and `:app:testDebugUnitTest` directly instead of full APK packaging (`assembleDebug`/`compile_applet`) so `debug.keystore` and `.build-outputs/app-debug.apk` were not regenerated.
 * Any known issue or follow-up needed: Public Android SDK (`compileSdk = 34`) provides no API to set a circular `WindowManager` compositor touchable region (`ViewTreeObserver.InternalInsetsInfo.setTouchableRegion` is `@hide`/system-only), so while corner touches inside the `36dp x 36dp` overlay frame are rejected before affecting the bubble, they will not pass through the `36dp` corner gap to an underlying app window. Physical device verification is needed to confirm clean circular visual appearance and corner tap rejection across Reader, Note, Dictionary, and Floating PWA.
 
+---
+
+### Receipt 118
+* Timestamp: 2026-11-15 22:11 UTC
+* One-line summary of what was requested: Implement a minimal, isolated fix for the floating Note and Reader bottom-corner rendering defect by setting `rootCardView.elevation = 0f` and `rootCardView.stateListAnimator = null`, leaving `contentContainer`, `FloatingWindow.kt`, window bounds/resize/IME logic, Heavy architecture, and `blueprint/BLUEPRINT.md` untouched, and verifying with focused JVM tests.
+* Exact files touched:
+  - `app/src/main/java/com/example/feature/floating/FloatingMiniAppWindow.kt`
+  - `app/src/test/java/com/example/feature/floating/FloatingMiniAppFrameworkTest.kt`
+  - `receipts/RECEIPTS_101.md`
+  - Also removed container-recreated `/debug.keystore`, `/debug.keystore.base64`, and `/.build-outputs/app-debug.apk` and verified all three remain absent afterward.
+* What was actually done — factual, not persuasive:
+  1. In `FloatingMiniAppWindow.kt` (`rootCardView` setup in `createContentView`): replaced `elevation = 16 * density` with `elevation = 0f` and `stateListAnimator = null`, and added tracked fields `appliedRootElevationPx` (`-1f -> 0f`), `isRootStateListAnimatorDisabled` (`false -> true`), and `getRootCardViewForTesting()` while keeping the `#181825` `rootCardBackground`, `16dp` corner radius, `clipToOutline = !isMaximized`, `rootBorderOverlay`, bottom-right resize/control sticker, `contentContainer` outline/background, `FloatingWindow.kt`, bounds/resize/IME behavior, and `:heavy` architecture unchanged.
+  2. In `FloatingMiniAppFrameworkTest.kt`: added `testFloatingWindowRootCardZeroElevationAndClipTransitions` testing both `"note"` and `"reader"` floating windows for `rootCardView.elevation == 0f`, `rootCardView.stateListAnimator == null`, `appliedRootElevationPx == 0f`, `isRootStateListAnimatorDisabled == true`, `16dp` outline clipping in normal floating state, and maximize/restore corner-radius and clip transitions.
+  3. Left `blueprint/BLUEPRINT.md` untouched per explicit instruction.
+* How it was verified: Local Kotlin compilation and JVM unit tests only — `gradle :app:compileDebugKotlin :app:testDebugUnitTest --tests "com.example.feature.floating.FloatingMiniAppFrameworkTest" --tests "com.example.feature.reader.ReaderMiniAppTest" --tests "com.example.feature.pwa.floating.FloatingPwaMiniAppTest" --console=plain` (`BUILD SUCCESSFUL`; XML results: `FloatingMiniAppFrameworkTest` 86/86, `ReaderMiniAppTest` 6/6, `FloatingPwaMiniAppTest` 6/6 — 98/98 passed, 0 failures/errors/skipped). Actual HWUI `RenderNode` shadow rendering and physical-device corner appearance were not tested in this environment.
+* Any deviation from what was requested, and why: Ran `:app:compileDebugKotlin` and `:app:testDebugUnitTest` directly instead of full APK assembly (`assembleDebug`) so `debug.keystore` and `.build-outputs/app-debug.apk` were not regenerated.
+* Any known issue or follow-up needed: Physical-device testing is still required to confirm whether removing `rootCardView` elevation completely eliminates the bottom-corner square/grey bleed under real HWUI rendering, or if a follow-up isolating `contentContainer`'s outline/background is needed.

@@ -258,6 +258,10 @@ class FloatingMiniAppWindow(
         private set
     var appliedCornerRadiusPx: Float = 0f
         private set
+    var appliedRootElevationPx: Float = -1f
+        private set
+    var isRootStateListAnimatorDisabled: Boolean = false
+        private set
 
     val notePersistence = NotePersistenceCoordinator(instanceId, context, durableStore)
     val undoStack: ArrayDeque<String>
@@ -348,6 +352,7 @@ class FloatingMiniAppWindow(
         updateNoteEditorText(text)
     }
     fun getEditPopoverForTesting(): View? = editPopoverView
+    fun getRootCardViewForTesting(): FrameLayout? = rootCardView
 
     fun getContentViewportHeight(windowHeight: Int): Int {
         val density = context.resources.displayMetrics.density
@@ -531,7 +536,11 @@ class FloatingMiniAppWindow(
             }
             // Clip all children (including top bar, content, and surface) to the card's 16dp rounded outer shape
             clipToOutline = !isMaximized
-            elevation = 16 * density
+            // Disable RenderNode elevation shadow and stateListAnimator so shadows do not bleed into corner cutouts.
+            elevation = 0f
+            appliedRootElevationPx = 0f
+            stateListAnimator = null
+            isRootStateListAnimatorDisabled = true
         }
         root.viewTreeObserver?.addOnWindowFocusChangeListener { hasFocus ->
             hasRealWindowFocus = hasFocus
