@@ -3203,6 +3203,171 @@ class FloatingMiniAppFrameworkTest {
         restoredBridge.closeMiniApp("restored_sleep_1", deleteDurable = true)
         restoredBridge.closeMiniApp("restored_sleep_2", deleteDurable = true)
     }
+
+    @Test
+    fun testFoldedLauncherBubbleCircularShapeAndTouchArea() {
+        val store = DurableMiniAppStore.getInstance(testContext)
+        val wm = com.example.core.FloatingWindowManager.getInstance(testContext)
+        val bridge = FloatingMiniAppBridge.getInstance(testContext)
+
+        // 1. Verify visual circular shape, zero square-clipping elevation, single container, and flags across shared app types
+        val density = testContext.resources.displayMetrics.density
+        val expectedSizePx = (36 * density).toInt()
+        val appTypes = listOf("reader", "note", "dictionary", "floating_pwa")
+
+        for (type in appTypes) {
+            var wokenId: String? = null
+            val bubble = FloatingMiniAppLauncherBubble(
+                instanceId = "circle_shape_$type",
+                appType = type,
+                context = testContext,
+                initialX = 40,
+                initialY = 120,
+                accentColorHex = "#F38BA8",
+                onBubbleTapped = { wokenId = it }
+            )
+            val container = bubble.getOrCreateContainerView()
+            assertSame(
+                "Bubble container must not wrap content in an extra rectangular FrameLayout ($type)",
+                container,
+                bubble.getView()
+            )
+            assertSame(
+                "createContentView must return the same circular root container ($type)",
+                container,
+                bubble.createContentView(testContext)
+            )
+            assertTrue("Circular clipToOutline must be applied ($type)", bubble.isCircularClipAppliedForTesting)
+            assertEquals("Elevation must be 0f to prevent clipped square shadow artefacts ($type)", 0f, bubble.appliedElevationForTesting, 0.01f)
+            bubble.bubbleOutlineProvider.getOutline(container, android.graphics.Outline())
+            assertTrue("OutlineProvider must configure an oval outline ($type)", bubble.appliedOutlineShapeOvalForTesting)
+            assertEquals(expectedSizePx, bubble.bubbleSizePxForTesting)
+            assertEquals(expectedSizePx, bubble.bounds.width)
+            assertEquals(expectedSizePx, bubble.bounds.height)
+            assertEquals(expectedSizePx, bubble.layoutParams.width)
+            assertEquals(expectedSizePx, bubble.layoutParams.height)
+            assertNotEquals(0, bubble.layoutParams.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE)
+            assertEquals(0, bubble.layoutParams.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE)
+            assertNull(wokenId)
+
+            bubble.onDestroy()
+            assertNull("onDestroy must release bubble container view ($type)", bubble.getView())
+        }
+
+        // 2. Verify geometric circle hit-test boundaries for 36dp circle (72x72px at density=2f, center=36, radius=36)
+        val geoBubble = FloatingMiniAppLauncherBubble(
+            instanceId = "geo_test",
+            appType = "reader",
+            context = testContext,
+            initialX = 100,
+            initialY = 200,
+            onBubbleTapped = {}
+        )
+        val size = geoBubble.bubbleSizePxForTesting
+        val center = size / 2f
+        val radius = size / 2f
+        assertTrue("Center must be inside circle", geoBubble.isPointInsideCircle(center, center, size, size))
+        assertTrue("Cardinal top point on circumference must be inside", geoBubble.isPointInsideCircle(center, 0f, size, size))
+        assertTrue("Cardinal right point on circumference must be inside", geoBubble.isPointInsideCircle(size.toFloat(), center, size, size))
+        assertTrue("Point just inside diagonal boundary must be inside", geoBubble.isPointInsideCircle(center - 25f, center - 25f, size, size))
+        assertFalse("Point just outside diagonal boundary must be rejected", geoBubble.isPointInsideCircle(center - 26f, center - 26f, size, size))
+        assertFalse("Top-left square corner must be rejected", geoBubble.isPointInsideCircle(1f, 1f, size, size))
+        assertFalse("Top-right square corner must be rejected", geoBubble.isPointInsideCircle(size - 1f, 1f, size, size))
+        assertFalse("Bottom-left square corner must be rejected", geoBubble.isPointInsideCircle(1f, size - 1f, size, size))
+        assertFalse("Bottom-right square corner must be rejected", geoBubble.isPointInsideCircle(size - 1f, size - 1f, size, size))
+        assertFalse("Negative coordinate must be rejected", geoBubble.isPointInsideCircle(-1f, center, size, size))
+
+        // 3. Verify corner touches are rejected BEFORE focus, bringToFront, drag, persist, or wake
+        val noteId = "circular_corner_note"
+        val savedWindowBounds = WindowBounds(140, 220, 480, 600)
+        val noteWin = FloatingMiniAppWindow(noteId, testContext, "note")
+        noteWin.setWindowBounds(savedWindowBounds)
+        noteWin.createContentView(testContext)
+        noteWin.setNoteTextForTesting("Circular wake check")
+        wm.registerWindow(noteWin)
+        bridge.sleepMiniApp(noteId)
+
+        val otherId = "other_active_window"
+        val otherWin = FloatingMiniAppWindow(otherId, testContext, "note")
+        otherWin.setWindowBounds(WindowBounds(200, 260, 420, 500))
+        wm.registerWindow(otherWin)
+        wm.bringToFront(otherId)
+        assertEquals(otherId, wm.focusedWindowId)
+
+        val activeBubble = wm.getWindow("bubble_$noteId") as? FloatingMiniAppLauncherBubble
+        assertNotNull("Sleeping mini-app must have a registered launcher bubble", activeBubble)
+        activeBubble!!.getOrCreateContainerView()
+        val initialBubbleX = activeBubble.bounds.x
+        val initialBubbleY = activeBubble.bounds.y
+        val initialZOrder = activeBubble.zOrder
+        assertTrue("Bubble must sit below other active window initially", initialZOrder < otherWin.zOrder)
+
+        val corners = listOf(
+            1f to 1f,
+            (size - 1f) to 1f,
+            1f to (size - 1f),
+            (size - 1f) to (size - 1f)
+        )
+        for ((cx, cy) in corners) {
+            assertFalse(
+                "Corner ACTION_DOWN ($cx,$cy) must be rejected",
+                activeBubble.dispatchTouchForTesting(MotionEvent.ACTION_DOWN, cx, cy, initialBubbleX + cx, initialBubbleY + cy, size, size)
+            )
+            assertFalse(
+                "Subsequent MOVE after rejected corner press must remain rejected",
+                activeBubble.dispatchTouchForTesting(MotionEvent.ACTION_MOVE, center, center, initialBubbleX + 120f, initialBubbleY + 140f, size, size)
+            )
+            assertFalse(
+                "Subsequent UP even over center after rejected corner press must remain rejected",
+                activeBubble.dispatchTouchForTesting(MotionEvent.ACTION_UP, center, center, initialBubbleX + 120f, initialBubbleY + 140f, size, size)
+            )
+            assertEquals("Corner touch must not steal WindowManager focus", otherId, wm.focusedWindowId)
+            assertFalse("Corner touch must not focus the bubble", activeBubble.isFocused)
+            assertEquals("Corner touch must not bring bubble to front", initialZOrder, activeBubble.zOrder)
+            assertEquals("Corner touch must not move bubble X", initialBubbleX, activeBubble.bounds.x)
+            assertEquals("Corner touch must not move bubble Y", initialBubbleY, activeBubble.bounds.y)
+            assertNotNull("Corner touch must not wake sleeping mini-app", wm.getWindow("bubble_$noteId"))
+            assertNull("Mini-app window must stay sleeping after corner touch", wm.getWindow(noteId))
+        }
+
+        // 4. Drag starting inside circle continues smoothly even when finger moves outside local circle, persists buttonPosition, and preserves windowBounds
+        assertTrue(
+            activeBubble.dispatchTouchForTesting(MotionEvent.ACTION_DOWN, center, center, initialBubbleX + center, initialBubbleY + center, size, size)
+        )
+        assertTrue(
+            activeBubble.dispatchTouchForTesting(MotionEvent.ACTION_MOVE, size + 90f, size + 120f, initialBubbleX + center + 100f, initialBubbleY + center + 150f, size, size)
+        )
+        assertTrue(
+            activeBubble.dispatchTouchForTesting(MotionEvent.ACTION_UP, size + 90f, size + 120f, initialBubbleX + center + 100f, initialBubbleY + center + 150f, size, size)
+        )
+        val draggedX = activeBubble.bounds.x
+        val draggedY = activeBubble.bounds.y
+        assertEquals(initialBubbleX + 100, draggedX)
+        assertEquals(initialBubbleY + 150, draggedY)
+        assertEquals(size, activeBubble.bounds.width)
+        assertEquals(size, activeBubble.bounds.height)
+        val snapAfterDrag = store.loadSnapshot(noteId)!!
+        assertEquals(Pair(draggedX, draggedY), snapAfterDrag.buttonPosition)
+        assertEquals(savedWindowBounds, snapAfterDrag.windowBounds)
+        assertNotNull("Drag release must not wake sleeping mini-app", wm.getWindow("bubble_$noteId"))
+
+        // 5. Tap inside valid circle wakes mini-app and restores exact windowBounds
+        assertTrue(
+            activeBubble.dispatchTouchForTesting(MotionEvent.ACTION_DOWN, center + (radius - 4f), center, draggedX + center, draggedY + center, size, size)
+        )
+        assertTrue(
+            activeBubble.dispatchTouchForTesting(MotionEvent.ACTION_UP, center + (radius - 4f), center, draggedX + center, draggedY + center, size, size)
+        )
+        assertNull("Bubble must dismiss on valid circle tap", wm.getWindow("bubble_$noteId"))
+        val wokenNote = wm.getWindow(noteId) as? FloatingMiniAppWindow
+        assertNotNull("Valid circle tap must wake mini-app", wokenNote)
+        assertEquals(savedWindowBounds, wokenNote!!.bounds)
+        assertEquals("Circular wake check", wokenNote.getAuthoritativeNoteText())
+
+        bridge.closeMiniApp(noteId, deleteDurable = true)
+        bridge.closeMiniApp(otherId, deleteDurable = true)
+        wm.unregisterAll()
+    }
 }
 
 

@@ -222,3 +222,26 @@
 * Any deviation from what was requested, and why: Added `bridge.closeMiniApp(id1/id2, deleteDurable = true)` before step 5 of `testFoldedLauncherBubbleFlagsDragWakeAndRestore` so the previously woken `id1` (`ACTIVE`) snapshot did not remain in `DurableMiniAppStore` during the sleeping-snapshot restoration check.
 * Any known issue or follow-up needed: Physical-device validation required to confirm the runtime keyboard opens in other Android apps with one and multiple folded bubbles, bubble dragging/tapping/waking works cleanly, keyboard works inside active mini-apps, and repeated fold/wake cycles remain stable.
 
+---
+
+### Receipt 117
+* Timestamp: 2026-11-15 19:45 UTC
+* One-line summary of what was requested: Perform security artifact cleanup (`debug.keystore`, `debug.keystore.base64`, `.build-outputs/app-debug.apk`) and fix the shared global folded floating mini-app launcher bubble (`FloatingMiniAppLauncherBubble`) so both its visual shape and interactive touch area are genuinely circular (`36dp` diameter) across all mini-apps.
+* Exact files touched:
+  - Deleted workspace artifacts: `debug.keystore`, `debug.keystore.base64`, `.build-outputs/app-debug.apk` (verified absent before and after Gradle tasks)
+  - `app/src/main/java/com/example/feature/floating/FloatingMiniAppLauncherBubble.kt`
+  - `app/src/test/java/com/example/feature/floating/FloatingMiniAppFrameworkTest.kt`
+  - `blueprint/BLUEPRINT.md`
+  - `receipts/RECEIPTS_101.md`
+* What was actually done — factual, not persuasive:
+  1. Removed `/debug.keystore`, `/debug.keystore.base64`, and `/.build-outputs/app-debug.apk` cleanly without regenerating the keystore.
+  2. Updated `FloatingMiniAppLauncherBubble.kt`:
+     - Removed `elevation = 10 * density` (set `elevation = 0f` and `stateListAnimator = null`) to eliminate square-clipped RenderNode drop shadows at the `36dp x 36dp` overlay edges.
+     - Added explicit oval `ViewOutlineProvider` (`outline.setOval(...)`) with `clipToOutline = true`, preserving exact `36dp` dimensions, `#313244` background fill, `2dp` accent border, `7dp`-padded white icon, and `FLAG_NOT_FOCUSABLE` (`FLAG_NOT_TOUCHABLE` unset).
+     - Overrode `getOrCreateContainerView()`, `createContentView()`, `getView()`, and `onDestroy()` directly in `FloatingMiniAppLauncherBubble` (leaving `FloatingWindow.kt` untouched) so no unclipped rectangular outer `FrameLayout` wraps the bubble.
+     - Added `isPointInsideCircle` and root `dispatchTouchEvent` gating (`shouldAcceptAndFocusOnTouch` / `handleAcceptedTouchAction`) so outside-circle corner touches are rejected on `ACTION_DOWN` before focus shifts, `bringToFront`, drag state, `buttonPosition` updates, or `onBubbleTapped` wake callbacks, while active in-circle drags continue smoothly when the pointer moves outside the circle.
+  3. Added `testFoldedLauncherBubbleCircularShapeAndTouchArea` in `FloatingMiniAppFrameworkTest.kt` covering shared app types, oval outline/zero elevation/single container, `isPointInsideCircle` boundaries, all-4-corner rejection before focus/bringToFront/drag/wake, in-circle drag persistence, and tap-to-wake restoration.
+* How it was verified: Local Kotlin compilation (`gradle :app:compileDebugKotlin :app:compileDebugUnitTestKotlin`) and local JVM unit tests (`gradle :app:testDebugUnitTest` across 5 targeted suites: `FloatingMiniAppFrameworkTest` 85/85, `ReaderMiniAppTest` 6/6, `FloatingPwaMiniAppTest` 6/6, `FloatingMiniAppLogFilterTest` 7/7, `SidebarImeInteractionTest` 3/3 — 107/107 passed, 0 failures/errors/skipped). Physical Android overlay rendering and runtime touch behavior were not tested on a device or emulator in this environment.
+* Any deviation from what was requested, and why: Ran `:app:compileDebugKotlin` and `:app:testDebugUnitTest` directly instead of full APK packaging (`assembleDebug`/`compile_applet`) so `debug.keystore` and `.build-outputs/app-debug.apk` were not regenerated.
+* Any known issue or follow-up needed: Public Android SDK (`compileSdk = 34`) provides no API to set a circular `WindowManager` compositor touchable region (`ViewTreeObserver.InternalInsetsInfo.setTouchableRegion` is `@hide`/system-only), so while corner touches inside the `36dp x 36dp` overlay frame are rejected before affecting the bubble, they will not pass through the `36dp` corner gap to an underlying app window. Physical device verification is needed to confirm clean circular visual appearance and corner tap rejection across Reader, Note, Dictionary, and Floating PWA.
+

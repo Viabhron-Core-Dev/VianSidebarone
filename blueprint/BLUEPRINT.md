@@ -629,6 +629,17 @@
   - Left `FloatingWindow.kt` base flags, `FloatingMiniAppWindow.kt` active mini-app focus/IME behavior, `FloatingMiniAppBridge.kt`, and `:heavy` runtime untouched.
 - **2. Verification**: `FloatingMiniAppFrameworkTest` (84/84 passed including `testFoldedLauncherBubbleFlagsDragWakeAndRestore`), `FloatingMiniAppLogFilterTest` (7/7), `SidebarImeInteractionTest` (3/3), `ReaderMiniAppTest` (6/6), `FloatingPwaMiniAppTest` (6/6); `compile_applet` build succeeded. Requires physical-device validation for cross-app soft keyboard opening while bubbles are folded.
 
+### Phase 14.14: Global Folded Launcher Bubble Circular Shape & Touch-Area Alignment (COMPLETED)
+- **1. Circular Visual Shape (`FloatingMiniAppLauncherBubble.kt`)**:
+  - Removed `elevation = 10 * density` (`elevation = 0f`, `stateListAnimator = null`) so RenderNode drop shadows no longer hard-clip at the `36dp x 36dp` overlay surface corners into a visible dark square box.
+  - Applied an explicit circular `ViewOutlineProvider` (`outline.setOval(...)`) with `clipToOutline = true`, preserving exact `36dp` bounds, `#313244` fill, `2dp` accent border, and centered `7dp`-padded white app icon.
+- **2. Circular Container & Earliest Touch Rejection (`FloatingMiniAppLauncherBubble.kt`)**:
+  - Overrode `getOrCreateContainerView()`, `createContentView()`, `getView()`, and `onDestroy()` directly in `FloatingMiniAppLauncherBubble` (leaving `FloatingWindow.kt` and all other `FloatingWindow` subclasses untouched) so no unclipped rectangular base wrapper surrounds the bubble.
+  - Added `isPointInsideCircle` and `dispatchTouchEvent` gating (`shouldAcceptAndFocusOnTouch` / `handleAcceptedTouchAction`) to reject outside-circle square corner presses on `ACTION_DOWN` before focus shifts, `bringToFront`, drag tracking, `buttonPosition` writes, or `onBubbleTapped` wake callbacks, while allowing active in-circle drags to continue cleanly even if the pointer leaves the circle mid-drag.
+- **3. Security Cleanup & Verification**:
+  - Deleted generated `/debug.keystore`, `/debug.keystore.base64`, and `/.build-outputs/app-debug.apk` and kept them absent (did not invoke APK signing/packaging).
+  - Kotlin debug compilation (`:app:compileDebugKotlin`, `:app:compileDebugUnitTestKotlin`) and 107/107 targeted JVM unit tests passed (`FloatingMiniAppFrameworkTest`: 85/85 including `testFoldedLauncherBubbleCircularShapeAndTouchArea`, `ReaderMiniAppTest`: 6/6, `FloatingPwaMiniAppTest`: 6/6, `FloatingMiniAppLogFilterTest`: 7/7, `SidebarImeInteractionTest`: 3/3). Note: public Android SDK (`compileSdk = 34`) has no non-rectangular `WindowManager` overlay touchable-region API, so OS compositor frame bounds remain `36dp x 36dp` while corner touches are ignored before triggering any bubble action.
+
 ---
 
 ## Phase 14: PWA Engine & External AI App Integration (Tier 5 - Highest Complexity)
