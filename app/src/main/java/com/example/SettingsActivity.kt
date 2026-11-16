@@ -228,18 +228,6 @@ fun MainSettingsScreen(
             }
             item {
                 ListItem(
-                    headlineContent = { Text("Book Tracker") },
-                    supportingContent = { Text("Track read chapters, edit book metadata, and import/export LiteReader backups") },
-                    modifier = Modifier
-                        .clickable {
-                            com.example.feature.reader.BookTrackerActivity.launch(context)
-                        }
-                        .testTag("settings_item_book_tracker")
-                )
-                HorizontalDivider()
-            }
-            item {
-                ListItem(
                     headlineContent = { Text("Internet Speed Monitor") },
                     supportingContent = { Text("Configure status bar speed indicators, units, and app data usage") },
                     modifier = Modifier

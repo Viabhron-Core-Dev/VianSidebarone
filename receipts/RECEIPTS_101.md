@@ -302,3 +302,23 @@
 * How it was verified: Local build (`compile_applet`) and local JVM unit tests (`gradle :app:compileDebugKotlin :app:compileDebugUnitTestKotlin :app:testDebugUnitTest --tests "com.example.data.EpubParserTest" --tests "com.example.feature.reader.ReaderMiniAppTest" --tests "com.example.feature.reader.ReaderArchitectureAndBackupTest" --tests "com.example.feature.floating.FloatingMiniAppFrameworkTest" --tests "com.example.feature.pwa.floating.FloatingPwaMiniAppTest" --console=plain`) — 124/124 passed (`EpubParserTest` 14/14, `ReaderMiniAppTest` 10/10, `ReaderArchitectureAndBackupTest` 8/8, `FloatingMiniAppFrameworkTest` 86/86, `FloatingPwaMiniAppTest` 6/6), 0 failures/errors/skipped, empty `system-err`. Physical-device runtime rendering, WindowManager focus/overlay hide-restore, SAF file picker dialogs, and touch/scroll gestures were not tested on a device or emulator.
 * Any deviation from what was requested, and why: Non-Android view property getters (`View.getVisibility()`, `EditText.getText()`, `MotionEvent.obtain()`, `ViewConfiguration.scaledTouchSlop`) return stub defaults (`0`/`null`) under `mockable android.jar`, so Kotlin backing properties and `dispatchTouchCoordinatesForTesting` were used for JVM test assertions while keeping standard Android View interactions active on-device.
 * Any known issue or follow-up needed: Requires on-device verification for compact dark visual fidelity, reading tap-to-toggle sensitivity while scrolling/selecting text, Book Tracker hide-and-restore transitions, and active-book-only re-import SAF flow.
+
+---
+
+### Receipt 120
+* Timestamp: 2026-11-16 18:36 UTC
+* One-line summary of what was requested: Remove the standalone Book Tracker item from MainSettingsScreen in SettingsActivity.kt while preserving Reader Settings in MainSettingsScreen, Open Book Tracker inside ReaderSettingsScreen.kt, and all Book Tracker / backup / Reader functionality, with focused tests.
+* Exact files touched:
+  - `app/src/main/java/com/example/SettingsActivity.kt`
+  - `app/src/test/java/com/example/feature/settings/SettingsNavigationStructureTest.kt` (added)
+  - `blueprint/BLUEPRINT.md`
+  - `receipts/RECEIPTS_101.md`
+* What was actually done — factual, not persuasive:
+  1. In `app/src/main/java/com/example/SettingsActivity.kt` (`MainSettingsScreen`), removed only the `item { ... }` block containing the `"Book Tracker"` `ListItem`, its `BookTrackerActivity.launch(context)` click handler, and `testTag("settings_item_book_tracker")`, leaving `"Reader Settings"` (`settings_item_reader_settings`), `SettingsNavigationApp` routes, `ReaderSettingsScreen.kt`, `BookTrackerActivity.kt`, and all unrelated Settings items untouched.
+  2. Added `app/src/test/java/com/example/feature/settings/SettingsNavigationStructureTest.kt` verifying:
+     - `SettingsActivity.kt` has no standalone `"Book Tracker"` item, `settings_item_book_tracker` tag, or `BookTrackerActivity.launch(` call while preserving `Reader Settings` (`settings_item_reader_settings`, `"reader_settings"` route) and all unrelated Settings items.
+     - `ReaderSettingsScreen.kt` still contains `Open Book Tracker` (`open_book_tracker_button`) and `Import / Export Reader Backups` (`open_reader_backups_button`) invoking `BookTrackerActivity.launch(...)`, and `BookTrackerActivity.launch(capturingContext, openBackupPanel = false)` dispatches an Activity `Intent`.
+  3. Recorded Phase 14.16 in `blueprint/BLUEPRINT.md`.
+* How it was verified: Local Kotlin compilation (`gradle :app:compileDebugKotlin :app:compileDebugUnitTestKotlin`) and local JVM unit tests (`gradle :app:testDebugUnitTest --tests "com.example.feature.settings.SettingsNavigationStructureTest" --tests "com.example.feature.welcome.WelcomeNavigationTest" --tests "com.example.feature.reader.ReaderMiniAppTest" --tests "com.example.feature.reader.ReaderArchitectureAndBackupTest" --console=plain`) — **24/24 passed** (`SettingsNavigationStructureTest` 2/2, `WelcomeNavigationTest` 4/4, `ReaderMiniAppTest` 10/10, `ReaderArchitectureAndBackupTest` 8/8), 0 failures, 0 errors, 0 skipped. Live Compose UI rendering and tap interactions in `:heavy` `SettingsActivity` / `ReaderSettingsScreen` were not tested on a physical Android device or emulator.
+* Any deviation from what was requested, and why: None. Compose UI instrumentation (`createComposeRule`) is not included in `app/build.gradle.kts`, so `SettingsNavigationStructureTest` combines source-contract assertions with JVM runtime `Intent` dispatch verification instead of adding new test dependencies.
+* Any known issue or follow-up needed: Verify visually on-device that Main Settings no longer lists Book Tracker while tapping Reader Settings -> Open Book Tracker launches `BookTrackerActivity`.

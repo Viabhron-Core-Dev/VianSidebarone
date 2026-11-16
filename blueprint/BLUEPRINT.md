@@ -659,6 +659,14 @@
   - Full project build (`compile_applet`) succeeded and `/debug.keystore`, `/debug.keystore.base64`, and `/.build-outputs/app-debug.apk` were removed and verified absent afterward.
   - Targeted JVM unit tests passed cleanly: **124/124** (`EpubParserTest` 14/14, `ReaderMiniAppTest` 10/10, `ReaderArchitectureAndBackupTest` 8/8, `FloatingMiniAppFrameworkTest` 86/86, `FloatingPwaMiniAppTest` 6/6) with zero uncaught exceptions. Requires physical-device testing for visual overlay rendering, HWUI contrast, touch/scroll feel, and Activity-return overlay restoration.
 
+### Phase 14.16: Settings Navigation Correction — Remove Standalone Book Tracker From Main Settings (COMPLETED)
+- **1. Main Settings Cleanup (`SettingsActivity.kt`)**:
+  - Removed only the standalone `Book Tracker` `ListItem` (click handler launching `BookTrackerActivity` and `settings_item_book_tracker` tag) from `MainSettingsScreen`.
+  - Preserved `Reader Settings` (`settings_item_reader_settings`, `onNavigateToReaderSettings()`, `"reader_settings"` route) and all unrelated main Settings entries unchanged.
+  - Kept `ReaderSettingsScreen.kt` (`open_book_tracker_button` and `open_reader_backups_button`), `BookTrackerActivity`, backup import/export, and Reader navigation completely intact.
+- **2. Verification**:
+  - Kotlin compilation (`:app:compileDebugKotlin`, `:app:compileDebugUnitTestKotlin`) and 24/24 targeted JVM unit tests passed (`SettingsNavigationStructureTest` 2/2, `WelcomeNavigationTest` 4/4, `ReaderMiniAppTest` 10/10, `ReaderArchitectureAndBackupTest` 8/8). Requires on-device UI verification of Settings list rendering and navigation clicks.
+
 ---
 
 ## Phase 14: PWA Engine & External AI App Integration (Tier 5 - Highest Complexity)
