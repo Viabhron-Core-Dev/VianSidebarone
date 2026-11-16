@@ -36,6 +36,7 @@ import android.view.inputmethod.InputConnection
 import android.view.inputmethod.InputMethodManager
 import android.widget.EditText
 import android.widget.FrameLayout
+import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.SeekBar
@@ -214,6 +215,12 @@ class FloatingMiniAppWindow(
     private var topBarIconDrawable: GradientDrawable? = null
     private var topBarEditBtn: TextView? = null
     private var topBarEditBtnBg: GradientDrawable? = null
+    private var topBarReaderEditIconBtn: ImageButton? = null
+    var topBarReaderEditContentDescription: String? = null
+        private set
+    private var bottomRightStickerView: View? = null
+    var isBottomRightStickerVisible: Boolean = true
+        private set
     private var titleView: TextView? = null
     private var noteEditText: EditText? = null
     private var imeBridgeEditText: EditText? = null
@@ -353,6 +360,16 @@ class FloatingMiniAppWindow(
     }
     fun getEditPopoverForTesting(): View? = editPopoverView
     fun getRootCardViewForTesting(): FrameLayout? = rootCardView
+    fun getBottomRightStickerViewForTesting(): View? = bottomRightStickerView
+    fun getTopBarReaderEditButtonForTesting(): ImageButton? = topBarReaderEditIconBtn
+    fun getTopBarNoteEditButtonForTesting(): TextView? = topBarEditBtn
+
+    internal fun setReaderBottomRightStickerHidden(hidden: Boolean) {
+        if (!isReaderApp()) return
+        val visible = !hidden
+        isBottomRightStickerVisible = visible
+        bottomRightStickerView?.visibility = if (visible) View.VISIBLE else View.GONE
+    }
 
     fun getContentViewportHeight(windowHeight: Int): Int {
         val density = context.resources.displayMetrics.density
@@ -700,6 +717,8 @@ class FloatingMiniAppWindow(
 
         // 5. Three-Control Sticker [ ×  —  ↘ ]
         val sticker = createBottomRightSticker(context)
+        bottomRightStickerView = sticker
+        isBottomRightStickerVisible = true
         root.addView(sticker)
 
         // 5. Attach IME Insets Listener
@@ -1638,6 +1657,9 @@ class FloatingMiniAppWindow(
             },
             onOpenReaderSettings = {
                 FloatingMiniAppBridge.getInstance(context).launchReaderSettingsFromReader(instanceId)
+            },
+            onReadingToolbarVisibilityChanged = { toolbarVisible ->
+                setReaderBottomRightStickerHidden(toolbarVisible)
             }
         )
         readerInstance = instance
@@ -2220,8 +2242,31 @@ class FloatingMiniAppWindow(
         }
         bar.addView(titleView)
 
-        // "Edit" button for Note mini-app (opens formatting popover) and Reader mini-app (opens Heavy Tracker editor for current book)
-        if (isNoteApp() || isReaderApp()) {
+        // Compact pencil icon for Reader (opens Book Tracker editor); keep "Edit" button for Note formatting popover
+        if (isReaderApp()) {
+            val iconEditBg = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = 6 * density
+                setColor(Color.parseColor("#313244"))
+                setStroke((1 * density).toInt().coerceAtLeast(1), Color.parseColor("#45475A"))
+            }
+            val readerEditBtn = ImageButton(context).apply {
+                setImageResource(com.example.R.drawable.ic_edit_pencil)
+                setColorFilter(Color.parseColor("#CDD6F4"))
+                contentDescription = "Edit book in Book Tracker"
+                topBarReaderEditContentDescription = "Edit book in Book Tracker"
+                scaleType = ImageView.ScaleType.CENTER_INSIDE
+                background = iconEditBg
+                setPadding((8 * density).toInt(), (6 * density).toInt(), (8 * density).toInt(), (6 * density).toInt())
+                layoutParams = LinearLayout.LayoutParams((40 * density).toInt(), (32 * density).toInt())
+                setOnClickListener {
+                    val activeBookId = readerInstance?.getCurrentBookId() ?: -1
+                    FloatingMiniAppBridge.getInstance(context).launchBookTrackerFromReader(instanceId, activeBookId)
+                }
+            }
+            topBarReaderEditIconBtn = readerEditBtn
+            bar.addView(readerEditBtn)
+        } else if (isNoteApp()) {
             val editBg = GradientDrawable().apply {
                 shape = GradientDrawable.RECTANGLE
                 cornerRadius = 4 * density
@@ -2239,12 +2284,7 @@ class FloatingMiniAppWindow(
                 background = editBg
                 setPadding((8 * density).toInt(), (3 * density).toInt(), (8 * density).toInt(), (3 * density).toInt())
                 setOnClickListener {
-                    if (isReaderApp()) {
-                        val activeBookId = readerInstance?.getCurrentBookId() ?: -1
-                        FloatingMiniAppBridge.getInstance(context).launchBookTrackerFromReader(instanceId, activeBookId)
-                    } else {
-                        toggleEditPopover()
-                    }
+                    toggleEditPopover()
                 }
             }
             topBarEditBtn = editBtn
@@ -3470,11 +3510,31 @@ class FloatingMiniAppWindow(
     fun clearContentForTesting() = clearNoteContent()
     fun flushPendingSaveForTesting(): Boolean = flushPendingSave()
 
+    override fun onFold(folded: Boolean) {
+        super.onFold(folded)
+        if (isReaderApp()) {
+            if (folded) {
+                setReaderBottomRightStickerHidden(false)
+            } else {
+                val instance = readerInstance
+                val toolbarVisibleInReading =
+                    instance?.getCurrentScreenModeForTesting() == com.example.feature.reader.ReaderScreenMode.READING &&
+                        instance.getReadingViewForTesting()?.isBottomToolbarVisibleForTesting() == true
+                setReaderBottomRightStickerHidden(toolbarVisibleInReading)
+            }
+        }
+    }
+
     override fun onShow() {
         super.onShow()
         if (isMainOnlyApp()) {
             if (isReaderApp()) {
-                readerInstance?.onResume()
+                val instance = readerInstance
+                instance?.onResume()
+                val toolbarVisibleInReading =
+                    instance?.getCurrentScreenModeForTesting() == com.example.feature.reader.ReaderScreenMode.READING &&
+                        instance.getReadingViewForTesting()?.isBottomToolbarVisibleForTesting() == true
+                setReaderBottomRightStickerHidden(toolbarVisibleInReading)
             }
             LogKeeper.log(context, "FloatingMiniAppWindow", "ON_SHOW_MAIN_ONLY id=$instanceId appType=$appType (skipping Heavy)")
             return

@@ -138,10 +138,12 @@ class FloatingMiniAppBridge private constructor(private val context: Context) {
 
         val existing = windowManager.getWindow(id) as? FloatingMiniAppWindow
         if (existing != null) {
-            if (existing.state != WindowState.VISIBLE) {
+            if (!existing.isAttached || existing.state != WindowState.VISIBLE) {
                 windowManager.showWindow(id)
             }
-            windowManager.bringToFront(id)
+            if (windowManager.getTopVisibleWindow()?.windowId != id) {
+                windowManager.bringToFront(id)
+            }
             LogKeeper.log(context, TAG, "READER_RESTORED_AFTER_EXTERNAL id=$id fromMemory=true")
             return true
         }

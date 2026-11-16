@@ -25,8 +25,9 @@ import kotlinx.coroutines.withContext
  * - [prepareForSleep]: Marks warm session in [ReaderSessionTracker], flushes latest reading
  *   position and book identity into recovery snapshot.
  * - [releaseRuntime]: Releases view tree, TextToSpeech, auto-scroll handlers, and 21-chapter buffers.
- * - [restoreFromSnapshot]: On warm unfold, restores active book, chapter, scroll position, and
- *   settings; on cold process restart ([KEY_COLD_START] == "true"), opens Library (Recent tab).
+ * - [restoreFromSnapshot]: On warm unfold, restores exact active screen, book, chapter, and scroll
+ *   position; on clean launch / cold start ([KEY_COLD_START] == "true" or null snapshot), restores and
+ *   opens the last-read book (or opens Library if none exists or binary is missing).
  */
 class ReaderMiniAppInstance(
     override val instanceId: String,
@@ -34,7 +35,8 @@ class ReaderMiniAppInstance(
     var onRequestWindowFocusable: ((Boolean) -> Unit)? = null,
     var onActiveBookChanged: ((EpubBook?) -> Unit)? = null,
     var onOpenTracker: ((Int) -> Unit)? = null,
-    var onOpenReaderSettings: (() -> Unit)? = null
+    var onOpenReaderSettings: (() -> Unit)? = null,
+    var onReadingToolbarVisibilityChanged: ((Boolean) -> Unit)? = null
 ) : MiniAppInstance {
 
     companion object {
@@ -59,6 +61,7 @@ class ReaderMiniAppInstance(
     private var currentChapterIndex: Int = 0
     private var currentScrollY: Int = 0
     private var currentFontSizeSp: Float = 16f
+    private var pendingAutoOpenLastReadBook: Boolean = true
 
     private var hostContext: Context? = null
     private var rootContainer: FrameLayout? = null
@@ -69,7 +72,11 @@ class ReaderMiniAppInstance(
 
     override fun onCreate(savedSnapshot: MiniAppRecoverySnapshot?) {
         lifecycleState = MiniAppLifecycleState.CREATED
-        savedSnapshot?.let { restoreFromSnapshot(it) }
+        if (savedSnapshot != null) {
+            restoreFromSnapshot(savedSnapshot)
+        } else {
+            pendingAutoOpenLastReadBook = true
+        }
     }
 
     override fun onStart() {
@@ -79,10 +86,19 @@ class ReaderMiniAppInstance(
     override fun onResume() {
         lifecycleState = MiniAppLifecycleState.RESUMED
         when (currentScreenMode) {
-            ReaderScreenMode.LIBRARY -> libraryView?.loadBooks()
-            ReaderScreenMode.FOLDER_BROWSER -> folderBrowserView?.refreshCurrentFolder()
+            ReaderScreenMode.LIBRARY -> {
+                onReadingToolbarVisibilityChanged?.invoke(false)
+                libraryView?.loadBooks()
+            }
+            ReaderScreenMode.FOLDER_BROWSER -> {
+                onReadingToolbarVisibilityChanged?.invoke(false)
+                folderBrowserView?.refreshCurrentFolder()
+            }
             ReaderScreenMode.READING -> {
                 readingView?.refreshPreferences()
+                onReadingToolbarVisibilityChanged?.invoke(
+                    readingView?.isBottomToolbarVisibleForTesting() == true
+                )
             }
         }
     }
@@ -138,6 +154,7 @@ class ReaderMiniAppInstance(
         readingView?.saveCurrentProgressImmediately()
         com.example.feature.floating.EmbeddedImeBridge.clearFocusRecursive(rootContainer)
         onRequestWindowFocusable?.invoke(false)
+        onReadingToolbarVisibilityChanged?.invoke(false)
         libraryView?.releaseResources()
         readingView?.releaseResources()
         folderBrowserView?.releaseResources()
@@ -154,7 +171,8 @@ class ReaderMiniAppInstance(
         val isColdStart = payload[KEY_COLD_START] == "true"
 
         if (isColdStart) {
-            // Cold app/process restart: open Library (Recent tab) by default rather than auto-opening a book
+            // Cold app/process restart: schedule auto-open of the last-read book once views attach
+            pendingAutoOpenLastReadBook = true
             currentScreenMode = ReaderScreenMode.LIBRARY
             currentBookId = -1
             currentChapterIndex = 0
@@ -162,6 +180,7 @@ class ReaderMiniAppInstance(
             currentFontSizeSp = payload[KEY_FONT_SIZE]?.toFloatOrNull() ?: 16f
             libraryView?.selectTab(ReaderLibraryTab.RECENT)
         } else {
+            pendingAutoOpenLastReadBook = false
             val modeStr = payload[KEY_SCREEN_MODE] ?: ReaderScreenMode.LIBRARY.name
             currentScreenMode = try {
                 ReaderScreenMode.valueOf(modeStr)
@@ -185,6 +204,9 @@ class ReaderMiniAppInstance(
 
         if (rootContainer != null) {
             showCurrentScreen()
+            if (isColdStart) {
+                tryAutoOpenLastReadBook()
+            }
         }
     }
 
@@ -230,6 +252,7 @@ class ReaderMiniAppInstance(
                 onRequestWindowFocusable?.invoke(focusable)
             },
             onOpenFolderBrowser = {
+                pendingAutoOpenLastReadBook = false
                 currentScreenMode = ReaderScreenMode.FOLDER_BROWSER
                 showCurrentScreen()
             },
@@ -240,6 +263,7 @@ class ReaderMiniAppInstance(
                 onOpenReaderSettings?.invoke()
             },
             onBookSelected = { selectedBook ->
+                pendingAutoOpenLastReadBook = false
                 openBook(selectedBook)
             }
         )
@@ -256,9 +280,15 @@ class ReaderMiniAppInstance(
             onOpenReaderSettings = {
                 onOpenReaderSettings?.invoke()
             },
+            onToolbarVisibilityChanged = { visible ->
+                val isReadingActive = currentScreenMode == ReaderScreenMode.READING
+                onReadingToolbarVisibilityChanged?.invoke(isReadingActive && visible)
+            },
             onBackToLibrary = {
+                pendingAutoOpenLastReadBook = false
                 currentScreenMode = ReaderScreenMode.LIBRARY
                 onActiveBookChanged?.invoke(null)
+                onReadingToolbarVisibilityChanged?.invoke(false)
                 showCurrentScreen()
             }
         )
@@ -267,10 +297,12 @@ class ReaderMiniAppInstance(
             context = context,
             instanceId = instanceId,
             onBackToLibrary = {
+                pendingAutoOpenLastReadBook = false
                 currentScreenMode = ReaderScreenMode.LIBRARY
                 showCurrentScreen()
             },
             onBookImported = { importedBook ->
+                pendingAutoOpenLastReadBook = false
                 openBook(importedBook)
             },
             onRequestWindowFocusable = { focusable ->
@@ -279,7 +311,48 @@ class ReaderMiniAppInstance(
         )
 
         showCurrentScreen()
+        if (pendingAutoOpenLastReadBook) {
+            tryAutoOpenLastReadBook()
+        }
         return container
+    }
+
+    private fun tryAutoOpenLastReadBook() {
+        if (!pendingAutoOpenLastReadBook) return
+        val ctx = hostContext ?: return
+        if (rootContainer == null) return
+
+        openBookJob?.cancel()
+        openBookJob = instanceScope.launch {
+            if (!pendingAutoOpenLastReadBook || lifecycleState == MiniAppLifecycleState.DESTROYED) return@launch
+            val repo = com.example.data.LibraryRepository(ctx)
+            val lastReadBook = withContext(Dispatchers.IO) {
+                try {
+                    repo.getRecentBooks().firstOrNull()
+                } catch (_: Throwable) {
+                    null
+                }
+            }
+            if (!pendingAutoOpenLastReadBook || lifecycleState == MiniAppLifecycleState.DESTROYED || rootContainer == null) {
+                return@launch
+            }
+            pendingAutoOpenLastReadBook = false
+            if (lastReadBook == null) {
+                return@launch
+            }
+            if (repo.hasBookBinary(lastReadBook)) {
+                repo.markBookBinaryActive(lastReadBook.id)
+                openBook(lastReadBook)
+            } else {
+                currentScreenMode = ReaderScreenMode.LIBRARY
+                currentBookId = -1
+                onActiveBookChanged?.invoke(null)
+                onReadingToolbarVisibilityChanged?.invoke(false)
+                libraryView?.setSelectedBookId(lastReadBook.id)
+                libraryView?.loadBooks()
+                libraryView?.promptReimportForBook(lastReadBook)
+            }
+        }
     }
 
     fun clearEmbeddedImeFocus() {
@@ -303,6 +376,7 @@ class ReaderMiniAppInstance(
      */
     fun openBookById(epubBookId: Int) {
         if (epubBookId <= 0) return
+        pendingAutoOpenLastReadBook = false
         ReaderSessionTracker.markWarmSession(instanceId)
         val ctx = hostContext
         val container = rootContainer
@@ -325,7 +399,9 @@ class ReaderMiniAppInstance(
                     currentScreenMode = ReaderScreenMode.LIBRARY
                     currentBookId = -1
                     onActiveBookChanged?.invoke(null)
+                    onReadingToolbarVisibilityChanged?.invoke(false)
                     showCurrentScreen()
+                    libraryView?.setSelectedBookId(book.id)
                     libraryView?.promptReimportForBook(book)
                 }
             }
@@ -333,13 +409,16 @@ class ReaderMiniAppInstance(
     }
 
     private fun openBook(book: EpubBook) {
+        pendingAutoOpenLastReadBook = false
         val ctx = hostContext
         val repo = ctx?.let { com.example.data.LibraryRepository(it) }
         if (repo != null && !repo.hasBookBinary(book)) {
             currentScreenMode = ReaderScreenMode.LIBRARY
             currentBookId = -1
             onActiveBookChanged?.invoke(null)
+            onReadingToolbarVisibilityChanged?.invoke(false)
             showCurrentScreen()
+            libraryView?.setSelectedBookId(book.id)
             libraryView?.promptReimportForBook(book)
             return
         }
@@ -364,6 +443,7 @@ class ReaderMiniAppInstance(
             currentScreenMode == ReaderScreenMode.READING && currentBookId > 0 -> {
                 val rView = readingView ?: return
                 container.addView(rView)
+                onReadingToolbarVisibilityChanged?.invoke(rView.isBottomToolbarVisibleForTesting())
 
                 if (alreadyLoadedBook != null && alreadyLoadedBook.id == currentBookId) {
                     onActiveBookChanged?.invoke(alreadyLoadedBook)
@@ -383,8 +463,10 @@ class ReaderMiniAppInstance(
                             currentScreenMode = ReaderScreenMode.LIBRARY
                             currentBookId = -1
                             onActiveBookChanged?.invoke(null)
+                            onReadingToolbarVisibilityChanged?.invoke(false)
                             showCurrentScreen()
                             if (book != null) {
+                                libraryView?.setSelectedBookId(book.id)
                                 libraryView?.promptReimportForBook(book)
                             }
                         }
@@ -393,12 +475,14 @@ class ReaderMiniAppInstance(
             }
             currentScreenMode == ReaderScreenMode.FOLDER_BROWSER -> {
                 onActiveBookChanged?.invoke(null)
+                onReadingToolbarVisibilityChanged?.invoke(false)
                 val fView = folderBrowserView ?: return
                 container.addView(fView)
                 fView.loadRootFolder()
             }
             else -> {
                 onActiveBookChanged?.invoke(null)
+                onReadingToolbarVisibilityChanged?.invoke(false)
                 val lView = libraryView ?: return
                 container.addView(lView)
                 lView.loadBooks()

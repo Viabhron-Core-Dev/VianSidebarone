@@ -213,9 +213,9 @@ object ReaderDispatchers {
  * Tracks warm in-process Reader sessions vs cold process starts.
  *
  * - Temporary fold (`sleepMiniApp`) marks the instance warm so unfolding (`wakeMiniApp`) in the same
- *   process restores the active book, chapter, and scroll position.
- * - On cold process restart (`warmSessions` is empty), opening or restoring Reader defaults to
- *   `ReaderScreenMode.LIBRARY` on the `RECENT` tab rather than auto-opening a book.
+ *   process preserves any active screen (Library, Folder Browser, or current Reading position).
+ * - On cold process restart (`warmSessions` is empty), Reader restores and opens the last-read active book
+ *   when one exists (or opens Library if none exists / falls back to Library with re-import prompt if missing binary).
  */
 object ReaderSessionTracker {
     private val warmSessions = ConcurrentHashMap.newKeySet<String>()

@@ -9,6 +9,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -40,19 +41,22 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
-import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -64,10 +68,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.R
 import com.example.core.LogKeeper
 import com.example.core.ipc.HeavyProcessHost
 import com.example.core.ipc.MainActionType
@@ -88,6 +95,41 @@ enum class TrackerSortOption(val label: String) {
     DATE("Date"),
     MOST_READ("Most Read"),
     NAME("Name")
+}
+
+internal object BookTrackerLightColors {
+    val Background = Color(0xFFF8FAFC)
+    val Surface = Color(0xFFFFFFFF)
+    val SurfaceVariant = Color(0xFFF1F5F9)
+    val Primary = Color(0xFF2563EB)
+    val OnPrimary = Color(0xFFFFFFFF)
+    val Secondary = Color(0xFF7C3AED)
+    val OnBackground = Color(0xFF0F172A)
+    val OnSurface = Color(0xFF0F172A)
+    val SecondaryText = Color(0xFF475569)
+    val Outline = Color(0xFFCBD5E1)
+    val CardBorder = Color(0xFFE2E8F0)
+    val StatusGreen = Color(0xFF15803D)
+    val RatingAmber = Color(0xFFB45309)
+    val DeleteRed = Color(0xFFDC2626)
+    val ChipSelectedBg = Color(0xFFDBEAFE)
+    val ChipSelectedText = Color(0xFF1D4ED8)
+    val BannerBg = Color(0xFFECFDF5)
+    val BannerBorder = Color(0xFFA7F3D0)
+    val BannerText = Color(0xFF166534)
+
+    fun createColorScheme() = lightColorScheme(
+        primary = Primary,
+        onPrimary = OnPrimary,
+        secondary = Secondary,
+        background = Background,
+        onBackground = OnBackground,
+        surface = Surface,
+        onSurface = OnSurface,
+        surfaceVariant = SurfaceVariant,
+        onSurfaceVariant = SecondaryText,
+        outline = Outline
+    )
 }
 
 /**
@@ -197,15 +239,7 @@ class BookTrackerActivity : ComponentActivity() {
 
         setContent {
             MaterialTheme(
-                colorScheme = darkColorScheme(
-                    primary = Color(0xFF89B4FA),
-                    secondary = Color(0xFFCBA6F7),
-                    background = Color(0xFF181825),
-                    surface = Color(0xFF1E1E2E),
-                    onPrimary = Color(0xFF11111B),
-                    onBackground = Color(0xFFCDD6F4),
-                    onSurface = Color(0xFFCDD6F4)
-                )
+                colorScheme = BookTrackerLightColors.createColorScheme()
             ) {
                 Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                     BookTrackerScreen(
@@ -411,24 +445,47 @@ fun BookTrackerScreen(
     }
 
     Scaffold(
+        containerColor = BookTrackerLightColors.Background,
         topBar = {
-            TopAppBar(
-                title = { Text("Book Tracker", fontWeight = FontWeight.Bold) },
-                navigationIcon = {
-                    IconButton(onClick = onClose) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                    }
-                },
-                actions = {
-                    TextButton(onClick = { showBackupDialog = true }) {
-                        Text("Backups", color = Color(0xFF89B4FA), fontWeight = FontWeight.Bold)
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = Color(0xFF1E1E2E),
-                    titleContentColor = Color(0xFFCDD6F4)
+            Column {
+                TopAppBar(
+                    title = {
+                        Text(
+                            text = "Book Tracker",
+                            fontWeight = FontWeight.Bold,
+                            color = BookTrackerLightColors.OnSurface
+                        )
+                    },
+                    navigationIcon = {
+                        IconButton(onClick = onClose) {
+                            Icon(
+                                Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = "Back",
+                                tint = BookTrackerLightColors.OnSurface
+                            )
+                        }
+                    },
+                    actions = {
+                        IconButton(
+                            onClick = { showBackupDialog = true },
+                            modifier = Modifier.testTag("tracker_backup_button")
+                        ) {
+                            Icon(
+                                painter = painterResource(id = R.drawable.ic_download),
+                                contentDescription = "Import or export backups",
+                                tint = BookTrackerLightColors.Primary
+                            )
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = BookTrackerLightColors.Surface,
+                        titleContentColor = BookTrackerLightColors.OnSurface,
+                        navigationIconContentColor = BookTrackerLightColors.OnSurface,
+                        actionIconContentColor = BookTrackerLightColors.Primary
+                    )
                 )
-            )
+                HorizontalDivider(color = BookTrackerLightColors.CardBorder, thickness = 1.dp)
+            }
         },
         floatingActionButton = {
             FloatingActionButton(
@@ -446,8 +503,8 @@ fun BookTrackerScreen(
                     )
                     isAddingNewBook = true
                 },
-                containerColor = Color(0xFF89B4FA),
-                contentColor = Color(0xFF11111B)
+                containerColor = BookTrackerLightColors.Primary,
+                contentColor = BookTrackerLightColors.OnPrimary
             ) {
                 Icon(Icons.Default.Add, contentDescription = "Add Tracker Book")
             }
@@ -456,6 +513,7 @@ fun BookTrackerScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
+                .background(BookTrackerLightColors.Background)
                 .padding(padding)
                 .padding(horizontal = 12.dp, vertical = 8.dp)
         ) {
@@ -464,7 +522,9 @@ fun BookTrackerScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(bottom = 8.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFF313244))
+                    shape = RoundedCornerShape(10.dp),
+                    border = BorderStroke(1.dp, BookTrackerLightColors.BannerBorder),
+                    colors = CardDefaults.cardColors(containerColor = BookTrackerLightColors.BannerBg)
                 ) {
                     Row(
                         modifier = Modifier
@@ -474,12 +534,13 @@ fun BookTrackerScreen(
                     ) {
                         Text(
                             text = msg,
-                            color = Color(0xFFA6E3A1),
+                            color = BookTrackerLightColors.BannerText,
                             fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium,
                             modifier = Modifier.weight(1f)
                         )
                         TextButton(onClick = { statusBannerText = null }) {
-                            Text("Dismiss", fontSize = 11.sp)
+                            Text("Dismiss", fontSize = 11.sp, color = BookTrackerLightColors.Primary)
                         }
                     }
                 }
@@ -489,8 +550,22 @@ fun BookTrackerScreen(
             OutlinedTextField(
                 value = searchQuery,
                 onValueChange = { searchQuery = it },
-                placeholder = { Text("Search by title or author...") },
+                placeholder = {
+                    Text(
+                        "Search by title or author...",
+                        color = BookTrackerLightColors.SecondaryText
+                    )
+                },
                 singleLine = true,
+                shape = RoundedCornerShape(10.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedContainerColor = BookTrackerLightColors.Surface,
+                    unfocusedContainerColor = BookTrackerLightColors.Surface,
+                    focusedBorderColor = BookTrackerLightColors.Primary,
+                    unfocusedBorderColor = BookTrackerLightColors.Outline,
+                    focusedTextColor = BookTrackerLightColors.OnSurface,
+                    unfocusedTextColor = BookTrackerLightColors.OnSurface
+                ),
                 modifier = Modifier.fillMaxWidth()
             )
 
@@ -504,12 +579,36 @@ fun BookTrackerScreen(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("Sort:", fontSize = 12.sp, color = Color(0xFFA6ADC8))
+                Text(
+                    "Sort:",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = BookTrackerLightColors.SecondaryText
+                )
                 TrackerSortOption.values().forEach { opt ->
+                    val isSelected = sortOption == opt
                     FilterChip(
-                        selected = sortOption == opt,
+                        selected = isSelected,
                         onClick = { sortOption = opt },
-                        label = { Text(opt.label, fontSize = 12.sp) }
+                        label = {
+                            Text(
+                                opt.label,
+                                fontSize = 12.sp,
+                                fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal
+                            )
+                        },
+                        colors = FilterChipDefaults.filterChipColors(
+                            containerColor = BookTrackerLightColors.Surface,
+                            labelColor = BookTrackerLightColors.OnSurface,
+                            selectedContainerColor = BookTrackerLightColors.ChipSelectedBg,
+                            selectedLabelColor = BookTrackerLightColors.ChipSelectedText
+                        ),
+                        border = FilterChipDefaults.filterChipBorder(
+                            enabled = true,
+                            selected = isSelected,
+                            borderColor = BookTrackerLightColors.Outline,
+                            selectedBorderColor = BookTrackerLightColors.Primary
+                        )
                     )
                 }
             }
@@ -523,12 +622,36 @@ fun BookTrackerScreen(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("Genre:", fontSize = 12.sp, color = Color(0xFFA6ADC8))
+                    Text(
+                        "Genre:",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = BookTrackerLightColors.SecondaryText
+                    )
                     allGenres.forEach { genre ->
+                        val isSelected = selectedGenre.equals(genre, ignoreCase = true)
                         FilterChip(
-                            selected = selectedGenre.equals(genre, ignoreCase = true),
+                            selected = isSelected,
                             onClick = { selectedGenre = genre },
-                            label = { Text(genre, fontSize = 11.sp) }
+                            label = {
+                                Text(
+                                    genre,
+                                    fontSize = 11.sp,
+                                    fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal
+                                )
+                            },
+                            colors = FilterChipDefaults.filterChipColors(
+                                containerColor = BookTrackerLightColors.Surface,
+                                labelColor = BookTrackerLightColors.OnSurface,
+                                selectedContainerColor = BookTrackerLightColors.ChipSelectedBg,
+                                selectedLabelColor = BookTrackerLightColors.ChipSelectedText
+                            ),
+                            border = FilterChipDefaults.filterChipBorder(
+                                enabled = true,
+                                selected = isSelected,
+                                borderColor = BookTrackerLightColors.Outline,
+                                selectedBorderColor = BookTrackerLightColors.Primary
+                            )
                         )
                     }
                 }
@@ -549,7 +672,7 @@ fun BookTrackerScreen(
                         } else {
                             "No tracked books match your search/filter."
                         },
-                        color = Color(0xFFA6ADC8),
+                        color = BookTrackerLightColors.SecondaryText,
                         fontSize = 13.sp
                     )
                 }
@@ -631,22 +754,29 @@ fun BookTrackerScreen(
     if (showBackupDialog) {
         AlertDialog(
             onDismissRequest = { showBackupDialog = false },
+            containerColor = BookTrackerLightColors.Surface,
+            titleContentColor = BookTrackerLightColors.OnSurface,
+            textContentColor = BookTrackerLightColors.SecondaryText,
             title = { Text("LiteReader Backups & Migration", fontWeight = FontWeight.Bold) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
                         "Safely import or export reading progress and books without overwriting active database tables.",
                         fontSize = 12.sp,
-                        color = Color(0xFFA6ADC8)
+                        color = BookTrackerLightColors.SecondaryText
                     )
                     Button(
                         onClick = {
                             showBackupDialog = false
                             importLauncher.launch(arrayOf("*/*"))
                         },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = BookTrackerLightColors.Primary,
+                            contentColor = BookTrackerLightColors.OnPrimary
+                        ),
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text("📥 Import Backup (.zip / .tsv / .mrstd)")
+                        Text("Import Backup (.zip / .tsv / .mrstd)")
                     }
                     OutlinedButton(
                         onClick = {
@@ -654,9 +784,10 @@ fun BookTrackerScreen(
                             pendingExportMode = "FULL_ZIP"
                             exportLauncher.launch("LiteReader_Full_Backup.zip")
                         },
+                        border = BorderStroke(1.dp, BookTrackerLightColors.Outline),
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text("📤 Export Full ZIP (DB + Books)")
+                        Text("Export Full ZIP (DB + Books)", color = BookTrackerLightColors.OnSurface)
                     }
                     OutlinedButton(
                         onClick = {
@@ -664,9 +795,10 @@ fun BookTrackerScreen(
                             pendingExportMode = "NOBOOKS_ZIP"
                             exportLauncher.launch("LiteReader_NoBooks_Backup.zip")
                         },
+                        border = BorderStroke(1.dp, BookTrackerLightColors.Outline),
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text("📤 Export NoBooks ZIP (DB Only)")
+                        Text("Export NoBooks ZIP (DB Only)", color = BookTrackerLightColors.OnSurface)
                     }
                     OutlinedButton(
                         onClick = {
@@ -674,15 +806,16 @@ fun BookTrackerScreen(
                             pendingExportMode = "TSV"
                             exportLauncher.launch("LiteReader_Tracker.tsv")
                         },
+                        border = BorderStroke(1.dp, BookTrackerLightColors.Outline),
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text("📤 Export Tracker TSV (.tsv)")
+                        Text("Export Tracker TSV (.tsv)", color = BookTrackerLightColors.OnSurface)
                     }
                 }
             },
             confirmButton = {
                 TextButton(onClick = { showBackupDialog = false }) {
-                    Text("Close")
+                    Text("Close", color = BookTrackerLightColors.Primary)
                 }
             }
         )
@@ -702,7 +835,9 @@ private fun TrackerBookCard(
             .fillMaxWidth()
             .clickable { onEdit() },
         shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1E2E))
+        border = BorderStroke(1.dp, BookTrackerLightColors.CardBorder),
+        colors = CardDefaults.cardColors(containerColor = BookTrackerLightColors.Surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -711,7 +846,7 @@ private fun TrackerBookCard(
                         text = book.title.ifBlank { "Untitled" },
                         fontWeight = FontWeight.Bold,
                         fontSize = 15.sp,
-                        color = Color(0xFFCDD6F4),
+                        color = BookTrackerLightColors.OnSurface,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis
                     )
@@ -719,17 +854,17 @@ private fun TrackerBookCard(
                         Text(
                             text = book.author,
                             fontSize = 12.sp,
-                            color = Color(0xFFA6ADC8),
+                            color = BookTrackerLightColors.SecondaryText,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
                     }
                 }
                 IconButton(onClick = onEdit) {
-                    Icon(Icons.Default.Edit, contentDescription = "Edit", tint = Color(0xFF89B4FA))
+                    Icon(Icons.Default.Edit, contentDescription = "Edit", tint = BookTrackerLightColors.Primary)
                 }
                 IconButton(onClick = onDelete) {
-                    Icon(Icons.Default.Delete, contentDescription = "Delete", tint = Color(0xFFF38BA8))
+                    Icon(Icons.Default.Delete, contentDescription = "Delete", tint = BookTrackerLightColors.DeleteRed)
                 }
             }
 
@@ -752,7 +887,8 @@ private fun TrackerBookCard(
             Text(
                 text = statusBadges,
                 fontSize = 12.sp,
-                color = Color(0xFFA6E3A1)
+                fontWeight = FontWeight.Medium,
+                color = BookTrackerLightColors.StatusGreen
             )
 
             if (book.genres.isNotBlank() || book.rating > 0f) {
@@ -761,7 +897,12 @@ private fun TrackerBookCard(
                     if (book.genres.isNotBlank()) add("Genres: ${book.genres}")
                     if (book.rating > 0f) add("★ ${book.rating}")
                 }.joinToString(" • ")
-                Text(text = metaText, fontSize = 11.sp, color = Color(0xFFF9E2AF))
+                Text(
+                    text = metaText,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = BookTrackerLightColors.RatingAmber
+                )
             }
 
             if (book.comment.isNotBlank()) {
@@ -769,7 +910,7 @@ private fun TrackerBookCard(
                 Text(
                     text = book.comment,
                     fontSize = 11.sp,
-                    color = Color(0xFFA6ADC8),
+                    color = BookTrackerLightColors.SecondaryText,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -784,11 +925,11 @@ private fun TrackerBookCard(
                     Button(
                         onClick = { onOpenInReader(linkedEpub.id) },
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = Color(0xFF89B4FA),
-                            contentColor = Color(0xFF11111B)
+                            containerColor = BookTrackerLightColors.Primary,
+                            contentColor = BookTrackerLightColors.OnPrimary
                         )
                     ) {
-                        Text("📖 Open in Reader", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Text("Open in Reader", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -817,10 +958,14 @@ private fun TrackerBookEditDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
+        containerColor = BookTrackerLightColors.Surface,
+        titleContentColor = BookTrackerLightColors.OnSurface,
+        textContentColor = BookTrackerLightColors.OnSurface,
         title = {
             Text(
                 if (isNew) "Add Tracker Book" else "Edit Tracker Book",
-                fontWeight = FontWeight.Bold
+                fontWeight = FontWeight.Bold,
+                color = BookTrackerLightColors.OnSurface
             )
         },
         text = {
@@ -835,19 +980,21 @@ private fun TrackerBookEditDialog(
                     Text(
                         text = "Linked Reader Book (#${linkedEpub.id}) • Reader Resume: Ch. $resumeCh / ${linkedEpub.totalChapters}",
                         fontSize = 12.sp,
-                        color = Color(0xFF89B4FA)
+                        fontWeight = FontWeight.Medium,
+                        color = BookTrackerLightColors.Primary
                     )
                     OutlinedButton(
                         onClick = { onOpenInReader(linkedEpub.id) },
+                        border = BorderStroke(1.dp, BookTrackerLightColors.Primary),
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text("📖 Open in Floating Reader")
+                        Text("Open in Floating Reader", color = BookTrackerLightColors.Primary)
                     }
                 } else {
                     Text(
                         text = "Unlinked Tracker Record (no local EPUB/TXT binary attached)",
                         fontSize = 11.sp,
-                        color = Color(0xFFA6ADC8)
+                        color = BookTrackerLightColors.SecondaryText
                     )
                 }
 

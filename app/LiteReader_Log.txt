@@ -1572,3 +1572,169 @@ java.lang.IllegalStateException: Hardware engine crashed unexpectedly
 [2026-11-16 18:35:14.728] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_BRING_TO_FRONT id=win_a alreadyTop=false hasVisibleAttachedAbove=true orderChanged=true zOrder=2 refreshPerformed=true
 [2026-11-16 18:35:14.728] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_FOCUS id=win_visible focused=false
 [2026-11-16 18:35:14.728] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_FOCUS id=win_a focused=true
+[2026-11-16 20:49:07.559] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_REGISTER id=win_a type=test bounds=WindowBounds(x=100, y=100, width=600, height=800) zOrder=0 total=1
+[2026-11-16 20:49:07.559] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_ATTACH id=win_a bounds=WindowBounds(x=100, y=100, width=600, height=800) type=test
+[2026-11-16 20:49:07.559] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_BRING_TO_FRONT id=win_a alreadyTop=true hasVisibleAttachedAbove=false orderChanged=false zOrder=0 refreshPerformed=false
+[2026-11-16 20:49:07.559] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_FOCUS id=win_a focused=true
+[2026-11-16 20:49:07.559] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_REGISTER id=win_hidden type=test bounds=WindowBounds(x=100, y=100, width=600, height=800) zOrder=1 total=2
+[2026-11-16 20:49:07.559] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_ATTACH id=win_hidden bounds=WindowBounds(x=100, y=100, width=600, height=800) type=test
+[2026-11-16 20:49:07.559] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_BRING_TO_FRONT id=win_hidden alreadyTop=true hasVisibleAttachedAbove=false orderChanged=false zOrder=1 refreshPerformed=false
+[2026-11-16 20:49:07.559] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_FOCUS id=win_a focused=false
+[2026-11-16 20:49:07.560] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_FOCUS id=win_hidden focused=true
+[2026-11-16 20:49:07.560] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_FOCUS id=win_hidden focused=false
+[2026-11-16 20:49:07.560] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_FOCUS id=win_a focused=true
+[2026-11-16 20:49:07.560] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_BRING_TO_FRONT id=win_a alreadyTop=false hasVisibleAttachedAbove=false orderChanged=true zOrder=1 refreshPerformed=false
+[2026-11-16 20:49:07.560] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_REGISTER id=win_visible type=test bounds=WindowBounds(x=100, y=100, width=600, height=800) zOrder=2 total=3
+[2026-11-16 20:49:07.560] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_ATTACH id=win_visible bounds=WindowBounds(x=100, y=100, width=600, height=800) type=test
+[2026-11-16 20:49:07.560] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_BRING_TO_FRONT id=win_visible alreadyTop=true hasVisibleAttachedAbove=false orderChanged=false zOrder=2 refreshPerformed=false
+[2026-11-16 20:49:07.560] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_FOCUS id=win_a focused=false
+[2026-11-16 20:49:07.560] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_FOCUS id=win_visible focused=true
+[2026-11-16 20:49:07.560] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_BRING_TO_FRONT id=win_a alreadyTop=false hasVisibleAttachedAbove=true orderChanged=true zOrder=2 refreshPerformed=true
+[2026-11-16 20:49:07.560] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_FOCUS id=win_visible focused=false
+[2026-11-16 20:49:07.560] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_FOCUS id=win_a focused=true
+[2026-11-16 20:49:07.616] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_REGISTER id=reader_wm_fix type=miniapp bounds=WindowBounds(x=100, y=100, width=600, height=800) zOrder=0 total=1
+[2026-11-16 20:49:07.617] [pid-0] [Test worker] [ERROR:FloatingWindowManager] WINDOW_ATTACH_FAILURE id=reader_wm_fix: Cannot invoke "android.content.res.Resources.getDisplayMetrics()" because the return value of "android.content.Context.getResources()" is null
+java.lang.NullPointerException: Cannot invoke "android.content.res.Resources.getDisplayMetrics()" because the return value of "android.content.Context.getResources()" is null
+	at com.example.feature.floating.FloatingMiniAppWindow.createContentView(FloatingMiniAppWindow.kt:501)
+	at com.example.core.FloatingWindow.getOrCreateContainerView(FloatingWindow.kt:164)
+	at com.example.core.FloatingWindowManager.attachOverlay(FloatingWindowManager.kt:317)
+	at com.example.core.FloatingWindowManager.showWindow(FloatingWindowManager.kt:373)
+	at com.example.feature.reader.ReaderMiniAppTest.testRestoreAfterBookTrackerDoesNotReAddAttachedHiddenViewAndIdempotentRestore(ReaderMiniAppTest.kt:490)
+	at java.base/jdk.internal.reflect.DirectMethodHandleAccessor.invoke(DirectMethodHandleAccessor.java:103)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:580)
+	at org.junit.runners.model.FrameworkMethod$1.runReflectiveCall(FrameworkMethod.java:59)
+	at org.junit.internal.runners.model.ReflectiveCallable.run(ReflectiveCallable.java:12)
+	at org.junit.runners.model.FrameworkMethod.invokeExplosively(FrameworkMethod.java:56)
+	at org.junit.internal.runners.statements.InvokeMethod.evaluate(InvokeMethod.java:17)
+	at org.junit.internal.runners.statements.RunBefores.evaluate(RunBefores.java:26)
+	at org.junit.rules.ExternalResource$1.evaluate(ExternalResource.java:54)
+	at org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)
+	at org.junit.runners.BlockJUnit4ClassRunner$1.evaluate(BlockJUnit4ClassRunner.java:100)
+	at org.junit.runners.ParentRunner.runLeaf(ParentRunner.java:366)
+	at org.junit.runners.BlockJUnit4ClassRunner.runChild(BlockJUnit4ClassRunner.java:103)
+	at org.junit.runners.BlockJUnit4ClassRunner.runChild(BlockJUnit4ClassRunner.java:63)
+	at org.junit.runners.ParentRunner$4.run(ParentRunner.java:331)
+	at org.junit.runners.ParentRunner$1.schedule(ParentRunner.java:79)
+	at org.junit.runners.ParentRunner.runChildren(ParentRunner.java:329)
+	at org.junit.runners.ParentRunner.access$100(ParentRunner.java:66)
+	at org.junit.runners.ParentRunner$2.evaluate(ParentRunner.java:293)
+	at org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)
+	at org.junit.runners.ParentRunner.run(ParentRunner.java:413)
+	at org.junit.runner.JUnitCore.run(JUnitCore.java:137)
+	at org.junit.runner.JUnitCore.run(JUnitCore.java:115)
+	at org.gradle.api.internal.tasks.testing.junit.JUnitTestExecutor.runRequest(JUnitTestExecutor.java:175)
+	at org.gradle.api.internal.tasks.testing.junit.JUnitTestExecutor.accept(JUnitTestExecutor.java:84)
+	at org.gradle.api.internal.tasks.testing.junit.JUnitTestExecutor.accept(JUnitTestExecutor.java:47)
+	at org.gradle.api.internal.tasks.testing.junit.AbstractJUnitTestDefinitionProcessor.processTestDefinition(AbstractJUnitTestDefinitionProcessor.java:65)
+	at org.gradle.api.internal.tasks.testing.SuiteTestDefinitionProcessor.processTestDefinition(SuiteTestDefinitionProcessor.java:54)
+	at java.base/jdk.internal.reflect.DirectMethodHandleAccessor.invoke(DirectMethodHandleAccessor.java:103)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:580)
+	at org.gradle.internal.dispatch.MethodInvocation.invokeOn(MethodInvocation.java:77)
+	at org.gradle.internal.dispatch.ReflectionDispatch.dispatch(ReflectionDispatch.java:28)
+	at org.gradle.internal.dispatch.ReflectionDispatch.dispatch(ReflectionDispatch.java:19)
+	at org.gradle.internal.dispatch.ContextClassLoaderDispatch.dispatch(ContextClassLoaderDispatch.java:33)
+	at org.gradle.internal.dispatch.ProxyDispatchAdapter$DispatchingInvocationHandler.invoke(ProxyDispatchAdapter.java:88)
+	at jdk.proxy1/jdk.proxy1.$Proxy4.processTestDefinition(Unknown Source)
+	at org.gradle.api.internal.tasks.testing.worker.TestWorker$2.run(TestWorker.java:178)
+	at org.gradle.api.internal.tasks.testing.worker.TestWorker.executeAndMaintainThreadName(TestWorker.java:126)
+	at org.gradle.api.internal.tasks.testing.worker.TestWorker.execute(TestWorker.java:103)
+	at org.gradle.api.internal.tasks.testing.worker.TestWorker.execute(TestWorker.java:63)
+	at org.gradle.process.internal.worker.child.ActionExecutionWorker.execute(ActionExecutionWorker.java:56)
+	at org.gradle.process.internal.worker.child.SystemApplicationClassLoaderWorker.call(SystemApplicationClassLoaderWorker.java:122)
+	at org.gradle.process.internal.worker.child.SystemApplicationClassLoaderWorker.call(SystemApplicationClassLoaderWorker.java:72)
+	at worker.org.gradle.process.internal.worker.GradleWorkerMain.run(GradleWorkerMain.java:69)
+	at worker.org.gradle.process.internal.worker.GradleWorkerMain.main(GradleWorkerMain.java:74)
+
+[2026-11-16 20:58:23.681] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_REGISTER id=win_a type=test bounds=WindowBounds(x=100, y=100, width=600, height=800) zOrder=0 total=1
+[2026-11-16 20:58:23.681] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_ATTACH id=win_a bounds=WindowBounds(x=100, y=100, width=600, height=800) type=test
+[2026-11-16 20:58:23.682] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_BRING_TO_FRONT id=win_a alreadyTop=true hasVisibleAttachedAbove=false orderChanged=false zOrder=0 refreshPerformed=false
+[2026-11-16 20:58:23.682] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_FOCUS id=win_a focused=true
+[2026-11-16 20:58:23.682] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_REGISTER id=win_hidden type=test bounds=WindowBounds(x=100, y=100, width=600, height=800) zOrder=1 total=2
+[2026-11-16 20:58:23.682] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_ATTACH id=win_hidden bounds=WindowBounds(x=100, y=100, width=600, height=800) type=test
+[2026-11-16 20:58:23.682] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_BRING_TO_FRONT id=win_hidden alreadyTop=true hasVisibleAttachedAbove=false orderChanged=false zOrder=1 refreshPerformed=false
+[2026-11-16 20:58:23.683] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_FOCUS id=win_a focused=false
+[2026-11-16 20:58:23.683] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_FOCUS id=win_hidden focused=true
+[2026-11-16 20:58:23.683] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_FOCUS id=win_hidden focused=false
+[2026-11-16 20:58:23.683] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_FOCUS id=win_a focused=true
+[2026-11-16 20:58:23.684] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_BRING_TO_FRONT id=win_a alreadyTop=false hasVisibleAttachedAbove=false orderChanged=true zOrder=1 refreshPerformed=false
+[2026-11-16 20:58:23.684] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_REGISTER id=win_visible type=test bounds=WindowBounds(x=100, y=100, width=600, height=800) zOrder=2 total=3
+[2026-11-16 20:58:23.684] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_ATTACH id=win_visible bounds=WindowBounds(x=100, y=100, width=600, height=800) type=test
+[2026-11-16 20:58:23.684] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_BRING_TO_FRONT id=win_visible alreadyTop=true hasVisibleAttachedAbove=false orderChanged=false zOrder=2 refreshPerformed=false
+[2026-11-16 20:58:23.685] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_FOCUS id=win_a focused=false
+[2026-11-16 20:58:23.685] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_FOCUS id=win_visible focused=true
+[2026-11-16 20:58:23.685] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_BRING_TO_FRONT id=win_a alreadyTop=false hasVisibleAttachedAbove=true orderChanged=true zOrder=2 refreshPerformed=true
+[2026-11-16 20:58:23.685] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_FOCUS id=win_visible focused=false
+[2026-11-16 20:58:23.685] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_FOCUS id=win_a focused=true
+[2026-11-16 20:58:23.776] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_REGISTER id=reader_wm_fix type=miniapp bounds=WindowBounds(x=100, y=100, width=600, height=800) zOrder=0 total=1
+[2026-11-16 20:58:23.777] [pid-0] [Test worker] [ERROR:FloatingWindowManager] WINDOW_ATTACH_FAILURE id=reader_wm_fix: Cannot invoke "android.content.res.Resources.getDisplayMetrics()" because the return value of "android.content.Context.getResources()" is null
+java.lang.NullPointerException: Cannot invoke "android.content.res.Resources.getDisplayMetrics()" because the return value of "android.content.Context.getResources()" is null
+	at com.example.feature.floating.FloatingMiniAppWindow.createContentView(FloatingMiniAppWindow.kt:503)
+	at com.example.core.FloatingWindow.getOrCreateContainerView(FloatingWindow.kt:164)
+	at com.example.core.FloatingWindowManager.attachOverlay(FloatingWindowManager.kt:317)
+	at com.example.core.FloatingWindowManager.showWindow(FloatingWindowManager.kt:373)
+	at com.example.feature.reader.ReaderMiniAppTest.testRestoreAfterBookTrackerDoesNotReAddAttachedHiddenViewAndIdempotentRestore(ReaderMiniAppTest.kt:490)
+	at java.base/jdk.internal.reflect.DirectMethodHandleAccessor.invoke(DirectMethodHandleAccessor.java:103)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:580)
+	at org.junit.runners.model.FrameworkMethod$1.runReflectiveCall(FrameworkMethod.java:59)
+	at org.junit.internal.runners.model.ReflectiveCallable.run(ReflectiveCallable.java:12)
+	at org.junit.runners.model.FrameworkMethod.invokeExplosively(FrameworkMethod.java:56)
+	at org.junit.internal.runners.statements.InvokeMethod.evaluate(InvokeMethod.java:17)
+	at org.junit.internal.runners.statements.RunBefores.evaluate(RunBefores.java:26)
+	at org.junit.rules.ExternalResource$1.evaluate(ExternalResource.java:54)
+	at org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)
+	at org.junit.runners.BlockJUnit4ClassRunner$1.evaluate(BlockJUnit4ClassRunner.java:100)
+	at org.junit.runners.ParentRunner.runLeaf(ParentRunner.java:366)
+	at org.junit.runners.BlockJUnit4ClassRunner.runChild(BlockJUnit4ClassRunner.java:103)
+	at org.junit.runners.BlockJUnit4ClassRunner.runChild(BlockJUnit4ClassRunner.java:63)
+	at org.junit.runners.ParentRunner$4.run(ParentRunner.java:331)
+	at org.junit.runners.ParentRunner$1.schedule(ParentRunner.java:79)
+	at org.junit.runners.ParentRunner.runChildren(ParentRunner.java:329)
+	at org.junit.runners.ParentRunner.access$100(ParentRunner.java:66)
+	at org.junit.runners.ParentRunner$2.evaluate(ParentRunner.java:293)
+	at org.junit.runners.ParentRunner$3.evaluate(ParentRunner.java:306)
+	at org.junit.runners.ParentRunner.run(ParentRunner.java:413)
+	at org.junit.runner.JUnitCore.run(JUnitCore.java:137)
+	at org.junit.runner.JUnitCore.run(JUnitCore.java:115)
+	at org.gradle.api.internal.tasks.testing.junit.JUnitTestExecutor.runRequest(JUnitTestExecutor.java:175)
+	at org.gradle.api.internal.tasks.testing.junit.JUnitTestExecutor.accept(JUnitTestExecutor.java:84)
+	at org.gradle.api.internal.tasks.testing.junit.JUnitTestExecutor.accept(JUnitTestExecutor.java:47)
+	at org.gradle.api.internal.tasks.testing.junit.AbstractJUnitTestDefinitionProcessor.processTestDefinition(AbstractJUnitTestDefinitionProcessor.java:65)
+	at org.gradle.api.internal.tasks.testing.SuiteTestDefinitionProcessor.processTestDefinition(SuiteTestDefinitionProcessor.java:54)
+	at java.base/jdk.internal.reflect.DirectMethodHandleAccessor.invoke(DirectMethodHandleAccessor.java:103)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:580)
+	at org.gradle.internal.dispatch.MethodInvocation.invokeOn(MethodInvocation.java:77)
+	at org.gradle.internal.dispatch.ReflectionDispatch.dispatch(ReflectionDispatch.java:28)
+	at org.gradle.internal.dispatch.ReflectionDispatch.dispatch(ReflectionDispatch.java:19)
+	at org.gradle.internal.dispatch.ContextClassLoaderDispatch.dispatch(ContextClassLoaderDispatch.java:33)
+	at org.gradle.internal.dispatch.ProxyDispatchAdapter$DispatchingInvocationHandler.invoke(ProxyDispatchAdapter.java:88)
+	at jdk.proxy1/jdk.proxy1.$Proxy4.processTestDefinition(Unknown Source)
+	at org.gradle.api.internal.tasks.testing.worker.TestWorker$2.run(TestWorker.java:178)
+	at org.gradle.api.internal.tasks.testing.worker.TestWorker.executeAndMaintainThreadName(TestWorker.java:126)
+	at org.gradle.api.internal.tasks.testing.worker.TestWorker.execute(TestWorker.java:103)
+	at org.gradle.api.internal.tasks.testing.worker.TestWorker.execute(TestWorker.java:63)
+	at org.gradle.process.internal.worker.child.ActionExecutionWorker.execute(ActionExecutionWorker.java:56)
+	at org.gradle.process.internal.worker.child.SystemApplicationClassLoaderWorker.call(SystemApplicationClassLoaderWorker.java:122)
+	at org.gradle.process.internal.worker.child.SystemApplicationClassLoaderWorker.call(SystemApplicationClassLoaderWorker.java:72)
+	at worker.org.gradle.process.internal.worker.GradleWorkerMain.run(GradleWorkerMain.java:69)
+	at worker.org.gradle.process.internal.worker.GradleWorkerMain.main(GradleWorkerMain.java:74)
+
+[2026-11-16 20:59:04.615] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_REGISTER id=win_a type=test bounds=WindowBounds(x=100, y=100, width=600, height=800) zOrder=0 total=1
+[2026-11-16 20:59:04.616] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_ATTACH id=win_a bounds=WindowBounds(x=100, y=100, width=600, height=800) type=test
+[2026-11-16 20:59:04.616] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_BRING_TO_FRONT id=win_a alreadyTop=true hasVisibleAttachedAbove=false orderChanged=false zOrder=0 refreshPerformed=false
+[2026-11-16 20:59:04.616] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_FOCUS id=win_a focused=true
+[2026-11-16 20:59:04.616] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_REGISTER id=win_hidden type=test bounds=WindowBounds(x=100, y=100, width=600, height=800) zOrder=1 total=2
+[2026-11-16 20:59:04.616] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_ATTACH id=win_hidden bounds=WindowBounds(x=100, y=100, width=600, height=800) type=test
+[2026-11-16 20:59:04.617] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_BRING_TO_FRONT id=win_hidden alreadyTop=true hasVisibleAttachedAbove=false orderChanged=false zOrder=1 refreshPerformed=false
+[2026-11-16 20:59:04.617] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_FOCUS id=win_a focused=false
+[2026-11-16 20:59:04.617] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_FOCUS id=win_hidden focused=true
+[2026-11-16 20:59:04.617] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_FOCUS id=win_hidden focused=false
+[2026-11-16 20:59:04.617] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_FOCUS id=win_a focused=true
+[2026-11-16 20:59:04.618] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_BRING_TO_FRONT id=win_a alreadyTop=false hasVisibleAttachedAbove=false orderChanged=true zOrder=1 refreshPerformed=false
+[2026-11-16 20:59:04.618] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_REGISTER id=win_visible type=test bounds=WindowBounds(x=100, y=100, width=600, height=800) zOrder=2 total=3
+[2026-11-16 20:59:04.618] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_ATTACH id=win_visible bounds=WindowBounds(x=100, y=100, width=600, height=800) type=test
+[2026-11-16 20:59:04.618] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_BRING_TO_FRONT id=win_visible alreadyTop=true hasVisibleAttachedAbove=false orderChanged=false zOrder=2 refreshPerformed=false
+[2026-11-16 20:59:04.618] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_FOCUS id=win_a focused=false
+[2026-11-16 20:59:04.619] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_FOCUS id=win_visible focused=true
+[2026-11-16 20:59:04.619] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_BRING_TO_FRONT id=win_a alreadyTop=false hasVisibleAttachedAbove=true orderChanged=true zOrder=2 refreshPerformed=true
+[2026-11-16 20:59:04.619] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_FOCUS id=win_visible focused=false
+[2026-11-16 20:59:04.619] [pid-0] [Test worker] [FloatingWindowManager] WINDOW_FOCUS id=win_a focused=true

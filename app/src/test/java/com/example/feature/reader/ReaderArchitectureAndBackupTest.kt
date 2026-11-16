@@ -834,4 +834,71 @@ class ReaderArchitectureAndBackupTest {
             detailsView.releaseResources()
         }
     }
+
+    @Test
+    fun testAutoOpenLastReadBookMissingBinaryFallbackAndSeekBarDragCommit() = runBlocking {
+        val dir = tempFolder.newFolder("auto_open_and_seek")
+        val novelFile = File(dir, "last_read_novel.txt").apply {
+            writeText((1..10).joinToString("\n\n") { "Chapter $it: Heading $it\nBody text content for chapter $it with enough length." })
+        }
+
+        val imported = repo.importBookFile(novelFile, "Last Read Novel", markOpenedOnImport = true)!!
+        repo.saveResumePosition(imported.id, chapterIndex = 2, scrollY = 360, updateOpenRecency = true)
+        repo.recordGenuineReadingProgress(imported.id, currentChapterZeroBased = 2)
+
+        // 1. Clean launch (savedSnapshot = null) auto-opens last-read active book without duplicating DB/Tracker rows
+        val cleanInstance = ReaderMiniAppInstance("auto_open_clean", "reader")
+        cleanInstance.onCreate(null)
+        cleanInstance.createContentView(context)
+        cleanInstance.awaitPendingJobsForTesting()
+        cleanInstance.getReadingViewForTesting()?.awaitPendingJobsForTesting()
+
+        assertEquals(ReaderScreenMode.READING, cleanInstance.getCurrentScreenModeForTesting())
+        assertEquals(imported.id, cleanInstance.getCurrentBookIdForTesting())
+        assertEquals(2, cleanInstance.getReadingViewForTesting()?.currentChapterIndex)
+        assertEquals(360, cleanInstance.getReadingViewForTesting()?.currentScrollY)
+        assertEquals("Auto-open must NOT duplicate EpubBook rows", 1, fakeDb.epubDao().getAllBooks().size)
+        assertEquals("Auto-open must NOT duplicate TrackerBook rows", 1, fakeDb.trackerDao().getAllBooks().size)
+
+        // 2. SeekBar drag ticks must preview cleanly without changing chapter/DB/Tracker; release commits cleanly
+        val readView = cleanInstance.getReadingViewForTesting()!!
+        readView.simulateSeekBarDragTickForTesting(680)
+        assertEquals("Drag tick must NOT change chapter during scrub", 2, readView.currentChapterIndex)
+        assertEquals("Drag tick must NOT change saved DB chapter", 2, fakeDb.epubDao().getBookById(imported.id)!!.lastReadChapter)
+        assertEquals("Drag tick must NOT advance Tracker high-water", 3, fakeDb.trackerDao().getByLinkedEpubId(imported.id)!!.readChapters)
+
+        readView.simulateSeekBarReleaseForTesting(680)
+        readView.awaitPendingJobsForTesting()
+        Thread.sleep(100)
+        assertEquals("SeekBar release must seek to target chapter 6 (10 chapters * ~0.68)", 6, readView.currentChapterIndex)
+        assertEquals("SeekBar release must persist final resume chapter", 6, fakeDb.epubDao().getBookById(imported.id)!!.lastReadChapter)
+        assertEquals("SeekBar jump must NOT falsely advance Tracker high-water", 3, fakeDb.trackerDao().getByLinkedEpubId(imported.id)!!.readChapters)
+        cleanInstance.onDestroy()
+
+        // 3. Cold restart snapshot (KEY_COLD_START = "true") also opens last-read active book
+        val coldSnapshot = com.example.feature.floating.MiniAppRecoverySnapshot(
+            instanceId = "auto_open_cold",
+            appType = "reader",
+            payload = mutableMapOf(ReaderMiniAppInstance.KEY_COLD_START to "true")
+        )
+        val coldInstance = ReaderMiniAppInstance("auto_open_cold", "reader")
+        coldInstance.onCreate(coldSnapshot)
+        coldInstance.createContentView(context)
+        coldInstance.awaitPendingJobsForTesting()
+        coldInstance.getReadingViewForTesting()?.awaitPendingJobsForTesting()
+        assertEquals(ReaderScreenMode.READING, coldInstance.getCurrentScreenModeForTesting())
+        assertEquals(imported.id, coldInstance.getCurrentBookIdForTesting())
+        assertEquals(6, coldInstance.getReadingViewForTesting()?.currentChapterIndex)
+        coldInstance.onDestroy()
+
+        // 4. Metadata-only last-read book (missing binary) must stay safely in LIBRARY without crashing
+        File(repo.getBook(imported.id)!!.filePath).delete()
+        val missingInstance = ReaderMiniAppInstance("auto_open_missing", "reader")
+        missingInstance.onCreate(null)
+        missingInstance.createContentView(context)
+        missingInstance.awaitPendingJobsForTesting()
+        assertEquals(ReaderScreenMode.LIBRARY, missingInstance.getCurrentScreenModeForTesting())
+        assertEquals(-1, missingInstance.getCurrentBookIdForTesting())
+        missingInstance.onDestroy()
+    }
 }

@@ -27,6 +27,7 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.ScrollView
+import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
 import androidx.recyclerview.widget.LinearLayoutManager
@@ -46,17 +47,20 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.Locale
 import kotlin.math.abs
+import kotlin.math.roundToInt
 
 /**
  * ReaderReadingView: Distraction-free dark reading surface inside the floating Reader mini-app.
  *
  * Visual & Interaction Contract:
  * - Near-black reading background (`#08080B`) with white text (`#F5F5F7`) and comfortable line spacing.
- * - Minimal compact top header showing book/chapter title; thin bottom progress indicator.
+ * - Single progress indicator rule: when toolbar is hidden, a thin top hairline progress bar sits
+ *   flush under the floating window top bar; when toolbar is visible, the top hairline hides and
+ *   a full-book SeekBar appears inside the bottom toolbar.
  * - Bottom action toolbar (`bottomToolbarLayout`) is hidden by default (`View.GONE`).
  *   Clean tap on the reading area toggles toolbar visibility without breaking scrolling or text selection.
- * - Toolbar provides: Library, Chapters/TOC (virtualized RecyclerView), Bookmark, TTS, Auto-scroll,
- *   Search, Reader Settings, plus Prev/Next chapter and font A-/A+ adjustments.
+ * - Toolbar provides: Full-book SeekBar, compact Prev/Next chapter buttons, and 7 icon actions
+ *   (Library, TOC/Chapters, Bookmark, TTS, Auto-scroll, Search, Reader Settings).
  * - Preserves strict separation between Reader resume position and Tracker high-water progress,
  *   21-chapter rolling cache, and Undo banner.
  */
@@ -66,8 +70,80 @@ class ReaderReadingView(
     private val onRequestWindowFocusable: ((Boolean) -> Unit)? = null,
     private val onActiveBookChanged: ((EpubBook?) -> Unit)? = null,
     private val onOpenReaderSettings: (() -> Unit)? = null,
+    private val onToolbarVisibilityChanged: ((Boolean) -> Unit)? = null,
     private val onBackToLibrary: () -> Unit
 ) : FrameLayout(context), TextToSpeech.OnInitListener {
+
+    data class SeekTarget(
+        val chapterIndex: Int,
+        val intraChapterFraction: Float
+    )
+
+    companion object {
+        const val PROGRESS_MAX_PERMILLE = 1000
+
+        private fun chapterWeights(chapters: List<ChapterMeta>, totalChapters: Int): FloatArray {
+            val count = maxOf(chapters.size, totalChapters).coerceAtLeast(1)
+            val hasWordCounts = chapters.any { it.wordCount > 0 }
+            return FloatArray(count) { idx ->
+                val words = chapters.getOrNull(idx)?.wordCount ?: 0
+                if (hasWordCounts) words.coerceAtLeast(1).toFloat() else 1f
+            }
+        }
+
+        fun computeFullBookProgressPermille(
+            chapters: List<ChapterMeta>,
+            totalChapters: Int,
+            chapterIndex: Int,
+            scrollY: Int,
+            scrollableRangePx: Int
+        ): Int {
+            val weights = chapterWeights(chapters, totalChapters)
+            val count = weights.size
+            if (count <= 0) return 0
+            val safeIdx = chapterIndex.coerceIn(0, count - 1)
+            val intra = if (scrollableRangePx > 0) {
+                (scrollY.coerceAtLeast(0).toFloat() / scrollableRangePx.toFloat()).coerceIn(0f, 1f)
+            } else {
+                0f
+            }
+            val totalWeight = weights.sum().coerceAtLeast(1f)
+            var completedWeight = 0f
+            for (i in 0 until safeIdx) {
+                completedWeight += weights[i]
+            }
+            val currentPosWeight = completedWeight + weights[safeIdx] * intra
+            return ((currentPosWeight / totalWeight) * PROGRESS_MAX_PERMILLE)
+                .roundToInt()
+                .coerceIn(0, PROGRESS_MAX_PERMILLE)
+        }
+
+        fun resolveSeekTarget(
+            chapters: List<ChapterMeta>,
+            totalChapters: Int,
+            permille: Int
+        ): SeekTarget {
+            val weights = chapterWeights(chapters, totalChapters)
+            val count = weights.size
+            if (count <= 0) return SeekTarget(0, 0f)
+            val clamped = permille.coerceIn(0, PROGRESS_MAX_PERMILLE)
+            if (clamped == 0) return SeekTarget(0, 0f)
+            if (clamped >= PROGRESS_MAX_PERMILLE) return SeekTarget(count - 1, 1f)
+
+            val totalWeight = weights.sum().coerceAtLeast(1f)
+            val targetWeight = (clamped.toFloat() / PROGRESS_MAX_PERMILLE.toFloat()) * totalWeight
+            var running = 0f
+            for (i in 0 until count) {
+                val w = weights[i]
+                if (targetWeight <= running + w || i == count - 1) {
+                    val intra = ((targetWeight - running) / w).coerceIn(0f, 1f)
+                    return SeekTarget(i, intra)
+                }
+                running += w
+            }
+            return SeekTarget(count - 1, 1f)
+        }
+    }
 
     private val appContext: Context = context
     private val density: Float = (context.resources.displayMetrics.density).takeIf { it > 0f } ?: 2f
@@ -130,17 +206,22 @@ class ReaderReadingView(
     private val readingContentTextView: TextView
     private val readingScrollView: ScrollView
 
-    // Thin persistent progress strip near bottom (leaves right-bottom sticker clearance)
-    private val bottomProgressStrip: LinearLayout
-    private val bottomProgressBar: ProgressBar
-    private val bottomProgressTextView: TextView
+    // Thin persistent progress hairline at the very top edge (shown ONLY when toolbar is hidden)
+    private val topBookProgressBar: ProgressBar
+    private var isTopProgressLineVisible: Boolean = true
+    private var currentFullBookProgressPermille: Int = 0
 
     // Hidden-by-default bottom action toolbar
     private var isBottomToolbarVisible: Boolean = false
     private val bottomToolbarLayout: LinearLayout
+    private val fullBookSeekBar: SeekBar
+    private val fullBookProgressLabelView: TextView
+    private var isUserSeekingFullBook: Boolean = false
+    private var isProgrammaticSeekUpdate: Boolean = false
+    private var pendingSeekPermille: Int = 0
+    private var hasFontControlsInToolbar: Boolean = false
     private val prevChapterButton: Button
     private val nextChapterButton: Button
-    private val fontSizeLabelView: TextView
     private val bookmarkToolbarIcon: ImageButton
 
     // High-Water Progress Undo Banner
@@ -205,6 +286,7 @@ class ReaderReadingView(
 
     // Lifecycle jobs
     private var scrollSaveJob: Job? = null
+    private var loadBookJob: Job? = null
     private var openChapterJob: Job? = null
     private var highWaterJob: Job? = null
     private var undoJob: Job? = null
@@ -238,6 +320,20 @@ class ReaderReadingView(
             orientation = LinearLayout.VERTICAL
             layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
         }
+
+        // --- Thin Full-Book Progress Line at Very Top Edge (flush under floating window top bar) ---
+        topBookProgressBar = ProgressBar(context, null, android.R.attr.progressBarStyleHorizontal).apply {
+            max = PROGRESS_MAX_PERMILLE
+            progress = 0
+            visibility = View.VISIBLE
+            setBackgroundColor(Color.parseColor("#181924"))
+            progressDrawable?.setColorFilter(Color.parseColor("#89B4FA"), android.graphics.PorterDuff.Mode.SRC_IN)
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                dp(2).coerceAtLeast(2)
+            )
+        }
+        mainLayout.addView(topBookProgressBar)
 
         // --- Compact Minimal Header (Book/Chapter title only) ---
         topHeaderLayout = LinearLayout(context).apply {
@@ -306,6 +402,9 @@ class ReaderReadingView(
             }
             setOnScrollChangeListener { _, _, scrollY, _, _ ->
                 currentScrollY = scrollY
+                if (!isProgrammaticScrollOrLoad) {
+                    updateFullBookProgressIndicators()
+                }
                 if (!hasGenuineReadingInCurrentChapter &&
                     ReaderProgressPolicy.isScrollActivityMeaningful(
                         scrollY = scrollY,
@@ -350,44 +449,17 @@ class ReaderReadingView(
         readingScrollView.addView(contentInnerLayout)
         mainLayout.addView(readingScrollView)
 
-        // --- Subtle Persistent Thin Progress Strip near Bottom ---
-        bottomProgressStrip = LinearLayout(context).apply {
-            orientation = LinearLayout.VERTICAL
-            setBackgroundColor(Color.parseColor("#0A0A0E"))
-            setPadding(dp(12), dp(3), dp(96), dp(6)) // right padding clears [ × — ↘ ] sticker
-        }
-
-        bottomProgressBar = ProgressBar(context, null, android.R.attr.progressBarStyleHorizontal).apply {
-            max = 100
-            progress = 0
-            progressDrawable?.setColorFilter(Color.parseColor("#89B4FA"), android.graphics.PorterDuff.Mode.SRC_IN)
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                dp(2).coerceAtLeast(2)
-            ).apply {
-                bottomMargin = dp(2)
-            }
-        }
-        bottomProgressStrip.addView(bottomProgressBar)
-
-        bottomProgressTextView = TextView(context).apply {
-            text = "Ch. 1 / 1 • 0%"
-            textSize = 10f
-            setTextColor(Color.parseColor("#8A91A6"))
-            maxLines = 1
-            ellipsize = TextUtils.TruncateAt.END
-        }
-        bottomProgressStrip.addView(bottomProgressTextView)
-        mainLayout.addView(bottomProgressStrip)
-
         // --- Hidden-By-Default Bottom Action Toolbar ---
+        // Note: Floating window [ × — ↘ ] sticker hides while Reader bottom toolbar is visible,
+        // so no extra 46dp bottom clearance is needed here.
         bottomToolbarLayout = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             visibility = View.GONE
             isClickable = true
             isFocusable = true
             setBackgroundColor(Color.parseColor("#121219"))
-            setPadding(dp(8), dp(6), dp(8), dp(46)) // 46dp clearance for [ × — ↘ ] sticker
+            bottomToolbarBottomPaddingPx = dp(8)
+            setPadding(dp(8), dp(6), dp(8), bottomToolbarBottomPaddingPx)
         }
 
         fun createCompactToolButton(label: String, onClick: () -> Unit): Button {
@@ -528,44 +600,83 @@ class ReaderReadingView(
         ttsBarLayout.addView(createCompactToolButton("✕") { toggleTtsBar() })
         bottomToolbarLayout.addView(ttsBarLayout)
 
-        // Slim Chapter Prev/Next + Compact Font A-/A+ Row
-        val navFontRow = LinearLayout(context).apply {
+        // Compact Full-Book SeekBar + Prev/Next Row (font controls removed; font size lives in Reader Settings)
+        val seekRow = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(0, dp(2), 0, dp(6))
+            setPadding(dp(2), 0, dp(2), dp(2))
+        }
+
+        fullBookSeekBar = SeekBar(context).apply {
+            max = PROGRESS_MAX_PERMILLE
+            progress = 0
+            minimumHeight = dp(34)
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onStartTrackingTouch(seekBar: SeekBar?) {
+                    isUserSeekingFullBook = true
+                }
+
+                override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                    if (fromUser && !isProgrammaticSeekUpdate) {
+                        isUserSeekingFullBook = true
+                        pendingSeekPermille = progress
+                        updateSeekPreviewLabel(progress)
+                    }
+                }
+
+                override fun onStopTrackingTouch(seekBar: SeekBar?) {
+                    val targetPermille = seekBar?.progress ?: pendingSeekPermille
+                    isUserSeekingFullBook = false
+                    commitSeekToFullBookPermille(targetPermille)
+                }
+            })
+        }
+        seekRow.addView(fullBookSeekBar)
+
+        fullBookProgressLabelView = TextView(context).apply {
+            text = "Ch. 1/1 • 0%"
+            textSize = 11f
+            setTextColor(Color.parseColor("#CDD6F4"))
+            gravity = Gravity.END
+            maxLines = 1
+            setPadding(dp(6), 0, dp(2), 0)
+        }
+        seekRow.addView(fullBookProgressLabelView)
+        bottomToolbarLayout.addView(seekRow)
+
+        val navRow = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, dp(1), 0, dp(4))
         }
 
         prevChapterButton = createCompactToolButton("◀ Prev") {
             if (currentChapterIndex > 0) {
                 openChapter(currentChapterIndex - 1, initialScrollY = 0, isDirectJump = false)
             }
+        }.apply {
+            minWidth = dp(48)
+            minimumWidth = dp(48)
+            minHeight = dp(34)
+            minimumHeight = dp(34)
+            setPadding(dp(10), dp(1), dp(10), dp(1))
         }
-        navFontRow.addView(prevChapterButton)
+        navRow.addView(prevChapterButton)
 
-        navFontRow.addView(View(context).apply { layoutParams = LinearLayout.LayoutParams(0, 0, 1f) })
-
-        navFontRow.addView(createCompactToolButton("A-") { adjustFontSize(-2f) }.apply {
-            layoutParams = LinearLayout.LayoutParams(dp(42), dp(36)).apply { marginEnd = dp(4) }
-        })
-        fontSizeLabelView = TextView(context).apply {
-            text = "${currentFontSizeSp.toInt()}sp"
-            textSize = 11f
-            setTextColor(Color.parseColor("#CDD6F4"))
-            gravity = Gravity.CENTER
-            setPadding(dp(4), 0, dp(4), 0)
-        }
-        navFontRow.addView(fontSizeLabelView)
-        navFontRow.addView(createCompactToolButton("A+") { adjustFontSize(2f) }.apply {
-            layoutParams = LinearLayout.LayoutParams(dp(42), dp(36)).apply { marginStart = dp(4) }
-        })
-
-        navFontRow.addView(View(context).apply { layoutParams = LinearLayout.LayoutParams(0, 0, 1f) })
+        navRow.addView(View(context).apply { layoutParams = LinearLayout.LayoutParams(0, 0, 1f) })
 
         nextChapterButton = createCompactToolButton("Next ▶") {
             advanceToNextChapterByUser()
+        }.apply {
+            minWidth = dp(48)
+            minimumWidth = dp(48)
+            minHeight = dp(34)
+            minimumHeight = dp(34)
+            setPadding(dp(10), dp(1), dp(10), dp(1))
         }
-        navFontRow.addView(nextChapterButton)
-        bottomToolbarLayout.addView(navFontRow)
+        navRow.addView(nextChapterButton)
+        bottomToolbarLayout.addView(navRow)
 
         // 7-Icon Action Row: Library, TOC, Bookmark, TTS, Auto-Scroll, Search, Reader Settings
         val iconRow = LinearLayout(context).apply {
@@ -883,14 +994,17 @@ class ReaderReadingView(
 
     private fun setBottomToolbarVisible(visible: Boolean) {
         isBottomToolbarVisible = visible
+        isTopProgressLineVisible = !visible
         if (visible) {
             bottomToolbarLayout.visibility = View.VISIBLE
-            bottomProgressStrip.visibility = View.GONE
+            topBookProgressBar.visibility = View.GONE
+            updateFullBookProgressIndicators()
         } else {
             bottomToolbarLayout.visibility = View.GONE
-            bottomProgressStrip.visibility = View.VISIBLE
+            topBookProgressBar.visibility = View.VISIBLE
             clearSearchFocus()
         }
+        onToolbarVisibilityChanged?.invoke(visible)
     }
 
     private fun navigateBackToLibrary() {
@@ -941,27 +1055,76 @@ class ReaderReadingView(
         setBackgroundColor(palette.backgroundColor)
         readingScrollView.setBackgroundColor(palette.backgroundColor)
         topHeaderLayout.setBackgroundColor(palette.backgroundColor)
-        bottomProgressStrip.setBackgroundColor(palette.backgroundColor)
+        topBookProgressBar.setBackgroundColor(palette.surfaceColor)
+        topBookProgressBar.progressDrawable?.setColorFilter(palette.accentColor, android.graphics.PorterDuff.Mode.SRC_IN)
         bottomToolbarLayout.setBackgroundColor(palette.surfaceColor)
         readingContentTextView.setTextColor(palette.textColor)
         readingContentTextView.setLineSpacing(0f, currentLineSpacingMult)
         chapterHeadingView.setTextColor(palette.accentColor)
         chapterTitleTopView.setTextColor(palette.secondaryTextColor)
-        bottomProgressTextView.setTextColor(palette.secondaryTextColor)
-    }
-
-    private fun adjustFontSize(deltaSp: Float) {
-        val next = (currentFontSizeSp + deltaSp).coerceIn(12f, 28f)
-        if (next != currentFontSizeSp) {
-            currentFontSizeSp = next
-            ReaderPreferences.setDefaultFontSizeSp(appContext, currentFontSizeSp)
-            applyFontSize()
-        }
+        fullBookProgressLabelView.setTextColor(palette.secondaryTextColor)
     }
 
     private fun applyFontSize() {
         readingContentTextView.textSize = currentFontSizeSp
-        fontSizeLabelView.text = "${currentFontSizeSp.toInt()}sp"
+    }
+
+    private fun updateSeekPreviewLabel(permille: Int) {
+        val totalCh = chaptersList.size.coerceAtLeast(1)
+        val target = resolveSeekTarget(chaptersList, totalCh, permille)
+        val pct = (permille.toFloat() / 10f).roundToInt().coerceIn(0, 100)
+        fullBookProgressLabelView.text = "Ch. ${target.chapterIndex + 1}/$totalCh • $pct%"
+    }
+
+    private fun updateFullBookProgressIndicators(scrollableRangeOverridePx: Int? = null) {
+        val totalCh = chaptersList.size.coerceAtLeast(1)
+        val range = scrollableRangeOverridePx ?: getScrollableRangePx()
+        val permille = computeFullBookProgressPermille(
+            chapters = chaptersList,
+            totalChapters = totalCh,
+            chapterIndex = currentChapterIndex,
+            scrollY = currentScrollY,
+            scrollableRangePx = range
+        )
+        currentFullBookProgressPermille = permille
+        topBookProgressBar.progress = permille
+        if (!isUserSeekingFullBook) {
+            isProgrammaticSeekUpdate = true
+            try {
+                fullBookSeekBar.progress = permille
+            } finally {
+                isProgrammaticSeekUpdate = false
+            }
+            val pct = (permille.toFloat() / 10f).roundToInt().coerceIn(0, 100)
+            fullBookProgressLabelView.text = "Ch. ${currentChapterIndex + 1}/$totalCh • $pct%"
+        }
+    }
+
+    private fun commitSeekToFullBookPermille(permille: Int) {
+        val book = currentBook ?: return
+        val totalCh = chaptersList.size.coerceAtLeast(1)
+        val target = resolveSeekTarget(chaptersList, totalCh, permille)
+        if (target.chapterIndex != currentChapterIndex) {
+            // Seeking across chapters is a direct jump — never inflates Tracker high-water
+            openChapter(
+                chapterIndex = target.chapterIndex,
+                initialScrollY = 0,
+                isDirectJump = true,
+                pendingSeekFraction = target.intraChapterFraction
+            )
+        } else {
+            val range = getScrollableRangePx()
+            val targetScrollY = if (range > 0) {
+                (range * target.intraChapterFraction).roundToInt().coerceIn(0, range)
+            } else 0
+            isProgrammaticScrollOrLoad = true
+            readingScrollView.scrollTo(0, targetScrollY)
+            currentScrollY = targetScrollY
+            initialChapterLoadScrollY = targetScrollY
+            isProgrammaticScrollOrLoad = false
+            updateFullBookProgressIndicators()
+            repository.saveReadingProgressAsync(book.id, currentChapterIndex, targetScrollY, updateOpenRecency = true)
+        }
     }
 
     private fun clearSearchFocus() {
@@ -1125,7 +1288,8 @@ class ReaderReadingView(
         applyFontSize()
         applyReaderPreferences()
 
-        viewScope.launch {
+        loadBookJob?.cancel()
+        loadBookJob = viewScope.launch {
             chaptersList = repository.getChapters(book.id)
             val chapterIdx = initialChapter ?: book.lastReadChapter
             val scrollY = initialScrollY ?: book.lastReadScrollY
@@ -1145,7 +1309,8 @@ class ReaderReadingView(
         chapterIndex: Int,
         initialScrollY: Int = 0,
         isDirectJump: Boolean = false,
-        isInitialRestore: Boolean = false
+        isInitialRestore: Boolean = false,
+        pendingSeekFraction: Float? = null
     ) {
         val wasTtsSpeaking = isTtsSpeaking
         val wasAutoScrolling = isAutoScrollRunning
@@ -1179,10 +1344,7 @@ class ReaderReadingView(
         updateMinimalHeaderTitle(title)
         chapterHeadingView.text = title
         updateBookmarkIconState()
-
-        val progressPercent = (((chapterIndex + 1).toFloat() / totalCh.toFloat()) * 100).toInt()
-        bottomProgressBar.progress = progressPercent
-        bottomProgressTextView.text = "Ch. ${chapterIndex + 1} / $totalCh • $progressPercent%"
+        updateFullBookProgressIndicators()
 
         prevChapterButton.isEnabled = chapterIndex > 0
         nextChapterButton.isEnabled = chapterIndex < chaptersList.size - 1
@@ -1194,19 +1356,34 @@ class ReaderReadingView(
             readingContentTextView.text = rawChapterText
             chapterOpenedAtMs = nowMs()
 
+            var postedHandled = false
             val posted = readingScrollView.post {
-                readingScrollView.scrollTo(0, initialScrollY)
+                val range = getScrollableRangePx()
+                val resolvedY = if (pendingSeekFraction != null && range > 0) {
+                    (range * pendingSeekFraction).roundToInt().coerceIn(0, range)
+                } else {
+                    initialScrollY
+                }
+                readingScrollView.scrollTo(0, resolvedY)
+                currentScrollY = resolvedY
+                initialChapterLoadScrollY = resolvedY
                 isProgrammaticScrollOrLoad = false
+                updateFullBookProgressIndicators()
+                if (pendingSeekFraction != null && resolvedY != initialScrollY) {
+                    repository.saveReadingProgressAsync(book.id, chapterIndex, resolvedY, updateOpenRecency = true)
+                }
+                postedHandled = true
             }
-            if (!posted) {
+            if (!posted && !postedHandled) {
                 readingScrollView.scrollTo(0, initialScrollY)
                 isProgrammaticScrollOrLoad = false
+                updateFullBookProgressIndicators()
             }
 
             repository.saveResumePosition(
                 bookId = book.id,
                 chapterIndex = chapterIndex,
-                scrollY = initialScrollY,
+                scrollY = currentScrollY,
                 updateOpenRecency = true
             )
 
@@ -1614,6 +1791,7 @@ class ReaderReadingView(
         try { textToSpeech?.shutdown() } catch (_: Throwable) {}
         textToSpeech = null
         scrollSaveJob?.cancel()
+        loadBookJob?.cancel()
         openChapterJob?.cancel()
         highWaterJob?.cancel()
         undoJob?.cancel()
@@ -1633,6 +1811,7 @@ class ReaderReadingView(
         viewScope.coroutineContext[kotlinx.coroutines.Job]?.isActive == true
 
     internal suspend fun awaitPendingJobsForTesting() {
+        loadBookJob?.join()
         openChapterJob?.join()
         highWaterJob?.join()
         undoJob?.join()
@@ -1644,6 +1823,30 @@ class ReaderReadingView(
     fun getLastHighWaterUpdateForTesting(): HighWaterProgressUpdate? = lastHighWaterUpdate
     fun getTocRecyclerViewForTesting(): RecyclerView? = tocRecyclerView
     fun isBottomToolbarVisibleForTesting(): Boolean = isBottomToolbarVisible
+    fun isTopProgressLineVisibleForTesting(): Boolean = isTopProgressLineVisible
+    fun hasFontControlsInToolbarForTesting(): Boolean = hasFontControlsInToolbar
+    private var bottomToolbarBottomPaddingPx: Int = 0
+    fun getBottomToolbarBottomPaddingPxForTesting(): Int = bottomToolbarBottomPaddingPx
+    fun getCurrentFullBookProgressPermilleForTesting(): Int = currentFullBookProgressPermille
+    fun getFullBookProgressLabelForTesting(): String = fullBookProgressLabelView.text?.toString() ?: ""
+    fun getFullBookSeekBarForTesting(): SeekBar = fullBookSeekBar
+    fun getTopBookProgressBarForTesting(): ProgressBar = topBookProgressBar
+    fun getPrevChapterButtonForTesting(): Button = prevChapterButton
+    fun getNextChapterButtonForTesting(): Button = nextChapterButton
+    fun navigateBackToLibraryForTesting() = navigateBackToLibrary()
+    fun refreshProgressIndicatorsForTesting(scrollableRangePx: Int = dp(800)) {
+        updateFullBookProgressIndicators(scrollableRangeOverridePx = scrollableRangePx)
+    }
+    fun simulateSeekBarDragTickForTesting(permille: Int) {
+        isUserSeekingFullBook = true
+        pendingSeekPermille = permille
+        updateSeekPreviewLabel(permille)
+    }
+    fun simulateSeekBarReleaseForTesting(permille: Int) {
+        isUserSeekingFullBook = false
+        pendingSeekPermille = permille
+        commitSeekToFullBookPermille(permille)
+    }
     fun handleCleanTapOnReadingAreaForTesting() = toggleBottomToolbar()
     fun dispatchTouchOnReadingAreaForTesting(event: MotionEvent): Boolean {
         handleReadingTouchEvent(event)

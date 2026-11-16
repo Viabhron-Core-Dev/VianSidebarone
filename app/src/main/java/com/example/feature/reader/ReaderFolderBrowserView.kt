@@ -96,6 +96,9 @@ class ReaderFolderBrowserView(
     private var currentQuery: String = ""
     private var isImporting: Boolean = false
 
+    private var topBarBottomPaddingPx: Int = 0
+    private var entryCardVerticalPaddingPx: Int = 0
+
     private val folderListener: (String?) -> Unit = { newUri ->
         loadRootFolder(newUri)
     }
@@ -107,17 +110,18 @@ class ReaderFolderBrowserView(
             orientation = LinearLayout.VERTICAL
             layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
             if (embeddedInLibrary) {
-                setPadding(dp(2), dp(4), dp(2), 0)
+                setPadding(0, dp(2), 0, 0)
             } else {
-                setPadding(dp(10), dp(8), dp(10), dp(46))
+                setPadding(dp(8), dp(6), dp(8), dp(42))
             }
         }
 
         // Top Bar
+        topBarBottomPaddingPx = dp(3)
         val topBar = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(2), dp(2), dp(2), dp(6))
+            setPadding(dp(2), 0, dp(2), topBarBottomPaddingPx)
         }
 
         if (!embeddedInLibrary) {
@@ -163,19 +167,20 @@ class ReaderFolderBrowserView(
             textSize = 11f
             setTextColor(Color.parseColor("#CDD6F4"))
             visibility = View.GONE
-            minHeight = dp(40)
-            minimumHeight = dp(40)
+            minHeight = dp(36)
+            minimumHeight = dp(36)
             background = GradientDrawable().apply {
-                setColor(Color.parseColor("#313244"))
+                setColor(Color.parseColor("#1D1E2A"))
+                setStroke(1, Color.parseColor("#2B2C3C"))
                 cornerRadius = dpF(8f)
             }
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
             ).apply {
-                marginEnd = dp(6)
+                marginEnd = dp(4)
             }
-            setPadding(dp(10), dp(4), dp(10), dp(4))
+            setPadding(dp(8), dp(2), dp(8), dp(2))
             setOnClickListener { navigateUp() }
         }
         topBar.addView(upButton)
@@ -184,14 +189,14 @@ class ReaderFolderBrowserView(
             text = "📁 Folder"
             textSize = 11f
             typeface = Typeface.DEFAULT_BOLD
-            setTextColor(Color.WHITE)
-            minHeight = dp(40)
-            minimumHeight = dp(40)
+            setTextColor(Color.parseColor("#0B0B10"))
+            minHeight = dp(36)
+            minimumHeight = dp(36)
             background = GradientDrawable().apply {
                 setColor(Color.parseColor("#89B4FA"))
                 cornerRadius = dpF(8f)
             }
-            setPadding(dp(10), dp(4), dp(10), dp(4))
+            setPadding(dp(10), dp(2), dp(10), dp(2))
             setOnClickListener { launchFolderTreePicker() }
         }
         topBar.addView(pickFolderBtn)
@@ -203,7 +208,7 @@ class ReaderFolderBrowserView(
             setTextColor(Color.parseColor("#9BA3B8"))
             maxLines = 1
             ellipsize = android.text.TextUtils.TruncateAt.START
-            setPadding(dp(4), dp(2), dp(4), dp(6))
+            setPadding(dp(2), dp(1), dp(2), if (embeddedInLibrary) dp(2) else dp(4))
         }
         if (embeddedInLibrary) {
             topBar.removeViewAt(0)
@@ -219,21 +224,22 @@ class ReaderFolderBrowserView(
 
         // Search input (uses generic EmbeddedImeBridge)
         searchBox = EmbeddedInputEditText(context) { instanceId }.apply {
-            hint = "Filter .epub / .txt in folder..."
-            setHintTextColor(Color.parseColor("#6C7086"))
-            setTextColor(Color.WHITE)
-            textSize = 13f
+            hint = "Filter .epub / .txt..."
+            setHintTextColor(Color.parseColor("#5B6078"))
+            setTextColor(Color.parseColor("#F5F5F7"))
+            textSize = 12.5f
             isSingleLine = true
             background = GradientDrawable().apply {
-                setColor(Color.parseColor("#313244"))
+                setColor(Color.parseColor("#161620"))
                 cornerRadius = dpF(8f)
+                setStroke(1, Color.parseColor("#2B2C3C"))
             }
-            setPadding(dp(12), dp(8), dp(12), dp(8))
+            setPadding(dp(10), dp(5), dp(10), dp(5))
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
             ).apply {
-                bottomMargin = dp(8)
+                bottomMargin = dp(4)
             }
             setOnTouchListener { _, _ ->
                 onRequestWindowFocusable?.invoke(true)
@@ -503,7 +509,7 @@ class ReaderFolderBrowserView(
                     createEntryRow(
                         icon = "📖",
                         title = entry.name,
-                        subtitle = "$ext • ${kb} KB • Tap to import & open",
+                        subtitle = "$ext • ${kb} KB",
                         accent = true
                     ) {
                         importDocumentFile(entry.name, doc)
@@ -520,30 +526,31 @@ class ReaderFolderBrowserView(
         accent: Boolean,
         onClick: () -> Unit
     ): LinearLayout {
+        entryCardVerticalPaddingPx = dp(6)
         return LinearLayout(appContext).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             minimumHeight = dp(48)
             background = GradientDrawable().apply {
-                setColor(Color.parseColor("#1E1E2E"))
-                cornerRadius = dpF(10f)
-                setStroke(1, Color.parseColor("#313244"))
+                setColor(Color.parseColor("#14141D"))
+                cornerRadius = dpF(8f)
+                setStroke(1, Color.parseColor("#232432"))
             }
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
             ).apply {
-                setMargins(dp(2), dp(3), dp(2), dp(3))
+                setMargins(dp(1), dp(2), dp(1), dp(2))
             }
-            setPadding(dp(12), dp(10), dp(12), dp(10))
+            setPadding(dp(10), entryCardVerticalPaddingPx, dp(10), entryCardVerticalPaddingPx)
             isClickable = true
             isFocusable = true
             setOnClickListener { onClick() }
 
             addView(TextView(appContext).apply {
                 text = icon
-                textSize = 18f
-                setPadding(0, 0, dp(10), 0)
+                textSize = 15f
+                setPadding(0, 0, dp(8), 0)
             })
 
             val col = LinearLayout(appContext).apply {
@@ -552,16 +559,18 @@ class ReaderFolderBrowserView(
             }
             col.addView(TextView(appContext).apply {
                 text = title
-                textSize = 13f
+                textSize = 12.5f
                 typeface = Typeface.DEFAULT_BOLD
-                setTextColor(Color.parseColor(if (accent) "#CDD6F4" else "#89B4FA"))
-                maxLines = 2
+                setTextColor(Color.parseColor(if (accent) "#F5F5F7" else "#89B4FA"))
+                maxLines = 1
                 ellipsize = android.text.TextUtils.TruncateAt.END
             })
             col.addView(TextView(appContext).apply {
                 text = subtitle
-                textSize = 11f
-                setTextColor(Color.parseColor("#A6ADC8"))
+                textSize = 10.5f
+                setTextColor(Color.parseColor("#9BA3B8"))
+                maxLines = 1
+                ellipsize = android.text.TextUtils.TruncateAt.END
             })
             addView(col)
         }
@@ -631,4 +640,10 @@ class ReaderFolderBrowserView(
         ReaderEventManager.unregisterFolderListener(folderListener)
         viewScope.cancel()
     }
+
+    // Testing helpers
+    fun getTopBarBottomPaddingPxForTesting(): Int = topBarBottomPaddingPx
+    fun getSearchBottomMarginPxForTesting(): Int =
+        (searchBox.layoutParams as? LinearLayout.LayoutParams)?.bottomMargin ?: 0
+    fun isEmbeddedInLibraryForTesting(): Boolean = embeddedInLibrary
 }

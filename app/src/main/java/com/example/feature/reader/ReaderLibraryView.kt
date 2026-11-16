@@ -114,6 +114,7 @@ class ReaderLibraryView(
         private set
     private var isSearchExpanded: Boolean = false
     private var isDetailsPanelVisible: Boolean = false
+    private var areRecentControlsHidden: Boolean = false
     private var currentFilterQuery: String = ""
     private var selectedBookId: Int = -1
 
@@ -149,14 +150,14 @@ class ReaderLibraryView(
         val rootLayout = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
-            setPadding(dp(10), dp(6), dp(10), dp(46)) // 46dp bottom clearance for [ ×  —  ↘ ] sticker
+            setPadding(dp(8), dp(4), dp(8), dp(42)) // 42dp bottom clearance for [ ×  —  ↘ ] sticker
         }
 
         // --- Compact Header Bar ("Library" + Chart, Book Details, Wrench, +File) ---
         val headerBar = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(2), dp(2), dp(2), dp(6))
+            setPadding(dp(2), dp(1), dp(2), dp(4))
         }
 
         val titleView = TextView(context).apply {
@@ -259,12 +260,12 @@ class ReaderLibraryView(
                 cornerRadius = dpF(10f)
                 setStroke(1, Color.parseColor("#232432"))
             }
-            setPadding(dp(3), dp(3), dp(3), dp(3))
+            setPadding(dp(2), dp(2), dp(2), dp(2))
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
             ).apply {
-                bottomMargin = dp(6)
+                bottomMargin = dp(4)
             }
         }
 
@@ -274,7 +275,7 @@ class ReaderLibraryView(
             typeface = Typeface.DEFAULT_BOLD
             minHeight = dp(36)
             minimumHeight = dp(36)
-            setPadding(dp(8), dp(2), dp(8), dp(2))
+            setPadding(dp(6), dp(1), dp(6), dp(1))
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
             setOnClickListener { selectTab(ReaderLibraryTab.RECENT) }
         }
@@ -286,7 +287,7 @@ class ReaderLibraryView(
             typeface = Typeface.DEFAULT_BOLD
             minHeight = dp(36)
             minimumHeight = dp(36)
-            setPadding(dp(8), dp(2), dp(8), dp(2))
+            setPadding(dp(6), dp(1), dp(6), dp(1))
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
             setOnClickListener { selectTab(ReaderLibraryTab.FILE_EXPLORER) }
         }
@@ -297,13 +298,13 @@ class ReaderLibraryView(
         utilityBar = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(2), 0, dp(2), dp(4))
+            setPadding(dp(2), 0, dp(2), dp(3))
         }
 
         sortButton = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            minimumHeight = dp(36)
+            minimumHeight = dp(34)
             isClickable = true
             isFocusable = true
             contentDescription = "Cycle library sort order"
@@ -312,13 +313,13 @@ class ReaderLibraryView(
                 cornerRadius = dpF(8f)
                 setStroke(1, Color.parseColor("#232432"))
             }
-            setPadding(dp(8), dp(5), dp(10), dp(5))
+            setPadding(dp(8), dp(4), dp(10), dp(4))
             setOnClickListener { cycleSortOption() }
         }
         val sortIcon = ImageView(context).apply {
             setImageResource(R.drawable.ic_sort)
             setColorFilter(Color.parseColor("#89B4FA"))
-            layoutParams = LinearLayout.LayoutParams(dp(15), dp(15)).apply {
+            layoutParams = LinearLayout.LayoutParams(dp(14), dp(14)).apply {
                 marginEnd = dp(5)
             }
         }
@@ -346,12 +347,12 @@ class ReaderLibraryView(
                 cornerRadius = dpF(8f)
                 setStroke(1, Color.parseColor("#232432"))
             }
-            setPadding(dp(10), dp(6), dp(10), dp(6))
+            setPadding(dp(8), dp(5), dp(8), dp(5))
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
             ).apply {
-                marginEnd = dp(6)
+                marginEnd = dp(4)
             }
             isClickable = true
             isFocusable = true
@@ -372,8 +373,8 @@ class ReaderLibraryView(
                 cornerRadius = dpF(8f)
                 setStroke(1, Color.parseColor("#232432"))
             }
-            setPadding(dp(9), dp(9), dp(9), dp(9))
-            layoutParams = LinearLayout.LayoutParams(dp(38), dp(38))
+            setPadding(dp(8), dp(8), dp(8), dp(8))
+            layoutParams = LinearLayout.LayoutParams(dp(36), dp(36))
             setOnClickListener { toggleSearchBar() }
         }
         utilityBar.addView(searchToggleBtn)
@@ -388,7 +389,7 @@ class ReaderLibraryView(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
             ).apply {
-                bottomMargin = dp(6)
+                bottomMargin = dp(4)
             }
         }
 
@@ -616,6 +617,7 @@ class ReaderLibraryView(
         }
         explorerTabButton.setTextColor(if (!isRecent) Color.parseColor("#0B0B10") else Color.parseColor("#9BA3B8"))
 
+        areRecentControlsHidden = !isRecent
         utilityBar.visibility = if (isRecent) View.VISIBLE else View.GONE
         searchRowLayout.visibility = if (isRecent && isSearchExpanded) View.VISIBLE else View.GONE
         recentContentContainer.visibility = if (isRecent) View.VISIBLE else View.GONE
@@ -770,19 +772,19 @@ class ReaderLibraryView(
             val bookCard = LinearLayout(appContext).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
-                minimumHeight = dp(52)
+                minimumHeight = dp(48)
                 background = GradientDrawable().apply {
                     setColor(Color.parseColor(if (isSelected) "#171926" else "#12121A"))
-                    cornerRadius = dpF(10f)
+                    cornerRadius = dpF(9f)
                     setStroke(1, Color.parseColor(if (isSelected) "#3B4A6E" else "#212230"))
                 }
                 layoutParams = LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT,
                     LinearLayout.LayoutParams.WRAP_CONTENT
                 ).apply {
-                    setMargins(dp(2), dp(3), dp(2), dp(3))
+                    setMargins(dp(1), dp(2), dp(1), dp(2))
                 }
-                setPadding(dp(10), dp(8), dp(6), dp(8))
+                setPadding(dp(8), dp(6), dp(4), dp(6))
                 isClickable = true
                 isFocusable = true
                 setOnClickListener {
@@ -794,7 +796,7 @@ class ReaderLibraryView(
             // Compact left accent initial
             val bookBadge = TextView(appContext).apply {
                 text = book.title.take(1).uppercase()
-                textSize = 13f
+                textSize = 12.5f
                 typeface = Typeface.DEFAULT_BOLD
                 setTextColor(Color.parseColor("#0B0B10"))
                 gravity = Gravity.CENTER
@@ -808,10 +810,10 @@ class ReaderLibraryView(
                     )
                     val colorIndex = Math.abs(book.title.hashCode()) % colors.size
                     setColor(colors[colorIndex])
-                    cornerRadius = dpF(7f)
+                    cornerRadius = dpF(6f)
                 }
-                layoutParams = LinearLayout.LayoutParams(dp(30), dp(38)).apply {
-                    marginEnd = dp(10)
+                layoutParams = LinearLayout.LayoutParams(dp(28), dp(34)).apply {
+                    marginEnd = dp(8)
                 }
             }
             bookCard.addView(bookBadge)
@@ -1069,7 +1071,10 @@ class ReaderLibraryView(
     fun getSortOptionForTesting(): ReaderLibrarySortOption = sortOption
     fun isDetailsOpenForTesting(): Boolean = isDetailsPanelVisible
     fun isSearchExpandedForTesting(): Boolean = isSearchExpanded
-    fun getDetailsViewForTesting(): ReaderBookDetailsView? = detailsView
+    fun isRecentControlsHiddenForTesting(): Boolean = areRecentControlsHidden
+
+    fun getEmbeddedExplorerForTesting(): ReaderFolderBrowserView = embeddedExplorerView
+
     fun setSearchQueryForTesting(query: String) {
         isSearchExpanded = true
         searchRowLayout.visibility = View.VISIBLE

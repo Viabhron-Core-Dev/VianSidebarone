@@ -322,3 +322,37 @@
 * How it was verified: Local Kotlin compilation (`gradle :app:compileDebugKotlin :app:compileDebugUnitTestKotlin`) and local JVM unit tests (`gradle :app:testDebugUnitTest --tests "com.example.feature.settings.SettingsNavigationStructureTest" --tests "com.example.feature.welcome.WelcomeNavigationTest" --tests "com.example.feature.reader.ReaderMiniAppTest" --tests "com.example.feature.reader.ReaderArchitectureAndBackupTest" --console=plain`) — **24/24 passed** (`SettingsNavigationStructureTest` 2/2, `WelcomeNavigationTest` 4/4, `ReaderMiniAppTest` 10/10, `ReaderArchitectureAndBackupTest` 8/8), 0 failures, 0 errors, 0 skipped. Live Compose UI rendering and tap interactions in `:heavy` `SettingsActivity` / `ReaderSettingsScreen` were not tested on a physical Android device or emulator.
 * Any deviation from what was requested, and why: None. Compose UI instrumentation (`createComposeRule`) is not included in `app/build.gradle.kts`, so `SettingsNavigationStructureTest` combines source-contract assertions with JVM runtime `Intent` dispatch verification instead of adding new test dependencies.
 * Any known issue or follow-up needed: Verify visually on-device that Main Settings no longer lists Book Tracker while tapping Reader Settings -> Open Book Tracker launches `BookTrackerActivity`.
+
+---
+
+### Receipt 121
+* Timestamp: 2026-11-16 21:00 UTC
+* One-line summary of what was requested: Implement 10-part Reader and Book Tracker refinement (fix WindowManager re-add crash on return from Book Tracker, auto-open last-read book, compact Library/Explorer UI, SeekBar reading toolbar with single-progress-indicator rule, Reader-only sticker hiding + top-bar pencil icon, Book Tracker light theme + backup icon action, and tests/verification).
+* Exact files touched:
+  - `app/src/main/res/drawable/ic_edit_pencil.xml` (added)
+  - `app/src/main/java/com/example/core/FloatingWindow.kt`
+  - `app/src/main/java/com/example/core/FloatingWindowManager.kt`
+  - `app/src/main/java/com/example/feature/floating/FloatingMiniAppBridge.kt`
+  - `app/src/main/java/com/example/feature/floating/FloatingMiniAppWindow.kt`
+  - `app/src/main/java/com/example/feature/reader/ReaderModels.kt`
+  - `app/src/main/java/com/example/feature/reader/ReaderMiniAppInstance.kt`
+  - `app/src/main/java/com/example/feature/reader/ReaderReadingView.kt`
+  - `app/src/main/java/com/example/feature/reader/ReaderLibraryView.kt`
+  - `app/src/main/java/com/example/feature/reader/ReaderFolderBrowserView.kt`
+  - `app/src/main/java/com/example/feature/reader/BookTrackerActivity.kt`
+  - `app/src/test/java/com/example/feature/reader/ReaderMiniAppTest.kt`
+  - `app/src/test/java/com/example/feature/reader/ReaderArchitectureAndBackupTest.kt`
+  - `blueprint/BLUEPRINT.md`
+  - `receipts/RECEIPTS_101.md`
+* What was actually done — factual, not persuasive:
+  1. Fixed Reader restoration `IllegalStateException` (`View has already been added`) across `FloatingWindow.kt`, `FloatingWindowManager.kt`, and `FloatingMiniAppBridge.kt` by tracking `@Volatile internal var isOverlayViewAttached` so `HIDDEN` (`View.GONE`) windows remain recognized as attached without duplicate `WindowManager.addView()`, while `FOLDED` detaches cleanly and `restoreReaderAfterExternalActivity()` is idempotent.
+  2. Added `tryAutoOpenLastReadBook()` in `ReaderMiniAppInstance.kt` to open the last-read active book at `lastReadChapter`/`lastReadScrollY` on clean/cold starts without duplicating DB/Tracker records, falling back safely to `LIBRARY` when no book exists or the binary is absent. Added `loadBookJob` tracking in `ReaderReadingView.kt` for deterministic coroutine lifecycle and test awaiting.
+  3. Compacted spacing/margins in `ReaderLibraryView.kt` (plus `areRecentControlsHidden` backing state) and `ReaderFolderBrowserView.kt` (removed `" • Tap to import & open"` suffix).
+  4. Redesigned `ReaderReadingView.kt` reading toolbar: removed `bottomProgressStrip` and `A-/sp/A+` controls, added proportional full-book `fullBookSeekBar` (lightweight drag preview only, seek + persist on release without inflating Tracker high-water), and enforced single progress indicator visibility (`topBookProgressBar` only when toolbar hidden; bottom `SeekBar` only when toolbar visible).
+  5. Updated `FloatingMiniAppWindow.kt`: replaced Reader's top-bar `"Edit"` text button with `ImageButton` (`ic_edit_pencil.xml` + `topBarReaderEditContentDescription`), hid Reader's bottom-right sticker and removed `46dp` clearance only while reading toolbar is visible (restoring on hide, tab/screen switch, `onShow`, `onFold`, and `releaseRuntime`), leaving Note/other windows unchanged.
+  6. Updated `BookTrackerActivity.kt` to an exclusive high-contrast light theme (`BookTrackerLightColors`, `lightColorScheme()`, white bordered cards/inputs/chips/dialogs) and replaced the TopAppBar `"Backups"` `TextButton` with an accessible `IconButton` using `ic_download.xml`.
+  7. Added/updated JVM tests in `ReaderMiniAppTest.kt` and `ReaderArchitectureAndBackupTest.kt` covering non-duplicate WindowManager `addView` on restore, auto-open + missing-binary fallback, SeekBar drag preview vs release commit, single progress indicator rule, Reader sticker hiding + pencil vs Note `"Edit"` button, compact Explorer controls, and `BookTrackerLightColors`.
+* How it was verified: Local build (`compile_applet` -> `Build succeeded - the applet is compiled`) and local JVM unit tests (`gradle :app:compileDebugKotlin :app:compileDebugUnitTestKotlin :app:testDebugUnitTest --tests "com.example.feature.reader.*" --tests "com.example.feature.floating.*" --tests "com.example.feature.settings.*" --tests "com.example.core.Main*" --tests "com.example.core.Floating*"`) — **139/139 passed** (`ReaderMiniAppTest` 15/15, `ReaderArchitectureAndBackupTest` 9/9, `FloatingMiniAppFrameworkTest` 86/86, `SettingsNavigationStructureTest` 2/2, `ScreenCapSettingsIntegrationTest` 6/6, `FloatingMiniAppLogFilterTest` 7/7, `MainProcessRecoveryTest` 8/8, `MainRuntimeRestorationTest` 6/6), 0 failures/errors/skipped, empty `system-err`. Confirmed `/debug.keystore`, `/debug.keystore.base64`, and `/.build-outputs/app-debug.apk` are absent. Physical-device WindowManager attachment/focus, Compose rendering of `BookTrackerActivity`, real `SeekBar` touch scrubbing, and visual layout proportions were not tested on a device or emulator.
+* Any deviation from what was requested, and why: None in behavior. Because `mockable android.jar` stubs return default values (`0`/`null`) for `View.getVisibility()`, `View.getContentDescription()`, and `ContextWrapper.getResources()`, Kotlin backing fields (`areRecentControlsHidden`, `topBarReaderEditContentDescription`) and `ContextWrapper` delegation on `wmContext` were used for JVM test assertions while keeping standard Android View behavior on-device.
+* Any known issue or follow-up needed: Physical-device testing required for Book Tracker launch-and-return crash fix, auto-open UX, compact UI spacing, SeekBar scrubbing feel, sticker visibility transitions, and Book Tracker light theme readability.
+

@@ -157,7 +157,7 @@ class ReaderMiniAppTest {
         assertEquals(ReaderScreenMode.READING, wakeInstance.getCurrentScreenModeForTesting())
         assertEquals(42, wakeInstance.getCurrentBookIdForTesting())
 
-        // 5. Cold process restart: KEY_COLD_START == "true" must open LIBRARY (Recent tab) instead of auto-opening book 42
+        // 5. Cold process restart with empty Library DB: KEY_COLD_START == "true" must safely stay in LIBRARY (Recent tab)
         ReaderSessionTracker.resetForTesting()
         val coldSnapshot = MiniAppRecoverySnapshot(
             instanceId = instanceId,
@@ -169,13 +169,14 @@ class ReaderMiniAppTest {
         val coldInstance = ReaderMiniAppInstance(instanceId, "reader")
         coldInstance.onCreate(coldSnapshot)
         coldInstance.createContentView(testContext)
-        assertEquals("Cold start must open LIBRARY mode", ReaderScreenMode.LIBRARY, coldInstance.getCurrentScreenModeForTesting())
-        assertEquals("Cold start must not auto-open previous book", -1, coldInstance.getCurrentBookIdForTesting())
+        assertEquals("Cold start with no books must stay in LIBRARY mode", ReaderScreenMode.LIBRARY, coldInstance.getCurrentScreenModeForTesting())
+        assertEquals("Cold start with no books must not open deleted/non-existent book", -1, coldInstance.getCurrentBookIdForTesting())
         assertEquals(
             "Cold start Library view must default to RECENT tab",
             ReaderLibraryTab.RECENT,
             coldInstance.getLibraryViewForTesting()?.getActiveTabForTesting()
         )
+        coldInstance.onDestroy()
     }
 
     @Test
@@ -446,5 +447,222 @@ class ReaderMiniAppTest {
             instanceField.set(null, prevFwm)
             bridgeField.set(null, prevBridge)
         }
+    }
+
+    @Test
+    fun testRestoreAfterBookTrackerDoesNotReAddAttachedHiddenViewAndIdempotentRestore() {
+        var addViewCount = 0
+        var removeViewCount = 0
+        val countingWm = java.lang.reflect.Proxy.newProxyInstance(
+            android.view.WindowManager::class.java.classLoader,
+            arrayOf(android.view.WindowManager::class.java)
+        ) { _, method, _ ->
+            when (method.name) {
+                "addView" -> addViewCount++
+                "removeViewImmediate", "removeView" -> removeViewCount++
+            }
+            null
+        } as android.view.WindowManager
+
+        val wmContext = object : ContextWrapper(testContext) {
+            override fun getApplicationContext(): Context = this
+            override fun getPackageName(): String = testContext.packageName
+            override fun getResources(): android.content.res.Resources = testContext.resources
+            override fun getSharedPreferences(name: String?, mode: Int): SharedPreferences =
+                testContext.getSharedPreferences(name, mode)
+            override fun getFilesDir(): File = testContext.filesDir
+            override fun getCacheDir(): File = testContext.cacheDir
+            override fun getSystemService(name: String): Any? {
+                return if (name == Context.WINDOW_SERVICE) countingWm else testContext.getSystemService(name)
+            }
+        }
+
+        val instanceField = com.example.core.FloatingWindowManager::class.java.getDeclaredField("instance").apply {
+            isAccessible = true
+        }
+        val bridgeField = com.example.feature.floating.FloatingMiniAppBridge::class.java.getDeclaredField("instance").apply {
+            isAccessible = true
+        }
+        val prevFwm = instanceField.get(null)
+        val prevBridge = bridgeField.get(null)
+        instanceField.set(null, null)
+        bridgeField.set(null, null)
+        try {
+            val fwm = com.example.core.FloatingWindowManager.getInstance(wmContext)
+            val bridge = com.example.feature.floating.FloatingMiniAppBridge.getInstance(wmContext)
+            val readerWin = com.example.feature.floating.FloatingMiniAppWindow("reader_wm_fix", wmContext, "reader")
+
+            fwm.registerWindow(readerWin)
+            assertTrue("Initial showWindow must succeed", fwm.showWindow("reader_wm_fix"))
+            assertEquals("Initial showWindow must call addView once", 1, addViewCount)
+            assertTrue("Visible window must report isAttached == true", readerWin.isAttached)
+
+            // Hide Reader for Book Tracker -> keeps view attached, hides visually
+            val hiddenId = bridge.hideReaderForExternalActivity("reader_wm_fix")
+            assertEquals("reader_wm_fix", hiddenId)
+            assertEquals(com.example.core.WindowState.HIDDEN, readerWin.state)
+            assertTrue("HIDDEN overlay view stays attached in WindowManager", readerWin.isAttached)
+            assertEquals(0, removeViewCount)
+
+            // Restore after Book Tracker closes -> MUST NOT re-add already-attached view
+            assertTrue(bridge.restoreReaderAfterExternalActivity("reader_wm_fix"))
+            assertEquals("Restoring hidden attached view must NOT trigger duplicate addView", 1, addViewCount)
+            assertEquals(com.example.core.WindowState.VISIBLE, readerWin.state)
+
+            // Second restore call (dual broadcast + IPC) -> idempotent no-op
+            assertTrue(bridge.restoreReaderAfterExternalActivity("reader_wm_fix"))
+            assertEquals("Duplicate restore call must remain idempotent", 1, addViewCount)
+            assertEquals(com.example.core.WindowState.VISIBLE, readerWin.state)
+
+            // Contrast with foldWindow -> detaches view and marks FOLDED
+            fwm.foldWindow("reader_wm_fix")
+            assertEquals(com.example.core.WindowState.FOLDED, readerWin.state)
+            assertTrue("Folded window must be detached (isAttached == false)", !readerWin.isAttached)
+            assertEquals(1, removeViewCount)
+
+            // Unfold from FOLDED -> cleanly re-attaches via addView once
+            fwm.unfoldWindow("reader_wm_fix")
+            assertEquals(com.example.core.WindowState.VISIBLE, readerWin.state)
+            assertTrue(readerWin.isAttached)
+            assertEquals(2, addViewCount)
+        } finally {
+            instanceField.set(null, prevFwm)
+            bridgeField.set(null, prevBridge)
+        }
+    }
+
+    @Test
+    fun testSingleProgressIndicatorAndRemovedFontControlsInReadingToolbar() {
+        val readView = ReaderReadingView(context = testContext, instanceId = "single_progress_test", onBackToLibrary = {})
+        try {
+            assertTrue("Bottom toolbar must be hidden by default", !readView.isBottomToolbarVisibleForTesting())
+            assertTrue("Top thin progress line must be visible when toolbar is hidden", readView.isTopProgressLineVisibleForTesting())
+            assertTrue("A-/sp/A+ font controls must be removed from bottom toolbar", !readView.hasFontControlsInToolbarForTesting())
+            assertTrue(
+                "Bottom toolbar must have compact padding without 46dp sticker gap (< 20dp)",
+                readView.getBottomToolbarBottomPaddingPxForTesting() < 40
+            )
+
+            // Toggle toolbar ON -> top line hides, bottom SeekBar toolbar shows
+            readView.handleCleanTapOnReadingAreaForTesting()
+            assertTrue(readView.isBottomToolbarVisibleForTesting())
+            assertTrue("Top thin progress line must hide when toolbar is visible", !readView.isTopProgressLineVisibleForTesting())
+
+            // Toggle toolbar OFF -> top line returns
+            readView.handleCleanTapOnReadingAreaForTesting()
+            assertTrue(!readView.isBottomToolbarVisibleForTesting())
+            assertTrue(readView.isTopProgressLineVisibleForTesting())
+
+            // Verify proportional full-book progress math and seek target resolution
+            val chapters = listOf(
+                com.example.data.ChapterMeta(index = 0, title = "Ch 1", wordCount = 1000),
+                com.example.data.ChapterMeta(index = 1, title = "Ch 2", wordCount = 1000),
+                com.example.data.ChapterMeta(index = 2, title = "Ch 3", wordCount = 2000)
+            ) // total = 4000 words
+            val pMid = ReaderReadingView.computeFullBookProgressPermille(
+                chapters = chapters,
+                totalChapters = 3,
+                chapterIndex = 1,
+                scrollY = 500,
+                scrollableRangePx = 1000
+            )
+            assertEquals(375, pMid) // (1000 + 500) / 4000 = 0.375 -> 375 permille
+
+            val target = ReaderReadingView.resolveSeekTarget(
+                chapters = chapters,
+                totalChapters = 3,
+                permille = 750 // 3000 / 4000 -> halfway into chapter 2
+            )
+            assertEquals(2, target.chapterIndex)
+            assertEquals(0.5f, target.intraChapterFraction, 0.01f)
+        } finally {
+            readView.releaseResources()
+        }
+    }
+
+    @Test
+    fun testReaderStickerHidingAndTopBarPencilVsNoteEditButton() {
+        val readerWin = com.example.feature.floating.FloatingMiniAppWindow("reader_sticker_test", testContext, "reader")
+        val noteWin = com.example.feature.floating.FloatingMiniAppWindow("note_sticker_test", testContext, "note")
+        try {
+            readerWin.createContentView(testContext)
+            noteWin.createContentView(testContext)
+
+            // Requirement #7: Reader top bar uses compact pencil ImageButton; Note keeps "Edit" text button
+            val readerEditBtn = readerWin.getTopBarReaderEditButtonForTesting()
+            assertNotNull("Reader top bar must have compact pencil ImageButton", readerEditBtn)
+            assertEquals(null, readerWin.getTopBarNoteEditButtonForTesting())
+            assertTrue(
+                "Reader pencil button must have accessible contentDescription",
+                readerWin.topBarReaderEditContentDescription?.isNotBlank() == true
+            )
+
+            assertNotNull("Note top bar must preserve 'Edit' text button", noteWin.getTopBarNoteEditButtonForTesting())
+            assertEquals(null, noteWin.getTopBarReaderEditButtonForTesting())
+
+            // Requirement #6: Sticker starts visible in Reader Library
+            assertTrue("Sticker must be visible in Reader Library", readerWin.isBottomRightStickerVisible)
+            assertTrue("Sticker must be visible in Note", noteWin.isBottomRightStickerVisible)
+
+            val readerInstance = readerWin.getReaderInstanceForTesting()!!
+            val readingView = readerInstance.getReadingViewForTesting()!!
+            // Switch instance into READING mode via reflection/open flow
+            val modeField = ReaderMiniAppInstance::class.java.getDeclaredField("currentScreenMode").apply { isAccessible = true }
+            modeField.set(readerInstance, ReaderScreenMode.READING)
+
+            // Showing bottom reading toolbar in READING hides Reader's sticker
+            readingView.handleCleanTapOnReadingAreaForTesting()
+            assertTrue(readingView.isBottomToolbarVisibleForTesting())
+            assertTrue("Reader sticker must hide when reading toolbar is visible", !readerWin.isBottomRightStickerVisible)
+
+            // Hiding toolbar restores sticker
+            readingView.handleCleanTapOnReadingAreaForTesting()
+            assertTrue(!readingView.isBottomToolbarVisibleForTesting())
+            assertTrue("Reader sticker must restore when reading toolbar hides", readerWin.isBottomRightStickerVisible)
+
+            // Leaving reading screen via Library button also restores sticker
+            readingView.handleCleanTapOnReadingAreaForTesting()
+            assertTrue(!readerWin.isBottomRightStickerVisible)
+            readingView.navigateBackToLibraryForTesting()
+            assertTrue("Reader sticker must restore when returning to Library", readerWin.isBottomRightStickerVisible)
+
+            // Fold sync restores sticker visibility
+            readerWin.onFold(true)
+            assertTrue(readerWin.isBottomRightStickerVisible)
+
+            // Note sticker remains unaffected
+            assertTrue(noteWin.isBottomRightStickerVisible)
+        } finally {
+            readerWin.onDestroy()
+            noteWin.onDestroy()
+        }
+    }
+
+    @Test
+    fun testExplorerTabHidesRecentControlsAndUsesCompactMetrics() {
+        val libView = ReaderLibraryView(context = testContext, instanceId = "explorer_compact_test", onBookSelected = {})
+        try {
+            libView.selectTab(ReaderLibraryTab.FILE_EXPLORER)
+            assertTrue(
+                "File Explorer tab must hide Recent utility/search/list controls",
+                libView.isRecentControlsHiddenForTesting()
+            )
+            val explorer = libView.getEmbeddedExplorerForTesting()
+            assertTrue(explorer.isEmbeddedInLibraryForTesting())
+            assertTrue("Explorer topBar padding must be compact", explorer.getTopBarBottomPaddingPxForTesting() <= 8)
+            assertTrue("Explorer search bottom margin must be compact", explorer.getSearchBottomMarginPxForTesting() <= 10)
+        } finally {
+            libView.releaseResources()
+        }
+    }
+
+    @Test
+    fun testBookTrackerLightColorSchemeUsesHighContrastLightPalette() {
+        val scheme = BookTrackerLightColors.createColorScheme()
+        assertTrue("Background must be near-white light canvas", scheme.background.red > 0.9f && scheme.background.green > 0.9f && scheme.background.blue > 0.9f)
+        assertTrue("Surface must be light white", scheme.surface.red > 0.95f && scheme.surface.green > 0.95f && scheme.surface.blue > 0.95f)
+        assertTrue("OnBackground text must be dark ink", scheme.onBackground.red < 0.15f && scheme.onBackground.green < 0.15f && scheme.onBackground.blue < 0.25f)
+        assertTrue("OnSurface text must be dark ink", scheme.onSurface.red < 0.15f && scheme.onSurface.green < 0.15f && scheme.onSurface.blue < 0.25f)
+        assertTrue("Primary cobalt accent must contrast with white OnPrimary", scheme.primary != scheme.background && scheme.onPrimary.red > 0.95f)
     }
 }

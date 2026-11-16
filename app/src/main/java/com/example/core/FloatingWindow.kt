@@ -108,7 +108,14 @@ open class FloatingWindow(
     private var containerView: FrameLayout? = null
     private var contentView: View? = null
 
-    val isAttached: Boolean get() = state == WindowState.ATTACHED || state == WindowState.VISIBLE
+    @Volatile
+    internal var isOverlayViewAttached: Boolean = false
+
+    val isAttached: Boolean
+        get() = isOverlayViewAttached ||
+            (containerView?.isAttachedToWindow == true) ||
+            state == WindowState.ATTACHED ||
+            state == WindowState.VISIBLE
     val isVisible: Boolean get() = state == WindowState.VISIBLE
 
     /**
@@ -241,6 +248,7 @@ open class FloatingWindow(
     open fun onDetach(wm: WindowManager) {}
 
     open fun onDestroy() {
+        isOverlayViewAttached = false
         onClose?.invoke()
         for (listener in lifecycleListeners) {
             listener.onDestroyed(this)

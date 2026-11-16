@@ -667,6 +667,22 @@
 - **2. Verification**:
   - Kotlin compilation (`:app:compileDebugKotlin`, `:app:compileDebugUnitTestKotlin`) and 24/24 targeted JVM unit tests passed (`SettingsNavigationStructureTest` 2/2, `WelcomeNavigationTest` 4/4, `ReaderMiniAppTest` 10/10, `ReaderArchitectureAndBackupTest` 8/8). Requires on-device UI verification of Settings list rendering and navigation clicks.
 
+### Phase 14.17: Reader & Book Tracker Refinement — Restoration Fix, Auto-Open, Compact UI, SeekBar & Light Tracker (COMPLETED)
+- **1. Reader Restoration Attachment Fix (`FloatingWindow.kt`, `FloatingWindowManager.kt`, `FloatingMiniAppBridge.kt`)**:
+  - Added `@Volatile internal var isOverlayViewAttached` on `FloatingWindow` and updated `isAttached` so `HIDDEN` (`View.GONE`) overlay views remain recognized as attached without calling duplicate `WindowManager.addView()` in `restoreReaderAfterExternalActivity()` → `showWindow()` → `attachOverlay()`. Preserved `FOLDED` view detachment and `DETACHED`/`onDestroy()` cleanup, and made `restoreReaderAfterExternalActivity()` idempotent.
+- **2. Auto-Open Last-Read Book (`ReaderMiniAppInstance.kt`, `ReaderReadingView.kt`, `ReaderModels.kt`)**:
+  - Added `tryAutoOpenLastReadBook()` on clean/cold launches to automatically reopen the last active book at `lastReadChapter` / `lastReadScrollY` without duplicating `EpubBook`/`TrackerBook` entries, staying safely in `LIBRARY` when none exists or when the source binary is missing.
+- **3. Library & File Explorer Compactness (`ReaderLibraryView.kt`, `ReaderFolderBrowserView.kt`)**:
+  - Tightened header/tab/filter/card paddings and margins across Library and embedded `File Explorer`, removed `" • Tap to import & open"` verbose suffix, and hid Recent-only controls cleanly while in `File Explorer`.
+- **4. Reading Toolbar, Single Progress Indicator & Reader-Only Sticker Hiding (`ReaderReadingView.kt`, `FloatingMiniAppWindow.kt`, `ic_edit_pencil.xml`)**:
+  - Removed `bottomProgressStrip` and inline `A-`/sp/`A+` font controls; added proportional full-book `SeekBar` (`fullBookSeekBar`) with lightweight drag preview and seek+resume persist on release (never inflating Tracker high-water).
+  - Enforced the single-progress-indicator rule: thin `topBookProgressBar` shows ONLY when the bottom toolbar is hidden; bottom `SeekBar` shows ONLY when the toolbar is visible.
+  - Replaced Reader's top-bar `"Edit"` button with compact accessible `ImageButton` (`ic_edit_pencil.xml`, keeping Note's `"Edit"` text button) and hid Reader's bottom-right `[ × — ↘ ]` sticker + removed `46dp` clearance exclusively while Reader's reading toolbar is visible (restoring on hide, Library/Explorer switch, `onShow`, `onFold`, and `releaseRuntime`).
+- **5. Book Tracker Light Theme & Backup Icon (`BookTrackerActivity.kt`)**:
+  - Converted `BookTrackerActivity` exclusively to a crisp high-contrast light palette (`BookTrackerLightColors`, `lightColorScheme()`, white bordered cards, cobalt blue primary, dark slate ink) and replaced the TopAppBar `"Backups"` `TextButton` with an accessible `IconButton` using `ic_download.xml`.
+- **6. Verification**:
+  - Full project build (`compile_applet`) succeeded and 139/139 targeted JVM unit tests passed (`ReaderMiniAppTest` 15/15, `ReaderArchitectureAndBackupTest` 9/9, `FloatingMiniAppFrameworkTest` 86/86, `SettingsNavigationStructureTest` 2/2, `ScreenCapSettingsIntegrationTest` 6/6, `FloatingMiniAppLogFilterTest` 7/7, `MainProcessRecoveryTest` 8/8, `MainRuntimeRestorationTest` 6/6), with 0 failures/errors/skipped and empty `system-err`.
+
 ---
 
 ## Phase 14: PWA Engine & External AI App Integration (Tier 5 - Highest Complexity)
