@@ -683,6 +683,16 @@
 - **6. Verification**:
   - Full project build (`compile_applet`) succeeded and 139/139 targeted JVM unit tests passed (`ReaderMiniAppTest` 15/15, `ReaderArchitectureAndBackupTest` 9/9, `FloatingMiniAppFrameworkTest` 86/86, `SettingsNavigationStructureTest` 2/2, `ScreenCapSettingsIntegrationTest` 6/6, `FloatingMiniAppLogFilterTest` 7/7, `MainProcessRecoveryTest` 8/8, `MainRuntimeRestorationTest` 6/6), with 0 failures/errors/skipped and empty `system-err`.
 
+### Phase 14.18: Floating Window Attachment & Z-Order Lifecycle Follow-Up Fix (COMPLETED)
+- **1. Authoritative Attachment Tracking (`FloatingWindow.kt`, `FloatingMiniAppLauncherBubble.kt`)**:
+  - Removed `state == WindowState.ATTACHED || state == WindowState.VISIBLE` inference from `FloatingWindow.isAttached`, deriving attachment exclusively from `(getView()?.isAttachedToWindow == true) || isOverlayViewAttached`.
+  - Added `View.OnAttachStateChangeListener` (`attachLifecycleStateListener` / `detachLifecycleStateListener`) bound in `FloatingWindow.getOrCreateContainerView()` and `FloatingMiniAppLauncherBubble.getOrCreateContainerView()` and unbound in `onDestroy()`.
+- **2. Safe Z-Order Refresh & Failure Consistency (`FloatingWindowManager.kt`, `FloatingMiniAppBridge.kt`)**:
+  - Exposed `refreshOverlayZOrder(windowId)` and fixed `refreshOverlayZOrder(window)` so visible and `HIDDEN` (`View.GONE`) attached windows reattach preserving exact `previousState` and `View.GONE` visibility without showing hidden windows, detached/folded windows are skipped, removal failure aborts re-add, and re-add failure (or revoked overlay permission) transitions cleanly to `WindowState.DETACHED` + `onDetach()` + focus handoff rather than leaving `WindowState.VISIBLE` while detached.
+  - Hardened `attachOverlay`, `detachOverlay`, `showWindow`, `hideWindow`, `foldWindow`, `unfoldWindow`, and `bringToFront` so `isOverlayViewAttached`, `isFolded`, and lifecycle states advance only after `WindowManager` operations succeed, and hardened `FloatingMiniAppBridge.restoreReaderAfterExternalActivity` / `openMiniApp` to check `!isAttached`, `WindowState`, `View.visibility`, and `showWindow()` return status.
+- **3. Focused Verification**:
+  - 137/137 targeted JVM unit tests passed (`FloatingMiniAppFrameworkTest`: 92/92 including 6 new strict fake-`WindowManager` + `TrackableFrameLayout` Z-order/failure/attachment tests, `ReaderMiniAppTest`: 15/15, `ReaderArchitectureAndBackupTest`: 9/9, `FloatingMiniAppLogFilterTest`: 7/7, `MainProcessRecoveryTest`: 8/8, `MainRuntimeRestorationTest`: 6/6) and `compile_applet` succeeded. Android attachment/visibility simulated on JVM without Robolectric or physical-device traversal; hardware overlay Z-order & restoration require physical-device verification.
+
 ---
 
 ## Phase 14: PWA Engine & External AI App Integration (Tier 5 - Highest Complexity)

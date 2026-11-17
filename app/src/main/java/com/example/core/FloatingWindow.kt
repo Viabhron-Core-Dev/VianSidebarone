@@ -111,11 +111,31 @@ open class FloatingWindow(
     @Volatile
     internal var isOverlayViewAttached: Boolean = false
 
+    private val attachmentStateListener = object : View.OnAttachStateChangeListener {
+        override fun onViewAttachedToWindow(v: View) {
+            if (v === getView()) {
+                isOverlayViewAttached = true
+            }
+        }
+
+        override fun onViewDetachedFromWindow(v: View) {
+            if (v === getView()) {
+                isOverlayViewAttached = false
+            }
+        }
+    }
+
+    protected fun attachLifecycleStateListener(view: View) {
+        view.removeOnAttachStateChangeListener(attachmentStateListener)
+        view.addOnAttachStateChangeListener(attachmentStateListener)
+    }
+
+    protected fun detachLifecycleStateListener(view: View) {
+        view.removeOnAttachStateChangeListener(attachmentStateListener)
+    }
+
     val isAttached: Boolean
-        get() = isOverlayViewAttached ||
-            (containerView?.isAttachedToWindow == true) ||
-            state == WindowState.ATTACHED ||
-            state == WindowState.VISIBLE
+        get() = (getView()?.isAttachedToWindow == true) || isOverlayViewAttached
     val isVisible: Boolean get() = state == WindowState.VISIBLE
 
     /**
@@ -167,6 +187,7 @@ open class FloatingWindow(
                 container.addView(content)
             }
 
+            attachLifecycleStateListener(container)
             containerView = container
         }
         return containerView!!
@@ -254,6 +275,7 @@ open class FloatingWindow(
             listener.onDestroyed(this)
         }
         lifecycleListeners.clear()
+        containerView?.let { detachLifecycleStateListener(it) }
         containerView?.removeAllViews()
         containerView = null
         contentView = null

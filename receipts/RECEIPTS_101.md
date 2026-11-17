@@ -356,3 +356,27 @@
 * Any deviation from what was requested, and why: None in behavior. Because `mockable android.jar` stubs return default values (`0`/`null`) for `View.getVisibility()`, `View.getContentDescription()`, and `ContextWrapper.getResources()`, Kotlin backing fields (`areRecentControlsHidden`, `topBarReaderEditContentDescription`) and `ContextWrapper` delegation on `wmContext` were used for JVM test assertions while keeping standard Android View behavior on-device.
 * Any known issue or follow-up needed: Physical-device testing required for Book Tracker launch-and-return crash fix, auto-open UX, compact UI spacing, SeekBar scrubbing feel, sticker visibility transitions, and Book Tracker light theme readability.
 
+---
+
+### Receipt 122
+* Timestamp: 2026-11-16 23:00 UTC
+* One-line summary of what was requested: Fix floating-window Z-order refresh (`refreshOverlayZOrder`) and harden WindowManager attachment-state tracking across attach/detach/show/hide/fold/unfold/restore paths, with focused regression tests.
+* Exact files touched:
+  - `app/src/main/java/com/example/core/FloatingWindow.kt`
+  - `app/src/main/java/com/example/core/FloatingWindowManager.kt`
+  - `app/src/main/java/com/example/feature/floating/FloatingMiniAppLauncherBubble.kt`
+  - `app/src/main/java/com/example/feature/floating/FloatingMiniAppBridge.kt`
+  - `app/src/test/java/com/example/feature/floating/FloatingMiniAppFrameworkTest.kt`
+  - `app/src/test/java/com/example/feature/reader/ReaderMiniAppTest.kt`
+  - `blueprint/BLUEPRINT.md`
+  - `receipts/RECEIPTS_101.md`
+* What was actually done — factual, not persuasive:
+  1. In `FloatingWindow.kt`, removed `state == WindowState.ATTACHED || state == WindowState.VISIBLE` from `isAttached` so attachment reports `(getView()?.isAttachedToWindow == true) || isOverlayViewAttached`, and added `View.OnAttachStateChangeListener` (`attachLifecycleStateListener` / `detachLifecycleStateListener`) bound in `getOrCreateContainerView()` and cleaned up in `onDestroy()`. Bound/unbound the same listener in `FloatingMiniAppLauncherBubble.kt`.
+  2. In `FloatingWindowManager.kt`, exposed `internal fun refreshOverlayZOrder(windowId)` and rewrote `refreshOverlayZOrder(window)` to verify actual attachment, preserve `previousState` and `View.GONE` for `HIDDEN` windows, abort re-add if `removeViewImmediate` fails, and transition cleanly to `WindowState.DETACHED` + `onDetach()` + focus handoff if re-add fails or overlay permission is denied (never leaving `WindowState.VISIBLE` while detached).
+  3. Hardened `attachOverlay`, `detachOverlay`, `showWindow`, `hideWindow`, `foldWindow`, `unfoldWindow`, and `bringToFront` in `FloatingWindowManager.kt` to reject `DESTROYED`, update `isOverlayViewAttached`/`isFolded`/states only after `WindowManager` operations succeed, preserve attachment truth on non-`IllegalArgumentException` removal failures, and keep hide/fold/show idempotent.
+  4. In `FloatingMiniAppBridge.kt`, updated `restoreReaderAfterExternalActivity` to verify `!existing.isAttached || existing.state != WindowState.VISIBLE || existing.getView()?.visibility != View.VISIBLE`, check `windowManager.showWindow(id)` before clearing `hiddenReaderInstanceIdForExternal`, and added `!existing.isAttached` check to `openMiniApp`.
+  5. Added `TrackableFrameLayout` + `StrictFakeWindowManagerHarness` + 6 Z-order/attachment/failure regression tests in `FloatingMiniAppFrameworkTest.kt` and upgraded `countingWm` in `ReaderMiniAppTest.kt` to throw `IllegalStateException`/`IllegalArgumentException` like Android `WindowManagerGlobal`.
+* How it was verified: Local build (`compile_applet` -> `Build succeeded - the applet is compiled`) and local JVM unit tests (`gradle :app:compileDebugKotlin :app:compileDebugUnitTestKotlin :app:testDebugUnitTest --tests "com.example.feature.floating.*" --tests "com.example.feature.reader.*" --tests "com.example.core.Main*" --tests "com.example.core.Floating*" --console=plain`) — **137/137 passed** (`FloatingMiniAppFrameworkTest` 92/92, `ReaderMiniAppTest` 15/15, `ReaderArchitectureAndBackupTest` 9/9, `FloatingMiniAppLogFilterTest` 7/7, `MainProcessRecoveryTest` 8/8, `MainRuntimeRestorationTest` 6/6), 0 failures/errors/skipped, empty `<system-err>`. Verified `/debug.keystore`, `/debug.keystore.base64`, and `/.build-outputs/app-debug.apk` remain absent. Note: Android attachment (`View.isAttachedToWindow`, `View.visibility`, `OnAttachStateChangeListener`) and `WindowManager` duplicate/missing-view exceptions were simulated on JVM via `StrictFakeWindowManagerHarness` + `TrackableFrameLayout` (no Robolectric or physical-device traversal).
+* Any deviation from what was requested, and why: Kept `isOverlayViewAttached` fallback alongside `View.isAttachedToWindow` + `OnAttachStateChangeListener` because on real Android `WindowManager.addView()` schedules asynchronous `performTraversals()` before `isAttachedToWindow` flips true, and because mockable `android.jar` stubs return `false` by default for non-overridden `View` subclasses.
+* Any known issue or follow-up needed: Physical-device verification required for multi-window Z-order bring-to-front swapping, `HIDDEN` overlay refresh behavior, `BookTrackerActivity` / `SettingsActivity` return restoration, and repeated fold/unfold/hide/show cycles under real HWUI/`WindowManagerGlobal`.
+

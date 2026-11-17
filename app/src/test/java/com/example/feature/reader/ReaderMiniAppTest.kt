@@ -453,13 +453,26 @@ class ReaderMiniAppTest {
     fun testRestoreAfterBookTrackerDoesNotReAddAttachedHiddenViewAndIdempotentRestore() {
         var addViewCount = 0
         var removeViewCount = 0
+        val attachedViews = LinkedHashSet<android.view.View>()
         val countingWm = java.lang.reflect.Proxy.newProxyInstance(
             android.view.WindowManager::class.java.classLoader,
             arrayOf(android.view.WindowManager::class.java)
-        ) { _, method, _ ->
+        ) { _, method, args ->
             when (method.name) {
-                "addView" -> addViewCount++
-                "removeViewImmediate", "removeView" -> removeViewCount++
+                "addView" -> {
+                    val view = args!![0] as android.view.View
+                    if (!attachedViews.add(view)) {
+                        throw IllegalStateException("View $view has already been added to the window manager.")
+                    }
+                    addViewCount++
+                }
+                "removeViewImmediate", "removeView" -> {
+                    val view = args!![0] as android.view.View
+                    if (!attachedViews.remove(view)) {
+                        throw IllegalArgumentException("View=$view not attached to window manager")
+                    }
+                    removeViewCount++
+                }
             }
             null
         } as android.view.WindowManager

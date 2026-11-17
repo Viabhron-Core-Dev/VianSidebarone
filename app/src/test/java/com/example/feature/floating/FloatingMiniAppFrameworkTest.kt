@@ -3425,4 +3425,346 @@ class FloatingMiniAppFrameworkTest {
         }
         wm.unregisterAll()
     }
+
+    private class TrackableFrameLayout(context: Context) : FrameLayout(context) {
+        var simulatedAttached: Boolean = false
+        private var simulatedVisibility: Int = VISIBLE
+        private val attachListeners = mutableListOf<OnAttachStateChangeListener>()
+
+        override fun isAttachedToWindow(): Boolean = simulatedAttached
+
+        override fun setVisibility(visibility: Int) {
+            simulatedVisibility = visibility
+            super.setVisibility(visibility)
+        }
+
+        override fun getVisibility(): Int = simulatedVisibility
+
+        override fun addOnAttachStateChangeListener(listener: OnAttachStateChangeListener?) {
+            if (listener != null && !attachListeners.contains(listener)) {
+                attachListeners.add(listener)
+            }
+            super.addOnAttachStateChangeListener(listener)
+        }
+
+        override fun removeOnAttachStateChangeListener(listener: OnAttachStateChangeListener?) {
+            if (listener != null) {
+                attachListeners.remove(listener)
+            }
+            super.removeOnAttachStateChangeListener(listener)
+        }
+
+        fun dispatchAttachState(attached: Boolean) {
+            simulatedAttached = attached
+            for (listener in attachListeners.toList()) {
+                if (attached) {
+                    listener.onViewAttachedToWindow(this)
+                } else {
+                    listener.onViewDetachedFromWindow(this)
+                }
+            }
+        }
+    }
+
+    private class StrictFakeWindowManagerHarness(baseContext: Context) {
+        val attachedViews = mutableListOf<android.view.View>()
+        var addViewCount = 0
+        var removeViewCount = 0
+        var failNextAddView = false
+        var failNextRemoveView = false
+
+        val windowManager: WindowManager = Proxy.newProxyInstance(
+            WindowManager::class.java.classLoader,
+            arrayOf(WindowManager::class.java)
+        ) { _, method, args ->
+            when (method.name) {
+                "addView" -> {
+                    val view = args!![0] as android.view.View
+                    if (failNextAddView) {
+                        failNextAddView = false
+                        throw RuntimeException("Simulated WindowManager.addView failure")
+                    }
+                    if (attachedViews.contains(view)) {
+                        throw IllegalStateException("View $view has already been added to the window manager.")
+                    }
+                    attachedViews.add(view)
+                    addViewCount++
+                    (view as? TrackableFrameLayout)?.dispatchAttachState(true)
+                }
+                "removeViewImmediate", "removeView" -> {
+                    val view = args!![0] as android.view.View
+                    if (failNextRemoveView) {
+                        failNextRemoveView = false
+                        throw RuntimeException("Simulated WindowManager.removeViewImmediate failure")
+                    }
+                    if (!attachedViews.remove(view)) {
+                        throw IllegalArgumentException("View=$view not attached to window manager")
+                    }
+                    removeViewCount++
+                    (view as? TrackableFrameLayout)?.dispatchAttachState(false)
+                }
+            }
+            null
+        } as WindowManager
+
+        val wmContext: Context = object : ContextWrapper(baseContext) {
+            override fun getApplicationContext(): Context = this
+            override fun getPackageName(): String = baseContext.packageName
+            override fun getResources(): android.content.res.Resources = baseContext.resources
+            override fun getSharedPreferences(name: String?, mode: Int): SharedPreferences =
+                baseContext.getSharedPreferences(name, mode)
+            override fun getFilesDir(): File = baseContext.filesDir
+            override fun getSystemService(name: String): Any? {
+                return if (name == Context.WINDOW_SERVICE) windowManager else baseContext.getSystemService(name)
+            }
+        }
+    }
+
+    private fun withIsolatedFloatingWindowManager(
+        harness: StrictFakeWindowManagerHarness,
+        block: (com.example.core.FloatingWindowManager) -> Unit
+    ) {
+        val instanceField = com.example.core.FloatingWindowManager::class.java.getDeclaredField("instance").apply {
+            isAccessible = true
+        }
+        val prev = instanceField.get(null)
+        instanceField.set(null, null)
+        try {
+            val fwm = com.example.core.FloatingWindowManager.getInstance(harness.wmContext)
+            block(fwm)
+        } finally {
+            instanceField.set(null, prev)
+        }
+    }
+
+    private fun makeTrackableWindow(
+        id: String,
+        context: Context
+    ): Pair<com.example.core.FloatingWindow, TrackableFrameLayout> {
+        val container = TrackableFrameLayout(context)
+        val win = object : com.example.core.FloatingWindow(id, context, com.example.core.FloatingWindow.TYPE_GENERIC) {
+            override fun getOrCreateContainerView(): FrameLayout {
+                attachLifecycleStateListener(container)
+                return container
+            }
+
+            override fun getView(): android.view.View = container
+        }
+        return win to container
+    }
+
+    @Test
+    fun testZOrderRefreshVisibleWindowRemainsAttachedAndVisible() {
+        val harness = StrictFakeWindowManagerHarness(testContext)
+        withIsolatedFloatingWindowManager(harness) { fwm ->
+            val (bottomWin, bottomView) = makeTrackableWindow("z_bottom", harness.wmContext)
+            val (topWin, topView) = makeTrackableWindow("z_top", harness.wmContext)
+
+            fwm.registerWindow(bottomWin)
+            fwm.registerWindow(topWin)
+            assertTrue(fwm.showWindow("z_bottom"))
+            assertTrue(fwm.showWindow("z_top"))
+            assertEquals(listOf<android.view.View>(bottomView, topView), harness.attachedViews)
+
+            // Bring bottom window above top window -> triggers refreshOverlayZOrder
+            val addBeforeBringToFront = harness.addViewCount
+            val removeBeforeBringToFront = harness.removeViewCount
+            assertTrue(fwm.bringToFront("z_bottom"))
+            assertTrue("Window must stay attached after Z-order refresh", bottomWin.isAttached)
+            assertTrue("Trackable View.isAttachedToWindow must be true", bottomView.isAttachedToWindow)
+            assertTrue("Window must remain logically visible", bottomWin.isVisible)
+            assertEquals(com.example.core.WindowState.VISIBLE, bottomWin.state)
+            assertEquals(android.view.View.VISIBLE, bottomView.visibility)
+            assertEquals(listOf<android.view.View>(topView, bottomView), harness.attachedViews)
+            assertEquals(1, harness.addViewCount - addBeforeBringToFront)
+            assertEquals(1, harness.removeViewCount - removeBeforeBringToFront)
+            assertEquals(4, harness.addViewCount)
+            assertEquals(2, harness.removeViewCount)
+        }
+    }
+
+    @Test
+    fun testZOrderRefreshHiddenAttachedWindowRemainsAttachedAndHidden() {
+        val harness = StrictFakeWindowManagerHarness(testContext)
+        withIsolatedFloatingWindowManager(harness) { fwm ->
+            val (win, view) = makeTrackableWindow("z_hidden", harness.wmContext)
+            fwm.registerWindow(win)
+            assertTrue(fwm.showWindow("z_hidden"))
+            assertTrue(fwm.hideWindow("z_hidden"))
+            assertEquals(com.example.core.WindowState.HIDDEN, win.state)
+            assertTrue(win.isAttached)
+            assertEquals(android.view.View.GONE, view.visibility)
+
+            assertTrue(fwm.refreshOverlayZOrder("z_hidden"))
+            assertTrue("Hidden window must stay attached after Z-order refresh", win.isAttached)
+            assertTrue("Trackable View.isAttachedToWindow must remain true", view.isAttachedToWindow)
+            assertEquals(com.example.core.WindowState.HIDDEN, win.state)
+            assertFalse("Hidden window must NOT become logically visible", win.isVisible)
+            assertEquals("Hidden view must remain View.GONE", android.view.View.GONE, view.visibility)
+            assertEquals(1, harness.attachedViews.size)
+        }
+    }
+
+    @Test
+    fun testZOrderRefreshDetachedAndFoldedWindowsRemainDetachedOrFolded() {
+        val harness = StrictFakeWindowManagerHarness(testContext)
+        withIsolatedFloatingWindowManager(harness) { fwm ->
+            val (detachedWin, detachedView) = makeTrackableWindow("z_detached", harness.wmContext)
+            val (foldedWin, foldedView) = makeTrackableWindow("z_folded", harness.wmContext)
+
+            fwm.registerWindow(detachedWin)
+            fwm.registerWindow(foldedWin)
+            assertTrue(fwm.showWindow("z_detached"))
+            assertTrue(fwm.showWindow("z_folded"))
+            assertTrue(fwm.detachOverlay("z_detached"))
+            assertTrue(fwm.foldWindow("z_folded"))
+
+            val addBefore = harness.addViewCount
+            val removeBefore = harness.removeViewCount
+
+            assertFalse(fwm.refreshOverlayZOrder("z_detached"))
+            assertFalse(fwm.refreshOverlayZOrder("z_folded"))
+
+            assertEquals(com.example.core.WindowState.DETACHED, detachedWin.state)
+            assertFalse(detachedWin.isAttached)
+            assertFalse(detachedView.isAttachedToWindow)
+
+            assertEquals(com.example.core.WindowState.FOLDED, foldedWin.state)
+            assertTrue(foldedWin.isFolded)
+            assertFalse(foldedWin.isAttached)
+            assertFalse(foldedView.isAttachedToWindow)
+
+            assertEquals(addBefore, harness.addViewCount)
+            assertEquals(removeBefore, harness.removeViewCount)
+            assertTrue(harness.attachedViews.isEmpty())
+        }
+    }
+
+    @Test
+    fun testRepeatedZOrderRefreshAndHideShowDoNotDuplicateAttachments() {
+        val harness = StrictFakeWindowManagerHarness(testContext)
+        withIsolatedFloatingWindowManager(harness) { fwm ->
+            val (win, view) = makeTrackableWindow("repeat_z", harness.wmContext)
+            fwm.registerWindow(win)
+            assertTrue(fwm.showWindow("repeat_z"))
+            assertEquals(1, harness.addViewCount)
+            assertEquals(0, harness.removeViewCount)
+
+            // Repeated hide -> show cycles must keep exactly 1 attachment without re-adding
+            repeat(3) {
+                assertTrue(fwm.hideWindow("repeat_z"))
+                assertEquals(com.example.core.WindowState.HIDDEN, win.state)
+                assertTrue(win.isAttached)
+                assertTrue(fwm.showWindow("repeat_z"))
+                assertEquals(com.example.core.WindowState.VISIBLE, win.state)
+                assertTrue(win.isAttached)
+            }
+            assertEquals("Hide -> show must keep exact initial attachment", 1, harness.addViewCount)
+            assertEquals("Hide -> show must not remove view", 0, harness.removeViewCount)
+
+            // Repeated Z-order refreshes remove once and re-add once cleanly without throwing duplicate-view crash
+            repeat(4) {
+                assertTrue(fwm.refreshOverlayZOrder("repeat_z"))
+                assertTrue(win.isAttached)
+                assertTrue(view.isAttachedToWindow)
+                assertEquals(com.example.core.WindowState.VISIBLE, win.state)
+                assertEquals(1, harness.attachedViews.size)
+            }
+            assertEquals(5, harness.addViewCount)
+            assertEquals(4, harness.removeViewCount)
+        }
+    }
+
+    @Test
+    fun testFailedAttachmentLeavesStateAndTrackingConsistent() {
+        val harness = StrictFakeWindowManagerHarness(testContext)
+        withIsolatedFloatingWindowManager(harness) { fwm ->
+            // 1. Initial showWindow / attachOverlay failure
+            val (win, view) = makeTrackableWindow("fail_attach", harness.wmContext)
+            fwm.registerWindow(win)
+            harness.failNextAddView = true
+            assertFalse(fwm.showWindow("fail_attach"))
+            assertEquals(com.example.core.WindowState.CREATED, win.state)
+            assertFalse(win.isAttached)
+            assertFalse(win.isOverlayViewAttached)
+            assertFalse(view.isAttachedToWindow)
+            assertTrue(harness.attachedViews.isEmpty())
+
+            // Recovery attach succeeds cleanly
+            assertTrue(fwm.showWindow("fail_attach"))
+            assertEquals(com.example.core.WindowState.VISIBLE, win.state)
+            assertTrue(win.isAttached)
+
+            // 2. Unfold failure leaves FOLDED state and isFolded == true
+            assertTrue(fwm.foldWindow("fail_attach"))
+            assertEquals(com.example.core.WindowState.FOLDED, win.state)
+            assertTrue(win.isFolded)
+            assertFalse(win.isAttached)
+
+            harness.failNextAddView = true
+            assertFalse(fwm.unfoldWindow("fail_attach"))
+            assertEquals(com.example.core.WindowState.FOLDED, win.state)
+            assertTrue("Failed unfold must preserve isFolded == true", win.isFolded)
+            assertFalse(win.isAttached)
+            assertFalse(win.isOverlayViewAttached)
+
+            // Unfold recovery works without stale state
+            assertTrue(fwm.unfoldWindow("fail_attach"))
+            assertEquals(com.example.core.WindowState.VISIBLE, win.state)
+            assertFalse(win.isFolded)
+            assertTrue(win.isAttached)
+
+            // 3. Z-order refresh re-add failure transitions out of VISIBLE to DETACHED
+            harness.failNextAddView = true
+            assertFalse(fwm.refreshOverlayZOrder("fail_attach"))
+            assertEquals(
+                "Window must NOT remain logically VISIBLE when physically detached",
+                com.example.core.WindowState.DETACHED,
+                win.state
+            )
+            assertFalse(win.isVisible)
+            assertFalse(win.isAttached)
+            assertFalse(win.isOverlayViewAttached)
+            assertFalse(view.isAttachedToWindow)
+        }
+    }
+
+    @Test
+    fun testFailedRemovalLeavesStateAndTrackingConsistent() {
+        val harness = StrictFakeWindowManagerHarness(testContext)
+        withIsolatedFloatingWindowManager(harness) { fwm ->
+            val (win, view) = makeTrackableWindow("fail_remove", harness.wmContext)
+            fwm.registerWindow(win)
+            assertTrue(fwm.showWindow("fail_remove"))
+            assertTrue(win.isAttached)
+            assertEquals(1, harness.addViewCount)
+
+            // 1. Failed detachOverlay keeps view attached and VISIBLE
+            harness.failNextRemoveView = true
+            assertFalse(fwm.detachOverlay("fail_remove"))
+            assertTrue(win.isAttached)
+            assertTrue(win.isOverlayViewAttached)
+            assertTrue(view.isAttachedToWindow)
+            assertEquals(com.example.core.WindowState.VISIBLE, win.state)
+            assertEquals(1, harness.attachedViews.size)
+
+            // 2. Failed foldWindow keeps view attached, VISIBLE, and isFolded == false
+            harness.failNextRemoveView = true
+            assertFalse(fwm.foldWindow("fail_remove"))
+            assertTrue(win.isAttached)
+            assertTrue(win.isOverlayViewAttached)
+            assertFalse(win.isFolded)
+            assertEquals(com.example.core.WindowState.VISIBLE, win.state)
+            assertEquals(1, harness.attachedViews.size)
+
+            // 3. Failed removal during refreshOverlayZOrder aborts re-add (no duplicate addView)
+            harness.failNextRemoveView = true
+            assertFalse(fwm.refreshOverlayZOrder("fail_remove"))
+            assertTrue(win.isAttached)
+            assertTrue(win.isOverlayViewAttached)
+            assertEquals(com.example.core.WindowState.VISIBLE, win.state)
+            assertEquals("Failed removal must NOT trigger duplicate addView", 1, harness.addViewCount)
+            assertEquals(1, harness.attachedViews.size)
+        }
+    }
 }

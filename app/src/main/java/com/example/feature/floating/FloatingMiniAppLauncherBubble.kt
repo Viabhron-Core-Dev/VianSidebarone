@@ -94,6 +94,7 @@ class FloatingMiniAppLauncherBubble(
     override fun getOrCreateContainerView(): FrameLayout {
         bubbleContainerView?.let { return it }
         val built = buildBubbleContainerView(context.applicationContext)
+        attachLifecycleStateListener(built)
         bubbleContainerView = built
         return built
     }
@@ -103,6 +104,7 @@ class FloatingMiniAppLauncherBubble(
     override fun getView(): View? = bubbleContainerView
 
     override fun onDestroy() {
+        bubbleContainerView?.let { detachLifecycleStateListener(it) }
         bubbleContainerView?.removeAllViews()
         bubbleContainerView = null
         activeTouchInsideCircle = false
