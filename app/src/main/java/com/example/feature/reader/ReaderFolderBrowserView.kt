@@ -9,14 +9,19 @@ import android.net.Uri
 import android.text.Editable
 import android.text.TextWatcher
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
+import android.view.inputmethod.InputMethodManager
 import android.widget.Button
 import android.widget.FrameLayout
+import android.widget.ImageButton
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.documentfile.provider.DocumentFile
+import com.example.R
 import com.example.core.LogKeeper
 import com.example.data.EpubBook
 import com.example.data.EpubParser
@@ -83,7 +88,10 @@ class ReaderFolderBrowserView(
     private val repository = LibraryRepository(context)
 
     private val breadcrumbView: TextView
+    private val searchToggleBtn: ImageButton
+    private val searchRowLayout: LinearLayout
     private val searchBox: EmbeddedInputEditText
+    private val clearSearchBtn: ImageButton
     private val listScrollView: ScrollView
     private val itemsContainer: LinearLayout
     private val emptyStateContainer: LinearLayout
@@ -94,10 +102,13 @@ class ReaderFolderBrowserView(
     private val folderStack = mutableListOf<DocumentFile>()
     private var currentEntries = listOf<FolderEntry>()
     private var currentQuery: String = ""
+    private var isSearchExpanded: Boolean = false
     private var isImporting: Boolean = false
 
     private var topBarBottomPaddingPx: Int = 0
     private var entryCardVerticalPaddingPx: Int = 0
+    private var listScrollBottomPaddingPx: Int = 0
+    private var renderedEntriesForTesting: List<FolderEntry> = emptyList()
 
     private val folderListener: (String?) -> Unit = { newUri ->
         loadRootFolder(newUri)
@@ -117,7 +128,7 @@ class ReaderFolderBrowserView(
         }
 
         // Top Bar
-        topBarBottomPaddingPx = dp(3)
+        topBarBottomPaddingPx = dp(2)
         val topBar = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -127,18 +138,18 @@ class ReaderFolderBrowserView(
         if (!embeddedInLibrary) {
             val backBtn = Button(context).apply {
                 text = "← Library"
-                textSize = 12f
+                textSize = 11.5f
                 typeface = Typeface.DEFAULT_BOLD
                 setTextColor(Color.parseColor("#89B4FA"))
-                minHeight = dp(40)
-                minimumHeight = dp(40)
+                minHeight = dp(34)
+                minimumHeight = dp(34)
                 background = GradientDrawable().apply {
                     setColor(Color.parseColor("#252538"))
                     cornerRadius = dpF(8f)
                 }
-                setPadding(dp(10), dp(4), dp(10), dp(4))
+                setPadding(dp(8), dp(2), dp(8), dp(2))
                 setOnClickListener {
-                    searchBox.clearFocus()
+                    clearSearchFocus()
                     onBackToLibrary()
                 }
             }
@@ -146,7 +157,7 @@ class ReaderFolderBrowserView(
 
             val titleView = TextView(context).apply {
                 text = "Folders"
-                textSize = 15f
+                textSize = 14f
                 typeface = Typeface.DEFAULT_BOLD
                 setTextColor(Color.parseColor("#CDD6F4"))
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
@@ -167,12 +178,12 @@ class ReaderFolderBrowserView(
             textSize = 11f
             setTextColor(Color.parseColor("#CDD6F4"))
             visibility = View.GONE
-            minHeight = dp(36)
-            minimumHeight = dp(36)
+            minHeight = dp(32)
+            minimumHeight = dp(32)
             background = GradientDrawable().apply {
                 setColor(Color.parseColor("#1D1E2A"))
                 setStroke(1, Color.parseColor("#2B2C3C"))
-                cornerRadius = dpF(8f)
+                cornerRadius = dpF(7f)
             }
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT,
@@ -190,16 +201,38 @@ class ReaderFolderBrowserView(
             textSize = 11f
             typeface = Typeface.DEFAULT_BOLD
             setTextColor(Color.parseColor("#0B0B10"))
-            minHeight = dp(36)
-            minimumHeight = dp(36)
+            minHeight = dp(32)
+            minimumHeight = dp(32)
             background = GradientDrawable().apply {
                 setColor(Color.parseColor("#89B4FA"))
-                cornerRadius = dpF(8f)
+                cornerRadius = dpF(7f)
             }
-            setPadding(dp(10), dp(2), dp(10), dp(2))
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                marginEnd = dp(4)
+            }
+            setPadding(dp(9), dp(2), dp(9), dp(2))
             setOnClickListener { launchFolderTreePicker() }
         }
         topBar.addView(pickFolderBtn)
+
+        searchToggleBtn = ImageButton(context).apply {
+            setImageResource(R.drawable.ic_search)
+            setColorFilter(Color.parseColor("#9BA3B8"))
+            contentDescription = "Toggle Explorer Search"
+            scaleType = ImageView.ScaleType.CENTER_INSIDE
+            background = GradientDrawable().apply {
+                setColor(Color.parseColor("#14141D"))
+                cornerRadius = dpF(7f)
+                setStroke(1, Color.parseColor("#232432"))
+            }
+            setPadding(dp(7), dp(7), dp(7), dp(7))
+            layoutParams = LinearLayout.LayoutParams(dp(32), dp(32))
+            setOnClickListener { toggleSearchBar() }
+        }
+        topBar.addView(searchToggleBtn)
 
         // Breadcrumb bar
         breadcrumbView = TextView(context).apply {
@@ -208,7 +241,7 @@ class ReaderFolderBrowserView(
             setTextColor(Color.parseColor("#9BA3B8"))
             maxLines = 1
             ellipsize = android.text.TextUtils.TruncateAt.START
-            setPadding(dp(2), dp(1), dp(2), if (embeddedInLibrary) dp(2) else dp(4))
+            setPadding(dp(2), dp(1), dp(2), if (embeddedInLibrary) dp(1) else dp(3))
         }
         if (embeddedInLibrary) {
             topBar.removeViewAt(0)
@@ -222,12 +255,24 @@ class ReaderFolderBrowserView(
             rootLayout.addView(breadcrumbView)
         }
 
-        // Search input (uses generic EmbeddedImeBridge)
+        // Expandable Search Row (hidden by default; revealed via compact top-bar search icon)
+        searchRowLayout = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            visibility = View.GONE
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                bottomMargin = dp(4)
+            }
+        }
+
         searchBox = EmbeddedInputEditText(context) { instanceId }.apply {
             hint = "Filter .epub / .txt..."
             setHintTextColor(Color.parseColor("#5B6078"))
             setTextColor(Color.parseColor("#F5F5F7"))
-            textSize = 12.5f
+            textSize = 12f
             isSingleLine = true
             background = GradientDrawable().apply {
                 setColor(Color.parseColor("#161620"))
@@ -235,14 +280,16 @@ class ReaderFolderBrowserView(
                 setStroke(1, Color.parseColor("#2B2C3C"))
             }
             setPadding(dp(10), dp(5), dp(10), dp(5))
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply {
-                bottomMargin = dp(4)
-            }
-            setOnTouchListener { _, _ ->
-                onRequestWindowFocusable?.invoke(true)
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            setOnTouchListener { v, event ->
+                if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+                    onRequestWindowFocusable?.invoke(true)
+                    v.post {
+                        v.requestFocus()
+                        val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+                        imm?.showSoftInput(v, InputMethodManager.SHOW_IMPLICIT)
+                    }
+                }
                 false
             }
             setOnFocusChangeListener { _, hasFocus ->
@@ -252,15 +299,34 @@ class ReaderFolderBrowserView(
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
                 override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
                     currentQuery = s?.toString() ?: ""
+                    updateSearchToggleTint()
                     renderEntries()
                 }
                 override fun afterTextChanged(s: Editable?) {}
             })
         }
-        rootLayout.addView(searchBox)
+        searchRowLayout.addView(searchBox)
 
-        // Scrollable list
+        clearSearchBtn = ImageButton(context).apply {
+            setImageResource(R.drawable.ic_close_small)
+            setColorFilter(Color.parseColor("#9BA3B8"))
+            contentDescription = "Close folder search"
+            background = GradientDrawable().apply {
+                setColor(Color.TRANSPARENT)
+            }
+            layoutParams = LinearLayout.LayoutParams(dp(34), dp(34))
+            setOnClickListener { collapseSearchBar() }
+        }
+        searchRowLayout.addView(clearSearchBtn)
+        rootLayout.addView(searchRowLayout)
+
+        // Scrollable list (bottom padding prevents Continue FAB from obscuring final row)
+        listScrollBottomPaddingPx = if (embeddedInLibrary) dp(52) else 0
         listScrollView = ScrollView(context).apply {
+            clipToPadding = false
+            if (listScrollBottomPaddingPx > 0) {
+                setPadding(0, 0, 0, listScrollBottomPaddingPx)
+            }
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 0,
@@ -403,10 +469,51 @@ class ReaderFolderBrowserView(
         }
     }
 
+    private fun toggleSearchBar() {
+        if (isSearchExpanded) {
+            collapseSearchBar()
+        } else {
+            isSearchExpanded = true
+            searchRowLayout.visibility = View.VISIBLE
+            updateSearchToggleTint()
+            onRequestWindowFocusable?.invoke(true)
+            searchBox.post {
+                searchBox.requestFocus()
+                try {
+                    val imm = appContext.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+                    imm?.showSoftInput(searchBox, InputMethodManager.SHOW_IMPLICIT)
+                } catch (_: Throwable) {}
+            }
+        }
+    }
+
+    private fun collapseSearchBar() {
+        isSearchExpanded = false
+        currentQuery = ""
+        searchBox.setText("")
+        searchRowLayout.visibility = View.GONE
+        updateSearchToggleTint()
+        clearSearchFocus()
+        renderEntries()
+    }
+
+    internal fun clearSearchFocus() {
+        searchBox.clearFocus()
+        EmbeddedImeBridge.clearFocusRecursive(searchRowLayout)
+        onRequestWindowFocusable?.invoke(false)
+    }
+
+    private fun updateSearchToggleTint() {
+        searchToggleBtn.setColorFilter(
+            Color.parseColor(if (isSearchExpanded || currentQuery.isNotEmpty()) "#89B4FA" else "#9BA3B8")
+        )
+    }
+
     private fun loadDirectory(dir: DocumentFile) {
         upButton.visibility = if (folderStack.size > 1) View.VISIBLE else View.GONE
         breadcrumbView.text = folderStack.joinToString(" / ") { it.name ?: "Folder" }
-        searchBox.visibility = View.VISIBLE
+        searchToggleBtn.visibility = View.VISIBLE
+        searchRowLayout.visibility = if (isSearchExpanded) View.VISIBLE else View.GONE
         emptyStateContainer.visibility = View.GONE
         listScrollView.visibility = View.VISIBLE
 
@@ -457,6 +564,7 @@ class ReaderFolderBrowserView(
     private fun renderEntries() {
         itemsContainer.removeAllViews()
         val sorted = filterAndSortEntries(currentEntries, currentQuery)
+        renderedEntriesForTesting = sorted
 
         if (folderStack.size > 1) {
             val parentRow = createEntryRow(
@@ -497,8 +605,7 @@ class ReaderFolderBrowserView(
                         accent = false
                     ) {
                         folderStack.add(doc)
-                        currentQuery = ""
-                        searchBox.setText("")
+                        collapseSearchBar()
                         loadDirectory(doc)
                     }
                 )
@@ -526,11 +633,11 @@ class ReaderFolderBrowserView(
         accent: Boolean,
         onClick: () -> Unit
     ): LinearLayout {
-        entryCardVerticalPaddingPx = dp(6)
+        entryCardVerticalPaddingPx = dp(4)
         return LinearLayout(appContext).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            minimumHeight = dp(48)
+            minimumHeight = dp(42)
             background = GradientDrawable().apply {
                 setColor(Color.parseColor("#14141D"))
                 cornerRadius = dpF(8f)
@@ -540,17 +647,17 @@ class ReaderFolderBrowserView(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
             ).apply {
-                setMargins(dp(1), dp(2), dp(1), dp(2))
+                setMargins(dp(1), dp(1), dp(1), dp(1))
             }
-            setPadding(dp(10), entryCardVerticalPaddingPx, dp(10), entryCardVerticalPaddingPx)
+            setPadding(dp(8), entryCardVerticalPaddingPx, dp(8), entryCardVerticalPaddingPx)
             isClickable = true
             isFocusable = true
             setOnClickListener { onClick() }
 
             addView(TextView(appContext).apply {
                 text = icon
-                textSize = 15f
-                setPadding(0, 0, dp(8), 0)
+                textSize = 14f
+                setPadding(0, 0, dp(7), 0)
             })
 
             val col = LinearLayout(appContext).apply {
@@ -605,7 +712,14 @@ class ReaderFolderBrowserView(
     private fun showNoFolderState(title: String, message: String) {
         upButton.visibility = View.GONE
         breadcrumbView.text = "No folder selected"
-        searchBox.visibility = View.GONE
+        isSearchExpanded = false
+        currentQuery = ""
+        renderedEntriesForTesting = emptyList()
+        searchBox.setText("")
+        searchToggleBtn.visibility = View.GONE
+        searchRowLayout.visibility = View.GONE
+        updateSearchToggleTint()
+        clearSearchFocus()
         listScrollView.visibility = View.GONE
         emptyStateContainer.visibility = View.VISIBLE
         emptyTitleView.text = title
@@ -644,6 +758,33 @@ class ReaderFolderBrowserView(
     // Testing helpers
     fun getTopBarBottomPaddingPxForTesting(): Int = topBarBottomPaddingPx
     fun getSearchBottomMarginPxForTesting(): Int =
-        (searchBox.layoutParams as? LinearLayout.LayoutParams)?.bottomMargin ?: 0
+        (searchRowLayout.layoutParams as? LinearLayout.LayoutParams)?.bottomMargin ?: 0
     fun isEmbeddedInLibraryForTesting(): Boolean = embeddedInLibrary
+    fun isSearchExpandedForTesting(): Boolean = isSearchExpanded
+    fun isSearchRowVisibleForTesting(): Boolean = isSearchExpanded
+    fun getSearchToggleButtonForTesting(): ImageButton = searchToggleBtn
+    fun getSearchCloseButtonForTesting(): ImageButton = clearSearchBtn
+    fun getSearchBoxForTesting(): EmbeddedInputEditText = searchBox
+    fun getCurrentQueryForTesting(): String = currentQuery
+    fun toggleSearchForTesting() = toggleSearchBar()
+    fun closeSearchForTesting() = collapseSearchBar()
+    fun setSearchQueryForTesting(query: String) {
+        isSearchExpanded = true
+        searchRowLayout.visibility = View.VISIBLE
+        currentQuery = query
+        searchBox.setText(query)
+        updateSearchToggleTint()
+        renderEntries()
+    }
+    fun getListScrollViewBottomPaddingPxForTesting(): Int = listScrollBottomPaddingPx
+    fun getEntryCardVerticalPaddingPxForTesting(): Int = entryCardVerticalPaddingPx
+    fun setEntriesForTesting(entries: List<FolderEntry>) {
+        searchToggleBtn.visibility = View.VISIBLE
+        searchRowLayout.visibility = if (isSearchExpanded) View.VISIBLE else View.GONE
+        emptyStateContainer.visibility = View.GONE
+        listScrollView.visibility = View.VISIBLE
+        currentEntries = entries
+        renderEntries()
+    }
+    fun getRenderedEntryCountForTesting(): Int = renderedEntriesForTesting.size
 }

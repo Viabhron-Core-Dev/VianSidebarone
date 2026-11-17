@@ -5,12 +5,14 @@ import android.content.ContextWrapper
 import android.content.SharedPreferences
 import com.example.core.FakeSharedPreferences
 import com.example.core.WindowBounds
+import com.example.data.EpubBook
 import com.example.data.EpubParser
 import com.example.feature.floating.HeavyFloatingHost
 import com.example.feature.floating.MiniAppLifecycleState
 import com.example.feature.floating.MiniAppRecoverySnapshot
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -601,15 +603,16 @@ class ReaderMiniAppTest {
             readerWin.createContentView(testContext)
             noteWin.createContentView(testContext)
 
-            // Requirement #7: Reader top bar uses compact pencil ImageButton; Note keeps "Edit" text button
+            // Phase 2 & 3: Reader top bar omits blue dot, uses compact 32dp height + Settings cog; Note keeps dot + "Edit"
             val readerEditBtn = readerWin.getTopBarReaderEditButtonForTesting()
-            assertNotNull("Reader top bar must have compact pencil ImageButton", readerEditBtn)
+            assertNotNull("Reader top bar must have compact Settings ImageButton", readerEditBtn)
+            assertEquals("Reader Settings", readerWin.topBarReaderEditContentDescription)
+            assertEquals(null, readerWin.getTopBarIconViewForTesting())
+            assertEquals("Reader", readerWin.getTopBarTitleTextForTesting())
+            assertTrue("Reader top bar must be compact (<= Note height)", readerWin.getTopBarHeightPx() < noteWin.getTopBarHeightPx())
             assertEquals(null, readerWin.getTopBarNoteEditButtonForTesting())
-            assertTrue(
-                "Reader pencil button must have accessible contentDescription",
-                readerWin.topBarReaderEditContentDescription?.isNotBlank() == true
-            )
 
+            assertNotNull("Note top bar must preserve accent indicator dot", noteWin.getTopBarIconViewForTesting())
             assertNotNull("Note top bar must preserve 'Edit' text button", noteWin.getTopBarNoteEditButtonForTesting())
             assertEquals(null, noteWin.getTopBarReaderEditButtonForTesting())
 
@@ -666,6 +669,171 @@ class ReaderMiniAppTest {
             assertTrue("Explorer search bottom margin must be compact", explorer.getSearchBottomMarginPxForTesting() <= 10)
         } finally {
             libView.releaseResources()
+        }
+    }
+
+    @Test
+    fun testReadingViewMinimalHeaderAndBottomToolbarOrderAndTitle() {
+        val longTitle = "The Unabridged Chronicles of the Northern Archipelago & Distant Voyages Vol. III"
+        val readerWin = com.example.feature.floating.FloatingMiniAppWindow("reader_phase2_test", testContext, "reader")
+        try {
+            readerWin.createContentView(testContext)
+            val instance = readerWin.getReaderInstanceForTesting()!!
+            val readView = instance.getReadingViewForTesting()!!
+
+            val epubFile = File(testContext.cacheDir, "fallback_named_book.epub").apply { writeText("stub") }
+            val bookWithTitle = EpubBook(
+                id = 77,
+                title = longTitle,
+                author = "A. Author",
+                filePath = epubFile.absolutePath,
+                totalChapters = 5
+            )
+            readView.loadBook(bookWithTitle)
+
+            // Top window bar stays "Reader" without embedding book name
+            assertEquals("Reader", readerWin.getTopBarTitleTextForTesting())
+
+            // Minimal header omits book name and keeps tight padding
+            val minimalHeader = readView.getMinimalHeaderTitleForTesting()
+            assertTrue(minimalHeader.isNotEmpty())
+            assertFalse("Minimal header must NOT show full book name", minimalHeader.contains("Northern Archipelago"))
+            assertTrue(readView.getTopHeaderVerticalPaddingPxForTesting() <= 6)
+
+            // Bottom toolbar shows wrapped full book name (maxLines == 3, multi-line)
+            assertEquals(longTitle, readView.getToolbarBookTitleTextForTesting())
+            assertEquals(3, readView.getToolbarBookTitleMaxLinesForTesting())
+
+            // Fallback to filename when book title is blank
+            assertEquals(
+                "fallback_named_book",
+                ReaderReadingView.resolveDisplayBookName(bookWithTitle.copy(title = "  "))
+            )
+
+            // Strict single-row order: Prev -> SeekBar -> Next, plus all 7 icon actions
+            val navSeekChildren = readView.getNavSeekRowChildrenForTesting()
+            assertEquals(3, navSeekChildren.size)
+            assertEquals(readView.getPrevChapterButtonForTesting(), navSeekChildren[0])
+            assertEquals(readView.getFullBookSeekBarForTesting(), navSeekChildren[1])
+            assertEquals(readView.getNextChapterButtonForTesting(), navSeekChildren[2])
+            assertTrue(readView.getPrevChapterContentDescriptionForTesting().isNotBlank())
+            assertTrue(readView.getNextChapterContentDescriptionForTesting().isNotBlank())
+            assertEquals(7, readView.getBottomToolbarIconDescriptionsForTesting().size)
+        } finally {
+            readerWin.onDestroy()
+        }
+    }
+
+    @Test
+    fun testLibraryRemovesHeaderBarAndShowsContinueFabAcrossTabs() {
+        val tempBookFile = File(testContext.cacheDir, "continue_fab_book.epub").apply {
+            writeText("non-empty-epub-stub")
+        }
+        val openedBooks = mutableListOf<EpubBook>()
+        val libView = ReaderLibraryView(
+            context = testContext,
+            instanceId = "library_fab_test",
+            onBookSelected = { openedBooks.add(it) }
+        )
+        try {
+            // Redundant Library header bar ("Library" + top action buttons) must be removed;
+            // first child of root content column is the segmented tabBar.
+            assertFalse("Redundant Library header bar must be removed", libView.hasHeaderBarForTesting())
+            val rootChildren = libView.getRootContentColumnChildrenForTesting()
+            assertTrue(rootChildren.size >= 4)
+            assertEquals(libView.getTabBarViewForTesting(), rootChildren[0])
+
+            // Hidden when no last-read book exists
+            libView.setRecentBooksForTesting(emptyList())
+            assertFalse("Continue FAB must hide when no last-read book exists", libView.isContinueFabVisibleForTesting())
+
+            // Visible on BOTH Recent and File Explorer tabs when a last-read book exists
+            val lastBook = EpubBook(
+                id = 91,
+                title = "Last Read Odyssey",
+                author = "Homer",
+                filePath = tempBookFile.absolutePath,
+                totalChapters = 12,
+                lastReadChapter = 4,
+                lastReadScrollY = 320,
+                lastOpenedTimestamp = 5000L
+            )
+            libView.setRecentBooksForTesting(listOf(lastBook))
+            assertTrue("Continue FAB must be visible on Recent tab", libView.isContinueFabVisibleForTesting())
+            assertTrue(
+                "Recent scroll container must reserve bottom padding clear of Continue FAB",
+                libView.getBookListScrollViewBottomPaddingPxForTesting() >= 80
+            )
+
+            libView.selectTab(ReaderLibraryTab.FILE_EXPLORER)
+            assertTrue("Continue FAB must remain visible on File Explorer tab", libView.isContinueFabVisibleForTesting())
+            assertTrue(
+                "Explorer scroll container must reserve bottom padding clear of Continue FAB",
+                libView.getEmbeddedExplorerForTesting().getListScrollViewBottomPaddingPxForTesting() >= 80
+            )
+
+            // Clicking Continue FAB from Explorer opens the actual last-read book
+            libView.clickContinueFabForTesting()
+            runBlocking { libView.awaitPendingJobsForTesting() }
+            assertEquals(1, openedBooks.size)
+            assertEquals(91, openedBooks.first().id)
+            assertEquals(4, openedBooks.first().lastReadChapter)
+            assertEquals(320, openedBooks.first().lastReadScrollY)
+
+            // Missing binary triggers promptReimport cleanly without invoking onBookSelected
+            openedBooks.clear()
+            tempBookFile.delete()
+            libView.clickContinueFabForTesting()
+            assertTrue("Missing binary must not blindly open empty reader", openedBooks.isEmpty())
+        } finally {
+            tempBookFile.delete()
+            libView.releaseResources()
+        }
+    }
+
+    @Test
+    fun testExplorerSearchHiddenByDefaultToggleFilterAndCleanClose() {
+        var lastFocusableRequested: Boolean? = null
+        val explorer = ReaderFolderBrowserView(
+            context = testContext,
+            instanceId = "explorer_search_test",
+            onBackToLibrary = {},
+            onBookImported = {},
+            onRequestWindowFocusable = { lastFocusableRequested = it },
+            embeddedInLibrary = true
+        )
+        try {
+            val entries = listOf(
+                ReaderFolderBrowserView.FolderEntry("Dune.epub", isDirectory = false, sizeBytes = 4096),
+                ReaderFolderBrowserView.FolderEntry("Foundation.epub", isDirectory = false, sizeBytes = 2048),
+                ReaderFolderBrowserView.FolderEntry("SciFi", isDirectory = true)
+            )
+            explorer.setEntriesForTesting(entries)
+
+            // Search hidden by default; all 3 entries shown
+            assertFalse("Explorer search must start collapsed", explorer.isSearchExpandedForTesting())
+            assertFalse("Explorer search row must be GONE by default", explorer.isSearchRowVisibleForTesting())
+            assertEquals(3, explorer.getRenderedEntryCountForTesting())
+
+            // Toggle search open -> search row becomes visible and filters entries
+            explorer.toggleSearchForTesting()
+            assertTrue(explorer.isSearchExpandedForTesting())
+            assertTrue(explorer.isSearchRowVisibleForTesting())
+            assertEquals(true, lastFocusableRequested)
+
+            explorer.setSearchQueryForTesting("dune")
+            assertEquals("dune", explorer.getCurrentQueryForTesting())
+            assertEquals(1, explorer.getRenderedEntryCountForTesting())
+
+            // Closing search collapses row, clears query & focus, and restores all 3 entries
+            explorer.closeSearchForTesting()
+            assertFalse(explorer.isSearchExpandedForTesting())
+            assertFalse(explorer.isSearchRowVisibleForTesting())
+            assertEquals("", explorer.getCurrentQueryForTesting())
+            assertEquals(false, lastFocusableRequested)
+            assertEquals(3, explorer.getRenderedEntryCountForTesting())
+        } finally {
+            explorer.releaseResources()
         }
     }
 

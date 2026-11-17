@@ -253,6 +253,7 @@ class ReaderMiniAppInstance(
             },
             onOpenFolderBrowser = {
                 pendingAutoOpenLastReadBook = false
+                openBookJob?.cancel()
                 currentScreenMode = ReaderScreenMode.FOLDER_BROWSER
                 showCurrentScreen()
             },
@@ -286,6 +287,7 @@ class ReaderMiniAppInstance(
             },
             onBackToLibrary = {
                 pendingAutoOpenLastReadBook = false
+                openBookJob?.cancel()
                 currentScreenMode = ReaderScreenMode.LIBRARY
                 onActiveBookChanged?.invoke(null)
                 onReadingToolbarVisibilityChanged?.invoke(false)

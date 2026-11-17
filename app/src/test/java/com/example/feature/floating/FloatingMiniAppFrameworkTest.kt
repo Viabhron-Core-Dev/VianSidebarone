@@ -3767,4 +3767,130 @@ class FloatingMiniAppFrameworkTest {
             assertEquals(1, harness.attachedViews.size)
         }
     }
+
+    @Test
+    fun testComputeSafeDisplayBoundsRespectsNavBarGestureAndCutouts() {
+        // 1. 3-button navigation bar (status bar 84px top, 3-button nav 144px bottom)
+        val threeButton = FloatingMiniAppWindow.computeSafeDisplayBoundsFromInsets(
+            displayLeft = 0,
+            displayTop = 0,
+            displayRight = 1080,
+            displayBottom = 2400,
+            leftInset = 0,
+            topInset = 84,
+            rightInset = 0,
+            bottomInset = 144
+        )
+        assertEquals(0, threeButton.x)
+        assertEquals(84, threeButton.y)
+        assertEquals(1080, threeButton.width)
+        assertEquals(2400 - 84 - 144, threeButton.height)
+        assertEquals(2400 - 144, threeButton.bottom)
+
+        // 2. Gesture navigation + top cutout
+        val gesture = FloatingMiniAppWindow.computeSafeDisplayBoundsFromInsets(
+            displayLeft = 0,
+            displayTop = 0,
+            displayRight = 1080,
+            displayBottom = 2400,
+            leftInset = 0,
+            topInset = 112,
+            rightInset = 0,
+            bottomInset = 72
+        )
+        assertEquals(112, gesture.y)
+        assertEquals(2400 - 72, gesture.bottom)
+
+        // 3. Landscape orientation with left cutout & right 3-button nav bar
+        val landscape = FloatingMiniAppWindow.computeSafeDisplayBoundsFromInsets(
+            displayLeft = 0,
+            displayTop = 0,
+            displayRight = 2400,
+            displayBottom = 1080,
+            leftInset = 96,
+            topInset = 72,
+            rightInset = 144,
+            bottomInset = 0
+        )
+        assertEquals(96, landscape.x)
+        assertEquals(72, landscape.y)
+        assertEquals(2400 - 96 - 144, landscape.width)
+        assertEquals(1080 - 72, landscape.height)
+    }
+
+    @Test
+    fun testMaximizeWindowFlagsAndStickerResizeVisibilityLifecycle() {
+        val noteWin = FloatingMiniAppWindow("max_flags_sticker_test", testContext, "test_notes")
+        val initialNormal = WindowBounds(70, 140, 460, 580)
+        noteWin.setWindowBounds(initialNormal)
+        noteWin.createContentView(testContext)
+        try {
+            // FLAG_LAYOUT_IN_SCREEN must be set so layoutParams.(x,y) use screen coordinates matching metrics.bounds
+            assertTrue(
+                "FloatingMiniAppWindow must use FLAG_LAYOUT_IN_SCREEN",
+                (noteWin.layoutParams.flags and android.view.WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN) != 0
+            )
+            assertTrue("Resize handle (↘) must be visible in normal floating state", noteWin.isStickerResizeVisibleForTesting())
+            assertTrue("Resize divider must be visible in normal floating state", noteWin.isStickerResizeDividerVisibleForTesting())
+
+            // Repeated maximize -> restore cycles must preserve exact normal bounds and toggle ↘ cleanly
+            repeat(2) {
+                noteWin.toggleMaximize()
+                assertTrue(noteWin.isMaximized)
+                assertEquals(
+                    "FLAG_LAYOUT_NO_LIMITS must be cleared while maximized",
+                    0,
+                    noteWin.layoutParams.flags and android.view.WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
+                )
+                assertFalse("Resize handle (↘) must hide when maximized", noteWin.isStickerResizeVisibleForTesting())
+                assertFalse("Resize divider must hide when maximized", noteWin.isStickerResizeDividerVisibleForTesting())
+                assertTrue("Outer [× | —] pill must remain visible when maximized", noteWin.isBottomRightStickerVisible)
+
+                noteWin.toggleMaximize()
+                assertFalse(noteWin.isMaximized)
+                assertTrue(
+                    "FLAG_LAYOUT_NO_LIMITS must be restored on unmaximize",
+                    (noteWin.layoutParams.flags and android.view.WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS) != 0
+                )
+                assertTrue("Resize handle (↘) must restore on unmaximize", noteWin.isStickerResizeVisibleForTesting())
+                assertTrue("Resize divider must restore on unmaximize", noteWin.isStickerResizeDividerVisibleForTesting())
+                assertEquals(initialNormal.x, noteWin.bounds.x)
+                assertEquals(initialNormal.y, noteWin.bounds.y)
+                assertEquals(initialNormal.width, noteWin.bounds.width)
+                assertEquals(initialNormal.height, noteWin.bounds.height)
+            }
+        } finally {
+            noteWin.onDestroy()
+        }
+    }
+
+    @Test
+    fun testMaximizeStickerResizeHidingComposesOrthogonallyWithReaderToolbarHiding() {
+        val readerWin = FloatingMiniAppWindow("reader_max_sticker_compose", testContext, "reader")
+        readerWin.setWindowBounds(WindowBounds(40, 120, 500, 620))
+        readerWin.createContentView(testContext)
+        try {
+            readerWin.toggleMaximize()
+            assertTrue(readerWin.isMaximized)
+            assertTrue(readerWin.isBottomRightStickerVisible)
+            assertFalse("↘ must stay hidden while maximized", readerWin.isStickerResizeVisibleForTesting())
+
+            // Hiding sticker via reading toolbar hides outer pill without losing maximized ↘ state
+            readerWin.setReaderBottomRightStickerHidden(true)
+            assertFalse(readerWin.isBottomRightStickerVisible)
+            assertFalse("↘ must still remain hidden while maximized", readerWin.isStickerResizeVisibleForTesting())
+
+            // Restoring sticker when toolbar hides reveals [× | —] ONLY while still maximized
+            readerWin.setReaderBottomRightStickerHidden(false)
+            assertTrue(readerWin.isBottomRightStickerVisible)
+            assertFalse("↘ must remain hidden until unmaximized", readerWin.isStickerResizeVisibleForTesting())
+
+            // Unmaximizing restores ↘
+            readerWin.toggleMaximize()
+            assertFalse(readerWin.isMaximized)
+            assertTrue("↘ must reappear on unmaximize", readerWin.isStickerResizeVisibleForTesting())
+        } finally {
+            readerWin.onDestroy()
+        }
+    }
 }

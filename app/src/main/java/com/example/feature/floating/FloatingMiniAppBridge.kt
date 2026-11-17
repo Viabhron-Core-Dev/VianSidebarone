@@ -120,6 +120,7 @@ class FloatingMiniAppBridge private constructor(private val context: Context) {
         if (!isReaderMiniApp(targetWindow.appType)) return null
 
         targetWindow.saveReaderStateForExternalActivity()
+        com.example.feature.reader.ReaderSessionTracker.markWarmSession(targetWindow.windowId)
         windowManager.hideWindow(targetWindow.windowId)
         hiddenReaderInstanceIdForExternal = targetWindow.windowId
         LogKeeper.log(context, TAG, "READER_HIDDEN_FOR_EXTERNAL id=${targetWindow.windowId}")

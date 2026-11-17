@@ -901,4 +901,57 @@ class ReaderArchitectureAndBackupTest {
         assertEquals(-1, missingInstance.getCurrentBookIdForTesting())
         missingInstance.onDestroy()
     }
+
+    @Test
+    fun testNonAutoOpenOnBackToLibraryTabSwitchOnResumeAndWarmRestore() = runBlocking {
+        val dir = tempFolder.newFolder("non_auto_open_guards")
+        val novelFile = File(dir, "guard_novel.txt").apply {
+            writeText((1..4).joinToString("\n\n") { "Chapter $it: Part $it\nContent for chapter $it." })
+        }
+
+        val imported = repo.importBookFile(novelFile, "Guard Novel", markOpenedOnImport = true)!!
+
+        // 1. Cold start auto-opens READING, then user goes Back to Library
+        val instance = ReaderMiniAppInstance("non_auto_open_1", "reader")
+        instance.onCreate(null)
+        instance.createContentView(context)
+        instance.awaitPendingJobsForTesting()
+        instance.getReadingViewForTesting()?.awaitPendingJobsForTesting()
+        assertEquals(ReaderScreenMode.READING, instance.getCurrentScreenModeForTesting())
+
+        instance.getReadingViewForTesting()?.navigateBackToLibraryForTesting()
+        assertEquals(ReaderScreenMode.LIBRARY, instance.getCurrentScreenModeForTesting())
+
+        // 2. Repeated onResume() and Library tab switching must NOT re-trigger auto-open
+        instance.onResume()
+        instance.awaitPendingJobsForTesting()
+        assertEquals(ReaderScreenMode.LIBRARY, instance.getCurrentScreenModeForTesting())
+
+        instance.getLibraryViewForTesting()?.selectTab(ReaderLibraryTab.FILE_EXPLORER)
+        instance.onResume()
+        instance.awaitPendingJobsForTesting()
+        assertEquals(ReaderScreenMode.LIBRARY, instance.getCurrentScreenModeForTesting())
+
+        instance.getLibraryViewForTesting()?.selectTab(ReaderLibraryTab.RECENT)
+        instance.awaitPendingJobsForTesting()
+        assertEquals(ReaderScreenMode.LIBRARY, instance.getCurrentScreenModeForTesting())
+
+        // 3. Sleep -> warm restore while in LIBRARY must stay in LIBRARY (KEY_COLD_START == "false")
+        val sleepPayload = instance.prepareForSleep()
+        assertEquals("false", sleepPayload[ReaderMiniAppInstance.KEY_COLD_START])
+        assertEquals(ReaderScreenMode.LIBRARY.name, sleepPayload[ReaderMiniAppInstance.KEY_SCREEN_MODE])
+        instance.onDestroy()
+
+        val warmSnapshot = com.example.feature.floating.MiniAppRecoverySnapshot(
+            instanceId = "non_auto_open_1",
+            appType = "reader",
+            payload = sleepPayload.toMutableMap()
+        )
+        val warmInstance = ReaderMiniAppInstance("non_auto_open_1", "reader")
+        warmInstance.onCreate(warmSnapshot)
+        warmInstance.createContentView(context)
+        warmInstance.awaitPendingJobsForTesting()
+        assertEquals(ReaderScreenMode.LIBRARY, warmInstance.getCurrentScreenModeForTesting())
+        warmInstance.onDestroy()
+    }
 }

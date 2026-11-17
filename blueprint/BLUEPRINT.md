@@ -693,6 +693,21 @@
 - **3. Focused Verification**:
   - 137/137 targeted JVM unit tests passed (`FloatingMiniAppFrameworkTest`: 92/92 including 6 new strict fake-`WindowManager` + `TrackableFrameLayout` Z-order/failure/attachment tests, `ReaderMiniAppTest`: 15/15, `ReaderArchitectureAndBackupTest`: 9/9, `FloatingMiniAppLogFilterTest`: 7/7, `MainProcessRecoveryTest`: 8/8, `MainRuntimeRestorationTest`: 6/6) and `compile_applet` succeeded. Android attachment/visibility simulated on JVM without Robolectric or physical-device traversal; hardware overlay Z-order & restoration require physical-device verification.
 
+### Phase 14.19: Reader UI Refinement + Shared Floating Window Maximize Fix (COMPLETED)
+- **1. Shared Floating-Window Maximize & Sticker Resize (`FloatingMiniAppWindow.kt`)**:
+  - Added `FLAG_LAYOUT_IN_SCREEN`, `fitInsetsTypes = 0` (API 30+), and cutout modes (`ALWAYS` on R+, `SHORT_EDGES` on P–Q) plus `applyMaximizeWindowFlags()` (clearing `FLAG_LAYOUT_NO_LIMITS` only while maximized and restoring it on unmaximize).
+  - Updated `getSafeDisplayBounds()` to read authoritative `WindowManager.currentWindowMetrics` + `systemBars() or displayCutout()` (`maxOf` with `getInsetsIgnoringVisibility(systemBars())`) instead of unmaximized sub-window `rootWindowInsets`, added pre-R `defaultDisplay` real-vs-app fallback, invalidated cache on display dimension / configuration changes (`handleConfigurationChangedOnRoot`), and extracted `computeSafeDisplayBoundsFromInsets`.
+  - Tracked `stickerResizeDividerView` and `stickerResizeButtonView` via `isStickerResizeVisible` so `↘` + its divider hide on maximize (`[ × | — ]` stays visible) and restore cleanly on unmaximize, composing orthogonally with Reader's full sticker-pill hiding when the reading bottom toolbar is visible.
+- **2. Reader Reading Top Bar & Toolbar Refinements (`FloatingMiniAppWindow.kt`, `ReaderReadingView.kt`)**:
+  - Omitted the blue dot icon for Reader windows (keeping Note's accent dot), reduced Reader top bar height to `32dp` (updating `getTopBarHeightPx()` / `getContentViewportHeight()`), kept top bar title strictly `"Reader"`, and converted Reader's top-bar action icon to `ic_settings_cog` (`"Reader Settings"` launching `launchReaderSettingsFromReader`).
+  - Tightened `topHeaderLayout` padding (`dp(2)` vertical) showing chapter title only in minimal mode; added `toolbarHeaderRow` inside `bottomToolbarLayout` displaying the wrapped full book/file name (`resolveDisplayBookName`, `maxLines = 3`) and strictly single-row `Prev (◀) → SeekBar → Next (▶)` (`navSeekRow`) above the 7-icon action row.
+- **3. Library, Embedded Explorer, Continue FAB & Session Restoration (`ReaderLibraryView.kt`, `ReaderFolderBrowserView.kt`, `ReaderMiniAppInstance.kt`, `FloatingMiniAppBridge.kt`)**:
+  - Removed the redundant `"Library"` `headerBar` from `ReaderLibraryView`, compacted tab/utility/card spacing, added `52dp` bottom scroll clearance (`clipToPadding = false`), and added a root-anchored **Continue** FAB (`Gravity.BOTTOM or Gravity.END`, `bottomMargin = 48dp`) visible across both `Recent` and `File Explorer` tabs when a last-read book exists (hidden when empty or Details open).
+  - Hid `ReaderFolderBrowserView` search bar by default behind a compact search toggle beside `↑ Up` / `📁 Folder`, collapsing and clearing query/focus cleanly on close/folder change/empty folder, and added `52dp` bottom scroll padding when embedded.
+  - Marked warm sessions on `hideReaderForExternalActivity` and cancelled stale `openBookJob` on `onOpenFolderBrowser` / `onBackToLibrary`.
+- **4. Verification**:
+  - `compile_applet` succeeded and **123/123** targeted JVM unit tests passed (`FloatingMiniAppFrameworkTest` 95/95, `ReaderMiniAppTest` 18/18, `ReaderArchitectureAndBackupTest` 10/10; mockable `android.jar` JVM environment without Robolectric). Note: pre-existing full-suite test `CallSensorIpcTest.testHeavyUnavailableAndQueueingBehavior` fails on `CallSensorIpcTest.kt:279` (untouched).
+
 ---
 
 ## Phase 14: PWA Engine & External AI App Integration (Tier 5 - Highest Complexity)

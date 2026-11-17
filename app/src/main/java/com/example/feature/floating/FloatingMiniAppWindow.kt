@@ -202,6 +202,8 @@ class FloatingMiniAppWindow(
     // Safe display bounds cache
     private var cachedSafeDisplayBounds: WindowBounds? = null
     private var lastSafeBoundsQueryTime: Long = 0L
+    private var lastSafeBoundsDisplayWidth: Int = -1
+    private var lastSafeBoundsDisplayHeight: Int = -1
 
     // View references
     private var rootCardView: FrameLayout? = null
@@ -212,6 +214,8 @@ class FloatingMiniAppWindow(
     private var contentContainerBg: GradientDrawable? = null
     private var contentPlaceholderBg: GradientDrawable? = null
     private var noteEditorBg: GradientDrawable? = null
+    private var topBarView: LinearLayout? = null
+    private var topBarIconView: ImageView? = null
     private var topBarIconDrawable: GradientDrawable? = null
     private var topBarEditBtn: TextView? = null
     private var topBarEditBtnBg: GradientDrawable? = null
@@ -219,6 +223,10 @@ class FloatingMiniAppWindow(
     var topBarReaderEditContentDescription: String? = null
         private set
     private var bottomRightStickerView: View? = null
+    private var stickerResizeDividerView: View? = null
+    private var stickerResizeButtonView: TextView? = null
+    var isStickerResizeVisible: Boolean = true
+        private set
     var isBottomRightStickerVisible: Boolean = true
         private set
     private var titleView: TextView? = null
@@ -361,6 +369,13 @@ class FloatingMiniAppWindow(
     fun getEditPopoverForTesting(): View? = editPopoverView
     fun getRootCardViewForTesting(): FrameLayout? = rootCardView
     fun getBottomRightStickerViewForTesting(): View? = bottomRightStickerView
+    fun getStickerResizeButtonForTesting(): TextView? = stickerResizeButtonView
+    fun getStickerResizeDividerForTesting(): View? = stickerResizeDividerView
+    fun isStickerResizeVisibleForTesting(): Boolean = isStickerResizeVisible
+    fun isStickerResizeDividerVisibleForTesting(): Boolean = isStickerResizeVisible
+    fun getTopBarViewForTesting(): LinearLayout? = topBarView
+    fun getTopBarIconViewForTesting(): ImageView? = topBarIconView
+    fun getTopBarTitleTextForTesting(): String = titleView?.text?.toString() ?: windowTitle
     fun getTopBarReaderEditButtonForTesting(): ImageButton? = topBarReaderEditIconBtn
     fun getTopBarNoteEditButtonForTesting(): TextView? = topBarEditBtn
 
@@ -371,9 +386,13 @@ class FloatingMiniAppWindow(
         bottomRightStickerView?.visibility = if (visible) View.VISIBLE else View.GONE
     }
 
-    fun getContentViewportHeight(windowHeight: Int): Int {
+    fun getTopBarHeightPx(): Int {
         val density = context.resources.displayMetrics.density
-        val topBarHeight = (38 * density).toInt()
+        return if (isReaderApp()) (32 * density).toInt() else (38 * density).toInt()
+    }
+
+    fun getContentViewportHeight(windowHeight: Int): Int {
+        val topBarHeight = getTopBarHeightPx()
         val pwaToolbarHeight = pwaWindowController?.getToolbarHeightPx() ?: 0
         return maxOf(0, windowHeight - topBarHeight - pwaToolbarHeight)
     }
@@ -467,7 +486,15 @@ class FloatingMiniAppWindow(
     }
 
     init {
-        layoutParams.flags = layoutParams.flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+        layoutParams.flags = layoutParams.flags or
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            layoutParams.fitInsetsTypes = 0
+            layoutParams.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            layoutParams.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+        }
         layoutParams.softInputMode = WindowManager.LayoutParams.SOFT_INPUT_STATE_UNCHANGED or
             WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING
         val saved = durableStore.loadSnapshot(instanceId)
@@ -490,12 +517,15 @@ class FloatingMiniAppWindow(
             currentAccentColorHex = normalizeHexColor(it)
         }
         if (windowTitle.isEmpty()) {
-            windowTitle = saved?.title?.takeIf { it.isNotEmpty() }
-                ?: when (appType) {
-                    "test_notes", "note" -> "Note"
-                    com.example.feature.pwa.floating.FloatingPwaMiniAppInstance.APP_TYPE -> "Floating PWA"
-                    else -> appType.replace('_', ' ').replaceFirstChar { it.uppercase() }
-                }
+            windowTitle = when {
+                isReaderApp() -> "Reader"
+                else -> saved?.title?.takeIf { it.isNotEmpty() }
+                    ?: when (appType) {
+                        "test_notes", "note" -> "Note"
+                        com.example.feature.pwa.floating.FloatingPwaMiniAppInstance.APP_TYPE -> "Floating PWA"
+                        else -> appType.replace('_', ' ').replaceFirstChar { it.uppercase() }
+                    }
+            }
         }
     }
 
@@ -517,6 +547,10 @@ class FloatingMiniAppWindow(
                     )
                 }
                 return super.dispatchTouchEvent(ev)
+            }
+            override fun onConfigurationChanged(newConfig: android.content.res.Configuration?) {
+                super.onConfigurationChanged(newConfig)
+                this@FloatingMiniAppWindow.handleConfigurationChangedOnRoot()
             }
             override fun onWindowFocusChanged(hasWindowFocus: Boolean) {
                 super.onWindowFocusChanged(hasWindowFocus)
@@ -719,6 +753,7 @@ class FloatingMiniAppWindow(
         val sticker = createBottomRightSticker(context)
         bottomRightStickerView = sticker
         isBottomRightStickerVisible = true
+        updateStickerResizeVisibility(isMaximized)
         root.addView(sticker)
 
         // 5. Attach IME Insets Listener
@@ -1643,14 +1678,11 @@ class FloatingMiniAppWindow(
                     }
                 }
             },
-            onActiveBookChanged = { activeBook ->
-                val newTitle = if (activeBook != null && activeBook.title.isNotBlank()) {
-                    "Reader • ${activeBook.title}"
-                } else {
-                    "Reader"
-                }
-                windowTitle = newTitle
-                titleView?.text = newTitle
+            onActiveBookChanged = { _ ->
+                // Minimal reading mode keeps top bar clean with "Reader" only;
+                // full book name is shown inside the reading bottom toolbar when revealed.
+                windowTitle = "Reader"
+                titleView?.text = "Reader"
             },
             onOpenTracker = { activeBookId ->
                 FloatingMiniAppBridge.getInstance(context).launchBookTrackerFromReader(instanceId, activeBookId)
@@ -2204,68 +2236,76 @@ class FloatingMiniAppWindow(
 
     private fun createTopBar(context: Context): LinearLayout {
         val density = context.resources.displayMetrics.density
-        val topBarHeight = (38 * density).toInt()
+        val readerMode = isReaderApp()
+        val topBarHeight = getTopBarHeightPx()
+        val horizontalPad = if (readerMode) (10 * density).toInt() else (12 * density).toInt()
 
         val bar = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             setBackgroundColor(Color.parseColor("#2B2D42"))
-            setPadding((12 * density).toInt(), 0, (12 * density).toInt(), 0)
+            setPadding(horizontalPad, 0, horizontalPad, 0)
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 topBarHeight
             )
         }
+        topBarView = bar
 
-        // Mini-App Icon Indicator
+        // Mini-App Icon Indicator (omit blue dot for Reader; preserve accent indicator for Note & others)
         val initialAccentInt = parseColorSafe(currentAccentColorHex)
-        val iconDrawable = GradientDrawable().apply {
-            shape = GradientDrawable.OVAL
-            setColor(initialAccentInt)
-        }
-        topBarIconDrawable = iconDrawable
-        val iconView = ImageView(context).apply {
-            setImageDrawable(iconDrawable)
-            layoutParams = LinearLayout.LayoutParams((14 * density).toInt(), (14 * density).toInt()).apply {
-                marginEnd = (10 * density).toInt()
+        if (!readerMode) {
+            val iconDrawable = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(initialAccentInt)
             }
+            topBarIconDrawable = iconDrawable
+            val iconView = ImageView(context).apply {
+                setImageDrawable(iconDrawable)
+                layoutParams = LinearLayout.LayoutParams((14 * density).toInt(), (14 * density).toInt()).apply {
+                    marginEnd = (10 * density).toInt()
+                }
+            }
+            topBarIconView = iconView
+            bar.addView(iconView)
+        } else {
+            topBarIconDrawable = null
+            topBarIconView = null
         }
-        bar.addView(iconView)
 
         // Title
         titleView = TextView(context).apply {
-            text = windowTitle
+            text = if (readerMode) "Reader" else windowTitle
             setTextColor(Color.WHITE)
-            textSize = 14f
+            textSize = if (readerMode) 13f else 14f
             typeface = Typeface.DEFAULT_BOLD
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         }
         bar.addView(titleView)
 
-        // Compact pencil icon for Reader (opens Book Tracker editor); keep "Edit" button for Note formatting popover
-        if (isReaderApp()) {
-            val iconEditBg = GradientDrawable().apply {
+        // Compact settings icon for Reader (opens Reader Settings); keep "Edit" button for Note formatting popover
+        if (readerMode) {
+            val iconSettingsBg = GradientDrawable().apply {
                 shape = GradientDrawable.RECTANGLE
                 cornerRadius = 6 * density
                 setColor(Color.parseColor("#313244"))
                 setStroke((1 * density).toInt().coerceAtLeast(1), Color.parseColor("#45475A"))
             }
-            val readerEditBtn = ImageButton(context).apply {
-                setImageResource(com.example.R.drawable.ic_edit_pencil)
+            val readerSettingsBtn = ImageButton(context).apply {
+                setImageResource(com.example.R.drawable.ic_settings_cog)
                 setColorFilter(Color.parseColor("#CDD6F4"))
-                contentDescription = "Edit book in Book Tracker"
-                topBarReaderEditContentDescription = "Edit book in Book Tracker"
+                contentDescription = "Reader Settings"
+                topBarReaderEditContentDescription = "Reader Settings"
                 scaleType = ImageView.ScaleType.CENTER_INSIDE
-                background = iconEditBg
-                setPadding((8 * density).toInt(), (6 * density).toInt(), (8 * density).toInt(), (6 * density).toInt())
-                layoutParams = LinearLayout.LayoutParams((40 * density).toInt(), (32 * density).toInt())
+                background = iconSettingsBg
+                setPadding((6 * density).toInt(), (4 * density).toInt(), (6 * density).toInt(), (4 * density).toInt())
+                layoutParams = LinearLayout.LayoutParams((36 * density).toInt(), (26 * density).toInt())
                 setOnClickListener {
-                    val activeBookId = readerInstance?.getCurrentBookId() ?: -1
-                    FloatingMiniAppBridge.getInstance(context).launchBookTrackerFromReader(instanceId, activeBookId)
+                    FloatingMiniAppBridge.getInstance(context).launchReaderSettingsFromReader(instanceId)
                 }
             }
-            topBarReaderEditIconBtn = readerEditBtn
-            bar.addView(readerEditBtn)
+            topBarReaderEditIconBtn = readerSettingsBtn
+            bar.addView(readerSettingsBtn)
         } else if (isNoteApp()) {
             val editBg = GradientDrawable().apply {
                 shape = GradientDrawable.RECTANGLE
@@ -3004,17 +3044,50 @@ class FloatingMiniAppWindow(
         }
         sticker.addView(sleepBtn)
 
-        // Divider
-        sticker.addView(createStickerDivider(context))
+        // Divider before Resize Handle
+        val resizeDivider = createStickerDivider(context)
+        stickerResizeDividerView = resizeDivider
+        sticker.addView(resizeDivider)
 
         // 3. Resize Handle (↘) - The ↘ region itself is the touch/drag target for resizing
         val resizeBtn = createStickerButton(context, "↘", Color.parseColor("#89B4FA")) {
             // Touch handled via setupStickerResizeTouch below
+        }.apply {
+            contentDescription = "Resize window"
         }
         setupStickerResizeTouch(resizeBtn, context)
+        stickerResizeButtonView = resizeBtn
         sticker.addView(resizeBtn)
 
         return sticker
+    }
+
+    private fun updateStickerResizeVisibility(maximized: Boolean) {
+        val visible = !maximized
+        isStickerResizeVisible = visible
+        val resizeVis = if (visible) View.VISIBLE else View.GONE
+        stickerResizeDividerView?.visibility = resizeVis
+        stickerResizeButtonView?.visibility = resizeVis
+        if (maximized) {
+            isResizing = false
+        }
+    }
+
+    private fun applyMaximizeWindowFlags(maximized: Boolean) {
+        layoutParams.flags = if (maximized) {
+            (layoutParams.flags or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN) and
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS.inv()
+        } else {
+            layoutParams.flags or
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            layoutParams.fitInsetsTypes = 0
+            layoutParams.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            layoutParams.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+        }
     }
 
     private fun createStickerButton(context: Context, label: String, textColor: Int, onClick: () -> Unit): TextView {
@@ -3131,40 +3204,127 @@ class FloatingMiniAppWindow(
 
     /**
      * Determines ONE authoritative safe display rectangle using Android system bar, navigation bar, and cutout insets.
+     * On API 30+, always reads [WindowMetrics.windowInsets] rather than this floating view's local `rootWindowInsets`,
+     * because an unmaximized mid-screen sub-window reports 0 bottom inset locally and would otherwise extend
+     * under the Android bottom navigation bar upon maximize.
      */
     fun getSafeDisplayBounds(context: Context, forceRefresh: Boolean = false): WindowBounds {
         val now = SystemClock.uptimeMillis()
+        val wm = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+
+        var currentDisplayW = -1
+        var currentDisplayH = -1
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val metricsRect = wm.currentWindowMetrics.bounds
+            currentDisplayW = metricsRect.width()
+            currentDisplayH = metricsRect.height()
+        } else {
+            val dm = context.resources.displayMetrics
+            currentDisplayW = dm.widthPixels
+            currentDisplayH = dm.heightPixels
+            try {
+                @Suppress("DEPRECATION")
+                val display = wm.defaultDisplay
+                if (display != null) {
+                    val realPt = android.graphics.Point()
+                    @Suppress("DEPRECATION")
+                    display.getRealSize(realPt)
+                    if (realPt.x > 0 && realPt.y > 0) {
+                        currentDisplayW = realPt.x
+                        currentDisplayH = realPt.y
+                    }
+                }
+            } catch (_: Throwable) {}
+        }
+
         val cached = cachedSafeDisplayBounds
-        if (!forceRefresh && cached != null && (now - lastSafeBoundsQueryTime < 1000L)) {
+        if (!forceRefresh &&
+            cached != null &&
+            (now - lastSafeBoundsQueryTime < 1000L) &&
+            currentDisplayW == lastSafeBoundsDisplayWidth &&
+            currentDisplayH == lastSafeBoundsDisplayHeight
+        ) {
             return cached
         }
-        val wm = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+
         val safeBounds = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             val metrics = wm.currentWindowMetrics
-            val rootInsets = getView()?.rootWindowInsets ?: metrics.windowInsets
-            val insets = rootInsets.getInsets(
+            val windowInsets = metrics.windowInsets
+            val visibleInsets = windowInsets.getInsets(
                 WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout()
             )
-            val rect = metrics.bounds
-            val left = insets.left
-            val top = insets.top
-            val right = rect.right - insets.right
-            val bottom = rect.bottom - insets.bottom
-            val width = maxOf(300, right - left)
-            val height = maxOf(400, bottom - top)
-            WindowBounds(left, top, width, height)
+            val ignoringVisInsets = windowInsets.getInsetsIgnoringVisibility(
+                WindowInsets.Type.systemBars()
+            )
+            computeSafeDisplayBoundsFromInsets(
+                displayRect = metrics.bounds,
+                leftInset = maxOf(visibleInsets.left, ignoringVisInsets.left),
+                topInset = maxOf(visibleInsets.top, ignoringVisInsets.top),
+                rightInset = maxOf(visibleInsets.right, ignoringVisInsets.right),
+                bottomInset = maxOf(visibleInsets.bottom, ignoringVisInsets.bottom)
+            )
         } else {
             val dm = context.resources.displayMetrics
             val statusBarRes = context.resources.getIdentifier("status_bar_height", "dimen", "android")
             val statusBarH = if (statusBarRes > 0) context.resources.getDimensionPixelSize(statusBarRes) else (24 * dm.density).toInt()
             val navBarRes = context.resources.getIdentifier("navigation_bar_height", "dimen", "android")
             val navBarH = if (navBarRes > 0) context.resources.getDimensionPixelSize(navBarRes) else (48 * dm.density).toInt()
-            WindowBounds(0, statusBarH, dm.widthPixels, maxOf(400, dm.heightPixels - statusBarH - navBarH))
+
+            var resolvedBounds: WindowBounds? = null
+            try {
+                @Suppress("DEPRECATION")
+                val display = wm.defaultDisplay
+                if (display != null) {
+                    val realPt = android.graphics.Point()
+                    val appPt = android.graphics.Point()
+                    @Suppress("DEPRECATION")
+                    display.getRealSize(realPt)
+                    @Suppress("DEPRECATION")
+                    display.getSize(appPt)
+                    if (realPt.x > 0 && realPt.y > 0 && appPt.x > 0 && appPt.y > 0) {
+                        resolvedBounds = computeSafeDisplayBoundsFromInsets(
+                            displayRect = Rect(0, 0, realPt.x, realPt.y),
+                            leftInset = 0,
+                            topInset = statusBarH,
+                            rightInset = (realPt.x - appPt.x).coerceAtLeast(0),
+                            bottomInset = (realPt.y - appPt.y).coerceAtLeast(0)
+                        )
+                    }
+                }
+            } catch (_: Throwable) {}
+
+            resolvedBounds ?: computeSafeDisplayBoundsFromInsets(
+                displayRect = Rect(0, 0, dm.widthPixels, dm.heightPixels),
+                leftInset = 0,
+                topInset = statusBarH,
+                rightInset = 0,
+                bottomInset = navBarH
+            )
         }
         cachedSafeDisplayBounds = safeBounds
         lastSafeBoundsQueryTime = now
+        lastSafeBoundsDisplayWidth = currentDisplayW
+        lastSafeBoundsDisplayHeight = currentDisplayH
         LogKeeper.log(context, "FloatingMiniAppWindow", "SAFE_DISPLAY_BOUNDS bounds=$safeBounds")
         return safeBounds
+    }
+
+    private fun handleConfigurationChangedOnRoot() {
+        cachedSafeDisplayBounds = null
+        lastSafeBoundsQueryTime = 0L
+        if (isMaximized) {
+            val refreshed = getSafeDisplayBounds(context, forceRefresh = true)
+            bounds.x = refreshed.x
+            bounds.y = refreshed.y
+            bounds.width = refreshed.width
+            bounds.height = refreshed.height
+            layoutParams.x = bounds.x
+            layoutParams.y = bounds.y
+            layoutParams.width = bounds.width
+            layoutParams.height = bounds.height
+            (manager ?: FloatingWindowManager.getInstance(context)).updateBounds(windowId, bounds)
+            relayoutEmbeddedSurface(bounds.width, getContentViewportHeight(bounds.height))
+        }
     }
 
     /**
@@ -3172,7 +3332,6 @@ class FloatingMiniAppWindow(
      */
     fun toggleMaximize() {
         val wm = manager ?: FloatingWindowManager.getInstance(context)
-        val safeBounds = getSafeDisplayBounds(context)
 
         if (isMaximized) {
             // Restore previous normal floating bounds
@@ -3185,13 +3344,16 @@ class FloatingMiniAppWindow(
             imeShiftOffsetY = 0
             durableStore.updateMaximizeRestoreBounds(instanceId, null)
 
-            // Restore rounded card shape
+            // Restore rounded card shape, normal window flags, and sticker resize handle (↘)
             applyCardCornerRadius(false)
+            applyMaximizeWindowFlags(false)
+            updateStickerResizeVisibility(false)
 
             LogKeeper.log(context, "FloatingMiniAppWindow", "RESTORE id=$instanceId target=$target")
             LogKeeper.log(context, "FloatingMiniAppWindow", "RESTORE_BOUNDS bounds=$target")
             durableStore.updateWindowBounds(instanceId, target)
         } else {
+            val safeBounds = getSafeDisplayBounds(context, forceRefresh = true)
             // If IME was shifted, reset IME shift to preserve pristine normal coordinates
             if (isImeShifted) {
                 isImeShifted = false
@@ -3210,8 +3372,10 @@ class FloatingMiniAppWindow(
             bounds.height = safeBounds.height
             isMaximized = true
 
-            // Flat edge-to-edge corners when maximized
+            // Flat edge-to-edge corners, strict in-screen bounds, and hide resize handle (↘) while keeping × and —
             applyCardCornerRadius(true)
+            applyMaximizeWindowFlags(true)
+            updateStickerResizeVisibility(true)
 
             LogKeeper.log(context, "FloatingMiniAppWindow", "MAXIMIZE id=$instanceId bounds=$bounds")
             LogKeeper.log(context, "FloatingMiniAppWindow", "MAXIMIZE_BOUNDS bounds=$bounds")
@@ -3676,6 +3840,46 @@ class FloatingMiniAppWindow(
     companion object {
         const val TYPE_MINIAPP = "miniapp"
         const val IME_DISMISS_DEBOUNCE_MS = 250L
+
+        /**
+         * Pure safe-bounds calculator shared across API 30+ WindowMetrics insets, legacy display metrics,
+         * and unit tests to guarantee maximized bounds never extend under system bars or display cutouts.
+         */
+        fun computeSafeDisplayBoundsFromInsets(
+            displayLeft: Int,
+            displayTop: Int,
+            displayRight: Int,
+            displayBottom: Int,
+            leftInset: Int,
+            topInset: Int,
+            rightInset: Int,
+            bottomInset: Int
+        ): WindowBounds {
+            val safeLeft = displayLeft + leftInset.coerceAtLeast(0)
+            val safeTop = displayTop + topInset.coerceAtLeast(0)
+            val safeRight = displayRight - rightInset.coerceAtLeast(0)
+            val safeBottom = displayBottom - bottomInset.coerceAtLeast(0)
+            val width = maxOf(300, safeRight - safeLeft)
+            val height = maxOf(400, safeBottom - safeTop)
+            return WindowBounds(safeLeft, safeTop, width, height)
+        }
+
+        fun computeSafeDisplayBoundsFromInsets(
+            displayRect: Rect,
+            leftInset: Int,
+            topInset: Int,
+            rightInset: Int,
+            bottomInset: Int
+        ): WindowBounds = computeSafeDisplayBoundsFromInsets(
+            displayLeft = displayRect.left,
+            displayTop = displayRect.top,
+            displayRight = displayRect.right,
+            displayBottom = displayRect.bottom,
+            leftInset = leftInset,
+            topInset = topInset,
+            rightInset = rightInset,
+            bottomInset = bottomInset
+        )
 
         /**
          * Phase 14.1 Controlled Experiment toggle:

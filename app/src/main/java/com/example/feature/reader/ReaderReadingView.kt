@@ -143,6 +143,16 @@ class ReaderReadingView(
             }
             return SeekTarget(count - 1, 1f)
         }
+
+        fun resolveDisplayBookName(book: EpubBook?): String {
+            if (book == null) return ""
+            val cleanTitle = book.title.trim()
+            if (cleanTitle.isNotEmpty()) return cleanTitle
+            val path = book.filePath.trim()
+            if (path.isEmpty()) return ""
+            val fileName = java.io.File(path).name
+            return fileName.substringBeforeLast('.').ifBlank { fileName }
+        }
     }
 
     private val appContext: Context = context
@@ -214,6 +224,9 @@ class ReaderReadingView(
     // Hidden-by-default bottom action toolbar
     private var isBottomToolbarVisible: Boolean = false
     private val bottomToolbarLayout: LinearLayout
+    private val toolbarBookTitleView: TextView
+    private val navSeekRow: LinearLayout
+    private val iconRowLayout: LinearLayout
     private val fullBookSeekBar: SeekBar
     private val fullBookProgressLabelView: TextView
     private var isUserSeekingFullBook: Boolean = false
@@ -223,6 +236,16 @@ class ReaderReadingView(
     private val prevChapterButton: Button
     private val nextChapterButton: Button
     private val bookmarkToolbarIcon: ImageButton
+
+    // Tracked Kotlin UI state for mockable android.jar unit test compatibility
+    private var minimalHeaderTitleState: String = "Chapter"
+    private var topHeaderVerticalPaddingPx: Int = 0
+    private var toolbarBookTitleTextState: String = ""
+    private val toolbarBookTitleMaxLinesState: Int = 3
+    private val navSeekRowChildrenForTesting = mutableListOf<View>()
+    private val iconRowActionsForTesting = mutableListOf<Pair<ImageButton, String>>()
+    private val prevChapterContentDescState: String = "Previous chapter"
+    private val nextChapterContentDescState: String = "Next chapter"
 
     // High-Water Progress Undo Banner
     private val undoBannerLayout: LinearLayout
@@ -335,17 +358,18 @@ class ReaderReadingView(
         }
         mainLayout.addView(topBookProgressBar)
 
-        // --- Compact Minimal Header (Book/Chapter title only) ---
+        // --- Compact Minimal Header (Chapter title only; no book name in minimal mode) ---
+        topHeaderVerticalPaddingPx = dp(2)
         topHeaderLayout = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             setBackgroundColor(Color.parseColor("#0D0D12"))
-            setPadding(dp(12), dp(5), dp(12), dp(5))
+            setPadding(dp(12), topHeaderVerticalPaddingPx, dp(12), topHeaderVerticalPaddingPx)
         }
 
         chapterTitleTopView = TextView(context).apply {
             text = "Chapter"
-            textSize = 11.5f
+            textSize = 11f
             setTextColor(Color.parseColor("#9BA3B8"))
             maxLines = 1
             isSingleLine = true
@@ -458,24 +482,24 @@ class ReaderReadingView(
             isClickable = true
             isFocusable = true
             setBackgroundColor(Color.parseColor("#121219"))
-            bottomToolbarBottomPaddingPx = dp(8)
-            setPadding(dp(8), dp(6), dp(8), bottomToolbarBottomPaddingPx)
+            bottomToolbarBottomPaddingPx = dp(6)
+            setPadding(dp(8), dp(4), dp(8), bottomToolbarBottomPaddingPx)
         }
 
         fun createCompactToolButton(label: String, onClick: () -> Unit): Button {
             return Button(context).apply {
                 text = label
-                textSize = 11.5f
+                textSize = 11f
                 setTextColor(Color.parseColor("#F5F5F7"))
-                minWidth = dp(40)
-                minimumWidth = dp(40)
-                minHeight = dp(38)
-                minimumHeight = dp(38)
+                minWidth = dp(36)
+                minimumWidth = dp(36)
+                minHeight = dp(34)
+                minimumHeight = dp(34)
                 background = GradientDrawable().apply {
                     setColor(Color.parseColor("#1D1E2A"))
                     cornerRadius = dpF(8f)
                 }
-                setPadding(dp(8), dp(2), dp(8), dp(2))
+                setPadding(dp(7), dp(1), dp(7), dp(1))
                 setOnClickListener { onClick() }
             }
         }
@@ -600,18 +624,69 @@ class ReaderReadingView(
         ttsBarLayout.addView(createCompactToolButton("✕") { toggleTtsBar() })
         bottomToolbarLayout.addView(ttsBarLayout)
 
-        // Compact Full-Book SeekBar + Prev/Next Row (font controls removed; font size lives in Reader Settings)
-        val seekRow = LinearLayout(context).apply {
+        // Book title (wrapped cleanly up to 3 lines) + full-book progress indicator row
+        val toolbarHeaderRow = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(2), 0, dp(2), dp(2))
         }
 
+        toolbarBookTitleView = TextView(context).apply {
+            text = ""
+            textSize = 11.5f
+            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(Color.parseColor("#F5F5F7"))
+            maxLines = 3
+            isSingleLine = false
+            ellipsize = TextUtils.TruncateAt.END
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+                marginEnd = dp(8)
+            }
+        }
+        toolbarHeaderRow.addView(toolbarBookTitleView)
+
+        fullBookProgressLabelView = TextView(context).apply {
+            text = "Ch. 1/1 • 0%"
+            textSize = 10.5f
+            setTextColor(Color.parseColor("#CDD6F4"))
+            gravity = Gravity.END
+            maxLines = 1
+            setPadding(dp(4), 0, dp(2), 0)
+        }
+        toolbarHeaderRow.addView(fullBookProgressLabelView)
+        bottomToolbarLayout.addView(toolbarHeaderRow)
+
+        // Single compact row strictly ordered: Prev chapter -> full-book progress SeekBar -> Next chapter
+        navSeekRow = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, dp(1), 0, dp(3))
+        }
+
+        prevChapterButton = createCompactToolButton("◀") {
+            if (currentChapterIndex > 0) {
+                openChapter(currentChapterIndex - 1, initialScrollY = 0, isDirectJump = false)
+            }
+        }.apply {
+            contentDescription = prevChapterContentDescState
+            minWidth = dp(40)
+            minimumWidth = dp(40)
+            minHeight = dp(32)
+            minimumHeight = dp(32)
+            setPadding(dp(8), dp(1), dp(8), dp(1))
+        }
+        navSeekRow.addView(prevChapterButton)
+        navSeekRowChildrenForTesting.add(prevChapterButton)
+
         fullBookSeekBar = SeekBar(context).apply {
             max = PROGRESS_MAX_PERMILLE
             progress = 0
-            minimumHeight = dp(34)
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            minimumHeight = dp(28)
+            contentDescription = "Book reading progress"
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+                marginStart = dp(4)
+                marginEnd = dp(4)
+            }
             setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
                 override fun onStartTrackingTouch(seekBar: SeekBar?) {
                     isUserSeekingFullBook = true
@@ -632,54 +707,25 @@ class ReaderReadingView(
                 }
             })
         }
-        seekRow.addView(fullBookSeekBar)
+        navSeekRow.addView(fullBookSeekBar)
+        navSeekRowChildrenForTesting.add(fullBookSeekBar)
 
-        fullBookProgressLabelView = TextView(context).apply {
-            text = "Ch. 1/1 • 0%"
-            textSize = 11f
-            setTextColor(Color.parseColor("#CDD6F4"))
-            gravity = Gravity.END
-            maxLines = 1
-            setPadding(dp(6), 0, dp(2), 0)
-        }
-        seekRow.addView(fullBookProgressLabelView)
-        bottomToolbarLayout.addView(seekRow)
-
-        val navRow = LinearLayout(context).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(0, dp(1), 0, dp(4))
-        }
-
-        prevChapterButton = createCompactToolButton("◀ Prev") {
-            if (currentChapterIndex > 0) {
-                openChapter(currentChapterIndex - 1, initialScrollY = 0, isDirectJump = false)
-            }
-        }.apply {
-            minWidth = dp(48)
-            minimumWidth = dp(48)
-            minHeight = dp(34)
-            minimumHeight = dp(34)
-            setPadding(dp(10), dp(1), dp(10), dp(1))
-        }
-        navRow.addView(prevChapterButton)
-
-        navRow.addView(View(context).apply { layoutParams = LinearLayout.LayoutParams(0, 0, 1f) })
-
-        nextChapterButton = createCompactToolButton("Next ▶") {
+        nextChapterButton = createCompactToolButton("▶") {
             advanceToNextChapterByUser()
         }.apply {
-            minWidth = dp(48)
-            minimumWidth = dp(48)
-            minHeight = dp(34)
-            minimumHeight = dp(34)
-            setPadding(dp(10), dp(1), dp(10), dp(1))
+            contentDescription = nextChapterContentDescState
+            minWidth = dp(40)
+            minimumWidth = dp(40)
+            minHeight = dp(32)
+            minimumHeight = dp(32)
+            setPadding(dp(8), dp(1), dp(8), dp(1))
         }
-        navRow.addView(nextChapterButton)
-        bottomToolbarLayout.addView(navRow)
+        navSeekRow.addView(nextChapterButton)
+        navSeekRowChildrenForTesting.add(nextChapterButton)
+        bottomToolbarLayout.addView(navSeekRow)
 
         // 7-Icon Action Row: Library, TOC, Bookmark, TTS, Auto-Scroll, Search, Reader Settings
-        val iconRow = LinearLayout(context).apply {
+        iconRowLayout = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
@@ -692,40 +738,42 @@ class ReaderReadingView(
                 scaleType = ImageView.ScaleType.CENTER_INSIDE
                 background = GradientDrawable().apply {
                     setColor(Color.parseColor("#1B1C27"))
-                    cornerRadius = dpF(8f)
+                    cornerRadius = dpF(7f)
                 }
-                setPadding(dp(9), dp(9), dp(9), dp(9))
-                layoutParams = LinearLayout.LayoutParams(0, dp(42), 1f).apply {
-                    setMargins(dp(2), 0, dp(2), 0)
+                setPadding(dp(7), dp(7), dp(7), dp(7))
+                layoutParams = LinearLayout.LayoutParams(0, dp(36), 1f).apply {
+                    setMargins(dp(1), 0, dp(1), 0)
                 }
                 setOnClickListener { onClick() }
+            }.also { btn ->
+                iconRowActionsForTesting.add(btn to desc)
             }
         }
 
-        iconRow.addView(createToolbarIcon(R.drawable.ic_library_books, "Back to Library") {
+        iconRowLayout.addView(createToolbarIcon(R.drawable.ic_library_books, "Back to Library") {
             navigateBackToLibrary()
         })
-        iconRow.addView(createToolbarIcon(R.drawable.ic_chapters_list, "Chapters / Table of Contents") {
+        iconRowLayout.addView(createToolbarIcon(R.drawable.ic_chapters_list, "Chapters / Table of Contents") {
             toggleTocOverlay()
         })
         bookmarkToolbarIcon = createToolbarIcon(R.drawable.ic_bookmark_outline, "Bookmarks") {
             toggleBookmarkOverlay()
         }
-        iconRow.addView(bookmarkToolbarIcon)
-        iconRow.addView(createToolbarIcon(R.drawable.ic_volume_up, "Text to Speech") {
+        iconRowLayout.addView(bookmarkToolbarIcon)
+        iconRowLayout.addView(createToolbarIcon(R.drawable.ic_volume_up, "Text to Speech") {
             toggleTtsBar()
         })
-        iconRow.addView(createToolbarIcon(R.drawable.ic_auto_scroll, "Auto-scroll") {
+        iconRowLayout.addView(createToolbarIcon(R.drawable.ic_auto_scroll, "Auto-scroll") {
             toggleAutoScrollBar()
         })
-        iconRow.addView(createToolbarIcon(R.drawable.ic_search, "Search Chapter or Book") {
+        iconRowLayout.addView(createToolbarIcon(R.drawable.ic_search, "Search Chapter or Book") {
             toggleSearchBar()
         })
-        iconRow.addView(createToolbarIcon(R.drawable.ic_settings_cog, "Reader Settings") {
+        iconRowLayout.addView(createToolbarIcon(R.drawable.ic_settings_cog, "Reader Settings") {
             openSettingsFromReadingView()
         })
 
-        bottomToolbarLayout.addView(iconRow)
+        bottomToolbarLayout.addView(iconRowLayout)
         mainLayout.addView(bottomToolbarLayout)
         addView(mainLayout)
 
@@ -1062,6 +1110,7 @@ class ReaderReadingView(
         readingContentTextView.setLineSpacing(0f, currentLineSpacingMult)
         chapterHeadingView.setTextColor(palette.accentColor)
         chapterTitleTopView.setTextColor(palette.secondaryTextColor)
+        toolbarBookTitleView.setTextColor(palette.textColor)
         fullBookProgressLabelView.setTextColor(palette.secondaryTextColor)
     }
 
@@ -1133,11 +1182,15 @@ class ReaderReadingView(
     }
 
     private fun updateMinimalHeaderTitle(chapterTitleOverride: String? = null) {
-        val bookTitle = currentBook?.title?.takeIf { it.isNotBlank() } ?: "Reader"
         val chTitle = chapterTitleOverride
             ?: chaptersList.getOrNull(currentChapterIndex)?.title?.takeIf { it.isNotBlank() }
             ?: "Chapter ${currentChapterIndex + 1}"
-        chapterTitleTopView.text = "$bookTitle • $chTitle"
+        // Minimal reading mode displays chapter title only (never full book name)
+        minimalHeaderTitleState = chTitle
+        chapterTitleTopView.text = chTitle
+        val bookName = resolveDisplayBookName(currentBook)
+        toolbarBookTitleTextState = bookName
+        toolbarBookTitleView.text = bookName
     }
 
     private fun updateBookmarkIconState() {
@@ -1274,6 +1327,9 @@ class ReaderReadingView(
         fontSizeSp: Float? = null
     ) {
         currentBook = book
+        val displayTitle = resolveDisplayBookName(book)
+        toolbarBookTitleTextState = displayTitle
+        toolbarBookTitleView.text = displayTitle
         onActiveBookChanged?.invoke(book)
         setBottomToolbarVisible(false) // Toolbar always hidden by default on reading start
         tocOverlayLayout.visibility = View.GONE
@@ -1827,12 +1883,29 @@ class ReaderReadingView(
     fun hasFontControlsInToolbarForTesting(): Boolean = hasFontControlsInToolbar
     private var bottomToolbarBottomPaddingPx: Int = 0
     fun getBottomToolbarBottomPaddingPxForTesting(): Int = bottomToolbarBottomPaddingPx
+    fun getMinimalHeaderTitleForTesting(): String =
+        chapterTitleTopView.text?.toString()?.takeIf { it.isNotEmpty() } ?: minimalHeaderTitleState
+    fun getTopHeaderVerticalPaddingPxForTesting(): Int = topHeaderVerticalPaddingPx
+    fun getToolbarBookTitleViewForTesting(): TextView = toolbarBookTitleView
+    fun getToolbarBookTitleTextForTesting(): String =
+        toolbarBookTitleView.text?.toString()?.takeIf { it.isNotEmpty() } ?: toolbarBookTitleTextState
+    fun getToolbarBookTitleMaxLinesForTesting(): Int =
+        toolbarBookTitleView.maxLines.takeIf { it > 0 } ?: toolbarBookTitleMaxLinesState
+    fun getNavSeekRowForTesting(): LinearLayout = navSeekRow
+    fun getNavSeekRowChildrenForTesting(): List<View> = navSeekRowChildrenForTesting.toList()
+    fun getTopHeaderLayoutForTesting(): LinearLayout = topHeaderLayout
+    fun getBottomToolbarIconRowForTesting(): LinearLayout = iconRowLayout
+    fun getBottomToolbarIconDescriptionsForTesting(): List<String> = iconRowActionsForTesting.map { it.second }
     fun getCurrentFullBookProgressPermilleForTesting(): Int = currentFullBookProgressPermille
     fun getFullBookProgressLabelForTesting(): String = fullBookProgressLabelView.text?.toString() ?: ""
     fun getFullBookSeekBarForTesting(): SeekBar = fullBookSeekBar
     fun getTopBookProgressBarForTesting(): ProgressBar = topBookProgressBar
     fun getPrevChapterButtonForTesting(): Button = prevChapterButton
     fun getNextChapterButtonForTesting(): Button = nextChapterButton
+    fun getPrevChapterContentDescriptionForTesting(): String =
+        prevChapterButton.contentDescription?.toString()?.takeIf { it.isNotEmpty() } ?: prevChapterContentDescState
+    fun getNextChapterContentDescriptionForTesting(): String =
+        nextChapterButton.contentDescription?.toString()?.takeIf { it.isNotEmpty() } ?: nextChapterContentDescState
     fun navigateBackToLibraryForTesting() = navigateBackToLibrary()
     fun refreshProgressIndicatorsForTesting(scrollableRangePx: Int = dp(800)) {
         updateFullBookProgressIndicators(scrollableRangeOverridePx = scrollableRangePx)

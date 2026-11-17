@@ -380,3 +380,39 @@
 * Any deviation from what was requested, and why: Kept `isOverlayViewAttached` fallback alongside `View.isAttachedToWindow` + `OnAttachStateChangeListener` because on real Android `WindowManager.addView()` schedules asynchronous `performTraversals()` before `isAttachedToWindow` flips true, and because mockable `android.jar` stubs return `false` by default for non-overridden `View` subclasses.
 * Any known issue or follow-up needed: Physical-device verification required for multi-window Z-order bring-to-front swapping, `HIDDEN` overlay refresh behavior, `BookTrackerActivity` / `SettingsActivity` return restoration, and repeated fold/unfold/hide/show cycles under real HWUI/`WindowManagerGlobal`.
 
+---
+
+### Receipt 123
+* Timestamp: 2026-11-17 22:09 UTC
+* One-line summary of what was requested: Implement Reader UI refinement (top bar, reading toolbar order/title, Library/Explorer compaction, collapsible Explorer search, Continue FAB, cold/warm session guards) and fix shared floating-window maximize overlapping below the Android bottom navigation bar (hiding only `↘` in the sticker when maximized).
+* Exact files touched:
+  - `app/src/main/java/com/example/feature/floating/FloatingMiniAppWindow.kt`
+  - `app/src/main/java/com/example/feature/floating/FloatingMiniAppBridge.kt`
+  - `app/src/main/java/com/example/feature/reader/ReaderReadingView.kt`
+  - `app/src/main/java/com/example/feature/reader/ReaderFolderBrowserView.kt`
+  - `app/src/main/java/com/example/feature/reader/ReaderLibraryView.kt`
+  - `app/src/main/java/com/example/feature/reader/ReaderMiniAppInstance.kt`
+  - `app/src/test/java/com/example/feature/floating/FloatingMiniAppFrameworkTest.kt`
+  - `app/src/test/java/com/example/feature/reader/ReaderMiniAppTest.kt`
+  - `app/src/test/java/com/example/feature/reader/ReaderArchitectureAndBackupTest.kt`
+  - `blueprint/BLUEPRINT.md`
+  - `receipts/RECEIPTS_101.md`
+* What was actually done — factual, not persuasive:
+  1. **Phase 1 — Shared Maximize & Sticker Resize (`FloatingMiniAppWindow.kt`)**:
+     - Added `FLAG_LAYOUT_IN_SCREEN`, `fitInsetsTypes = 0` (API 30+), display-cutout modes, and `applyMaximizeWindowFlags(maximized)` clearing `FLAG_LAYOUT_NO_LIMITS` during maximize and restoring it on unmaximize.
+     - Updated `getSafeDisplayBounds()` to use `WindowManager.currentWindowMetrics` + `systemBars() or displayCutout()` (`maxOf` with `getInsetsIgnoringVisibility(systemBars())`) on API 30+ (plus pre-R `defaultDisplay` `getRealSize`/`getSize` fallback and display-dimension/configuration cache invalidation via `handleConfigurationChangedOnRoot`), and extracted `computeSafeDisplayBoundsFromInsets`.
+     - Added `updateStickerResizeVisibility(maximized)` with `isStickerResizeVisible` tracking so `↘` + its divider hide on maximize (`[ × | — ]` stays visible) and restore on unmaximize without interfering with Reader's toolbar-driven full sticker hiding.
+  2. **Phase 2 — Reader Top Bar & Reading Toolbar (`FloatingMiniAppWindow.kt`, `ReaderReadingView.kt`)**:
+     - Removed Reader's top-bar blue dot, set Reader top-bar height to `32dp` via `getTopBarHeightPx()`, kept top-bar title `"Reader"`, and changed Reader's top-bar icon to `ic_settings_cog` (`"Reader Settings"` -> `launchReaderSettingsFromReader`).
+     - Tightened `ReaderReadingView.topHeaderLayout` padding (`2dp` vertical) showing chapter title only; added `toolbarHeaderRow` with `toolbarBookTitleView` (`resolveDisplayBookName`, `maxLines = 3`, wrapped) + progress label and ordered `navSeekRow` on one row strictly as `Prev (◀) → fullBookSeekBar → Next (▶)` above the 7-icon action row.
+  3. **Phase 3 — Library, Explorer, Continue FAB & Session Guards (`ReaderLibraryView.kt`, `ReaderFolderBrowserView.kt`, `ReaderMiniAppInstance.kt`, `FloatingMiniAppBridge.kt`)**:
+     - Removed `ReaderLibraryView`'s redundant `"Library"` `headerBar` (Book Tracker remains reachable via Reader Settings -> Open Book Tracker and per-book Details -> Full Tracker), compacted tab/utility/card layout, reserved `52dp` bottom scroll padding, and added root-anchored `"Continue"` `continueFab` (`bottomMargin = 48dp`) visible across both `Recent` and `File Explorer` tabs whenever `recentBooks.firstOrNull() != null && !isDetailsPanelVisible`.
+     - Hid `ReaderFolderBrowserView` search row by default (`View.GONE`), added a compact `ic_search` toggle beside `↑ Up` / `📁 Folder` with clean query/focus collapse, and added `52dp` embedded bottom scroll padding. Guarded `markBookBinaryActive` in `ReaderLibraryView.handleBookTap` and tracked `bookTapJob`.
+     - Added `ReaderSessionTracker.markWarmSession` on `hideReaderForExternalActivity` and cancelled `openBookJob` on `onOpenFolderBrowser` / `onBackToLibrary`.
+  4. **Tests (`FloatingMiniAppFrameworkTest.kt`, `ReaderMiniAppTest.kt`, `ReaderArchitectureAndBackupTest.kt`)**:
+     - Added tests covering safe display bounds (3-button, gesture, landscape/cutout), maximize flags + `[ × | — ]` vs `↘` visibility composition, compact Explorer controls, collapsible Explorer search filter/close, Reader header/toolbar/SeekBar ordering + wrapped full title, Continue FAB across tabs + missing-binary guard, and warm/cold auto-open guards.
+* How it was verified: Local full Android build via `compile_applet` (`Build succeeded - the applet is compiled`) and local JVM unit tests (`gradle :app:testDebugUnitTest --tests "com.example.feature.floating.FloatingMiniAppFrameworkTest" --tests "com.example.feature.reader.ReaderMiniAppTest" --tests "com.example.feature.reader.ReaderArchitectureAndBackupTest"`) — **123/123 passed** (`FloatingMiniAppFrameworkTest` 95/95, `ReaderMiniAppTest` 18/18, `ReaderArchitectureAndBackupTest` 10/10, 0 failures/errors/skipped). Earlier full `:app:testDebugUnitTest` run (475 tests) had 2 failures: pre-existing untouched `CallSensorIpcTest.testHeavyUnavailableAndQueueingBehavior` (`CallSensorIpcTest.kt:279`) and a concurrent-suite `Thread.sleep(150)` flake on `ReaderArchitectureAndBackupTest:697` (passed in isolated runs). Physical-device WindowManager layout bounds, system navigation bar insets across gesture/3-button modes, cutouts, HWUI rendering, and touch gestures were NOT tested on an emulator or physical device.
+* Any deviation from what was requested, and why: Because JVM tests run against mockable `android.jar` stubs where `Rect(l,t,r,b)`, `View.getVisibility()`, `TextView.getText()`, `ViewGroup.getChildCount()`, and `View.performClick()` are no-op stubs, added Kotlin backing state getters and an 8-Int `computeSafeDisplayBoundsFromInsets` overload alongside live Android View setters. Removed `"Library"` header bar shortcuts per Phase 3 specification (Book Tracker remains accessible via Reader Settings -> Open Book Tracker and per-book Details -> Full Tracker; SAF import remains on the `+ File` chip and empty states).
+* Any known issue or follow-up needed: Physical-device testing required to confirm double-tap maximize bounds under gesture vs 3-button navigation, display cutouts, rotation re-layout, Continue FAB clearance above the `[ × | — | ↘ ]` sticker across both tabs, and Reading toolbar multi-line title layout.
+
+
