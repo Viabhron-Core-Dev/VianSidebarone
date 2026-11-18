@@ -119,7 +119,7 @@ class ReaderLibraryView(
     private var isContinueFabVisibleState: Boolean = false
     private var continueFabLabelTextState: String = "▶"
     private var continueFabContentDescState: String = "Continue Reading"
-    private var isUtilityStickerVisibleState: Boolean = true
+    private var isUtilityStickerVisibleState: Boolean = false
     private var bookListScrollBottomPaddingPx: Int = 0
     private val hasLibraryHeaderBarState: Boolean = false
     private var currentFilterQuery: String = ""
@@ -130,14 +130,9 @@ class ReaderLibraryView(
 
     private val rootLayout: LinearLayout
     private val rootLayoutChildrenForTesting = mutableListOf<View>()
-    private val utilityStickerChildrenForTesting = mutableListOf<View>()
     private val tabBarView: LinearLayout
     private val recentTabButton: Button
     private val explorerTabButton: Button
-    private val utilityBar: LinearLayout
-    private val sortButton: LinearLayout
-    private val sortLabelView: TextView
-    private val searchToggleBtn: ImageButton
     private val searchRowLayout: LinearLayout
     private val searchBox: EmbeddedInputEditText
 
@@ -162,7 +157,7 @@ class ReaderLibraryView(
         rootLayout = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
-            setPadding(dp(5), dp(2), dp(5), dp(36)) // 36dp bottom clearance for [Sort|+File|Search] & [×|—|↘] stickers
+            setPadding(dp(5), dp(2), dp(5), 0)
         }
 
         // --- Compact Segmented Tab Bar: Recent vs File Explorer ---
@@ -209,108 +204,6 @@ class ReaderLibraryView(
         tabBar.addView(explorerTabButton)
         rootLayout.addView(tabBar)
         rootLayoutChildrenForTesting.add(tabBar)
-
-        // --- Compact 3-Control Library Sticker (Sort | + File | Search) integrated at bottom-start ---
-        utilityBar = LinearLayout(context).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            elevation = dpF(6f)
-            background = GradientDrawable().apply {
-                shape = GradientDrawable.RECTANGLE
-                cornerRadius = dpF(10f)
-                setColor(Color.parseColor("#252639"))
-                setStroke(1, Color.parseColor("#45475A"))
-            }
-            setPadding(dp(4), dp(2), dp(4), dp(2))
-            layoutParams = LayoutParams(
-                LayoutParams.WRAP_CONTENT,
-                dp(32),
-                Gravity.BOTTOM or Gravity.START
-            ).apply {
-                marginStart = dp(8)
-                bottomMargin = dp(8)
-            }
-        }
-
-        sortButton = LinearLayout(context).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            minimumHeight = dp(28)
-            isClickable = true
-            isFocusable = true
-            contentDescription = "Cycle library sort order"
-            setPadding(dp(5), dp(2), dp(6), dp(2))
-            setOnClickListener { cycleSortOption() }
-        }
-        val sortIcon = ImageView(context).apply {
-            setImageResource(R.drawable.ic_sort)
-            setColorFilter(Color.parseColor("#89B4FA"))
-            layoutParams = LinearLayout.LayoutParams(dp(12), dp(12)).apply {
-                marginEnd = dp(3)
-            }
-        }
-        sortButton.addView(sortIcon)
-        sortLabelView = TextView(context).apply {
-            text = sortOption.label
-            textSize = 10.5f
-            setTextColor(Color.parseColor("#CDD6F4"))
-        }
-        sortButton.addView(sortLabelView)
-        utilityBar.addView(sortButton)
-        utilityStickerChildrenForTesting.add(sortButton)
-
-        val div1 = View(context).apply {
-            setBackgroundColor(Color.parseColor("#45475A"))
-            layoutParams = LinearLayout.LayoutParams(dp(1).coerceAtLeast(1), dp(14)).apply {
-                gravity = Gravity.CENTER_VERTICAL
-            }
-        }
-        utilityBar.addView(div1)
-        utilityStickerChildrenForTesting.add(div1)
-
-        val importSecondaryChip = TextView(context).apply {
-            text = "+ File"
-            textSize = 10.5f
-            typeface = Typeface.DEFAULT_BOLD
-            setTextColor(Color.parseColor("#89B4FA"))
-            gravity = Gravity.CENTER
-            minimumHeight = dp(28)
-            setPadding(dp(7), dp(2), dp(7), dp(2))
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            )
-            isClickable = true
-            isFocusable = true
-            setOnClickListener {
-                clearSearchFocus()
-                launchImportActivity(openAfterImport = true)
-            }
-        }
-        utilityBar.addView(importSecondaryChip)
-        utilityStickerChildrenForTesting.add(importSecondaryChip)
-
-        val div2 = View(context).apply {
-            setBackgroundColor(Color.parseColor("#45475A"))
-            layoutParams = LinearLayout.LayoutParams(dp(1).coerceAtLeast(1), dp(14)).apply {
-                gravity = Gravity.CENTER_VERTICAL
-            }
-        }
-        utilityBar.addView(div2)
-        utilityStickerChildrenForTesting.add(div2)
-
-        searchToggleBtn = ImageButton(context).apply {
-            setImageResource(R.drawable.ic_search)
-            setColorFilter(Color.parseColor("#9BA3B8"))
-            contentDescription = "Toggle Library Search"
-            scaleType = ImageView.ScaleType.CENTER_INSIDE
-            background = GradientDrawable().apply { setColor(Color.TRANSPARENT) }
-            setPadding(dp(6), dp(6), dp(6), dp(6))
-            layoutParams = LinearLayout.LayoutParams(dp(28), dp(28))
-            setOnClickListener { toggleSearchBar() }
-        }
-        utilityBar.addView(searchToggleBtn)
-        utilityStickerChildrenForTesting.add(searchToggleBtn)
 
         // --- Expandable Search Row (hidden by default to maximize vertical space) ---
         searchRowLayout = LinearLayout(context).apply {
@@ -374,7 +267,6 @@ class ReaderLibraryView(
                 isSearchExpanded = false
                 searchRowLayout.visibility = View.GONE
                 clearSearchFocus()
-                updateSearchToggleTint()
                 renderBooksList()
             }
         }
@@ -387,10 +279,10 @@ class ReaderLibraryView(
             layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f)
         }
 
-        bookListScrollBottomPaddingPx = dp(52)
+        bookListScrollBottomPaddingPx = dp(86)
         bookListScrollView = ScrollView(context).apply {
             clipToPadding = false
-            setPadding(0, 0, 0, bookListScrollBottomPaddingPx) // Extra bottom clearance so Continue FAB never obscures last card
+            setPadding(0, 0, 0, bookListScrollBottomPaddingPx) // Clears Continue FAB (82dp) and [ × | — | ↘ ] (42dp) cleanly without bottom strip
             layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
         }
         booksContainer = LinearLayout(context).apply {
@@ -515,9 +407,6 @@ class ReaderLibraryView(
 
         addView(rootLayout)
 
-        // Attach the compact 3-control Library sticker [Sort | + File | Search] at bottom-start
-        addView(utilityBar)
-
         // --- Root-Anchored Circular Play-Only Continue Button (visible across Recent and File Explorer tabs) ---
         continueFab = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -595,8 +484,7 @@ class ReaderLibraryView(
         explorerTabButton.setTextColor(if (!isRecent) Color.parseColor("#0B0B10") else Color.parseColor("#9BA3B8"))
 
         areRecentControlsHidden = !isRecent
-        isUtilityStickerVisibleState = isRecent && !isDetailsPanelVisible
-        utilityBar.visibility = if (isUtilityStickerVisibleState) View.VISIBLE else View.GONE
+        isUtilityStickerVisibleState = false
         searchRowLayout.visibility = if (isRecent && isSearchExpanded) View.VISIBLE else View.GONE
         recentContentContainer.visibility = if (isRecent) View.VISIBLE else View.GONE
         explorerContainer.visibility = if (isRecent) View.GONE else View.VISIBLE
@@ -608,8 +496,14 @@ class ReaderLibraryView(
         if (lastActiveId > 0) {
             allBooks.firstOrNull { it.id == lastActiveId }?.let { return it }
             recentBooks.firstOrNull { it.id == lastActiveId }?.let { return it }
+            return null
         }
-        return recentBooks.firstOrNull()
+        val activeBinaryId = repository.getActiveBinaryBookId()
+        if (activeBinaryId > 0) {
+            allBooks.firstOrNull { it.id == activeBinaryId && it.lastOpenedTimestamp > 0L }?.let { return it }
+            recentBooks.firstOrNull { it.id == activeBinaryId && it.lastOpenedTimestamp > 0L }?.let { return it }
+        }
+        return recentBooks.firstOrNull { it.lastOpenedTimestamp > 0L }
     }
 
     private fun triggerContinueFabClick() {
@@ -628,37 +522,7 @@ class ReaderLibraryView(
     private fun cycleSortOption() {
         val values = ReaderLibrarySortOption.entries
         sortOption = values[(sortOption.ordinal + 1) % values.size]
-        sortLabelView.text = sortOption.label
         renderBooksList()
-    }
-
-    private fun toggleSearchBar() {
-        isSearchExpanded = !isSearchExpanded
-        searchRowLayout.visibility = if (isSearchExpanded) View.VISIBLE else View.GONE
-        updateSearchToggleTint()
-        if (isSearchExpanded) {
-            onRequestWindowFocusable?.invoke(true)
-            searchBox.post {
-                searchBox.requestFocus()
-                try {
-                    val imm = appContext.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
-                    imm?.showSoftInput(searchBox, InputMethodManager.SHOW_IMPLICIT)
-                } catch (_: Throwable) {}
-            }
-        } else {
-            if (currentFilterQuery.isNotEmpty()) {
-                searchBox.setText("")
-                currentFilterQuery = ""
-                renderBooksList()
-            }
-            clearSearchFocus()
-        }
-    }
-
-    private fun updateSearchToggleTint() {
-        searchToggleBtn.setColorFilter(
-            Color.parseColor(if (isSearchExpanded || currentFilterQuery.isNotEmpty()) "#89B4FA" else "#9BA3B8")
-        )
     }
 
     private fun clearSearchFocus() {
@@ -716,7 +580,6 @@ class ReaderLibraryView(
         isDetailsPanelVisible = true
         detailsOverlay.visibility = View.VISIBLE
         isUtilityStickerVisibleState = false
-        utilityBar.visibility = View.GONE
         updateContinueFabVisibility()
     }
 
@@ -1085,11 +948,10 @@ class ReaderLibraryView(
     fun getEmbeddedExplorerForTesting(): ReaderFolderBrowserView = embeddedExplorerView
     fun getRootContentColumnForTesting(): LinearLayout = rootLayout
     fun getRootContentColumnChildrenForTesting(): List<View> = rootLayoutChildrenForTesting.toList()
+    fun getRootLayoutBottomPaddingPxForTesting(): Int = rootLayout.paddingBottom
     fun getTabBarViewForTesting(): LinearLayout = tabBarView
-    fun getUtilityStickerViewForTesting(): LinearLayout = utilityBar
-    fun getUtilityStickerChildrenForTesting(): List<View> = utilityStickerChildrenForTesting.toList()
+    fun hasBottomUtilityBarForTesting(): Boolean = false
     fun isUtilityStickerVisibleForTesting(): Boolean = isUtilityStickerVisibleState
-    fun isUtilityBarInRootColumnForTesting(): Boolean = utilityBar.parent === rootLayout
     fun hasHeaderBarForTesting(): Boolean = hasLibraryHeaderBarState
     fun getContinueFabForTesting(): View = continueFab
     fun getContinueFabLabelTextForTesting(): String = continueFabLabelTextState

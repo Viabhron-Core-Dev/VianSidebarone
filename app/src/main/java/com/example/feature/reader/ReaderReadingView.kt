@@ -419,10 +419,11 @@ class ReaderReadingView(
                 false
             }
             setOnScrollChangeListener { _, _, scrollY, _, _ ->
-                currentScrollY = scrollY
-                if (!isProgrammaticScrollOrLoad) {
-                    updateFullBookProgressIndicators()
+                if (isProgrammaticScrollOrLoad) {
+                    return@setOnScrollChangeListener
                 }
+                currentScrollY = scrollY
+                updateFullBookProgressIndicators()
                 if (!hasGenuineReadingInCurrentChapter &&
                     ReaderProgressPolicy.isScrollActivityMeaningful(
                         scrollY = scrollY,
@@ -430,10 +431,18 @@ class ReaderReadingView(
                         scrollableRangePx = getScrollableRangePx(),
                         scrollThresholdPx = dp(80),
                         userTouched = userTouchDownInReadingView,
-                        isProgrammatic = isProgrammaticScrollOrLoad
+                        isProgrammatic = false
                     )
                 ) {
                     recordGenuineReadingActivityOnCurrentChapter(currentChapterIndex)
+                }
+                currentBook?.let { activeBook ->
+                    repository.saveSyncResumeCheckpoint(
+                        bookId = activeBook.id,
+                        chapterIndex = currentChapterIndex,
+                        scrollY = scrollY,
+                        commitImmediately = false
+                    )
                 }
                 scheduleDebouncedProgressSave()
             }
@@ -1088,6 +1097,11 @@ class ReaderReadingView(
     }
 
     private fun applyReaderPreferences() {
+        val prefs = appContext.getSharedPreferences(ReaderPreferences.PREFS_NAME, Context.MODE_PRIVATE)
+        if (prefs.contains(ReaderPreferences.KEY_DEFAULT_FONT_SIZE)) {
+            currentFontSizeSp = ReaderPreferences.getDefaultFontSizeSp(appContext)
+            applyFontSize()
+        }
         currentLineSpacingMult = ReaderPreferences.getLineSpacingMultiplier(appContext)
         currentThemePreset = ReaderPreferences.getThemePreset(appContext)
         autoScrollSpeedMultiplier = ReaderPreferences.getAutoScrollSpeed(appContext)
@@ -1332,10 +1346,12 @@ class ReaderReadingView(
         bookmarkOverlayLayout.visibility = View.GONE
         searchBookOverlayLayout.visibility = View.GONE
 
-        currentFontSizeSp = if (fontSizeSp != null && fontSizeSp in 12f..28f) {
-            fontSizeSp
-        } else {
-            ReaderPreferences.getDefaultFontSizeSp(appContext)
+        val prefs = appContext.getSharedPreferences(ReaderPreferences.PREFS_NAME, Context.MODE_PRIVATE)
+        currentFontSizeSp = when {
+            fontSizeSp != null && fontSizeSp in 12f..28f &&
+                !(fontSizeSp == 16f && prefs.contains(ReaderPreferences.KEY_DEFAULT_FONT_SIZE)) -> fontSizeSp
+            prefs.contains(ReaderPreferences.KEY_DEFAULT_FONT_SIZE) -> ReaderPreferences.getDefaultFontSizeSp(appContext)
+            else -> ReaderPreferences.getDefaultFontSizeSp(appContext)
         }
         applyFontSize()
         applyReaderPreferences()
@@ -1408,8 +1424,7 @@ class ReaderReadingView(
             readingContentTextView.text = rawChapterText
             chapterOpenedAtMs = nowMs()
 
-            var postedHandled = false
-            val posted = readingScrollView.post {
+            fun applyRestoredScrollPosition(): Int {
                 val range = getScrollableRangePx()
                 val resolvedY = if (pendingSeekFraction != null && range > 0) {
                     (range * pendingSeekFraction).roundToInt().coerceIn(0, range)
@@ -1419,8 +1434,44 @@ class ReaderReadingView(
                 readingScrollView.scrollTo(0, resolvedY)
                 currentScrollY = resolvedY
                 initialChapterLoadScrollY = resolvedY
-                isProgrammaticScrollOrLoad = false
                 updateFullBookProgressIndicators()
+                return resolvedY
+            }
+
+            var postedHandled = false
+            val posted = readingScrollView.post {
+                val needsLayoutWait = (initialScrollY > 0 || pendingSeekFraction != null) &&
+                    getScrollableRangePx() <= 0 &&
+                    readingContentTextView.height == 0
+                if (needsLayoutWait) {
+                    val layoutListener = object : View.OnLayoutChangeListener {
+                        override fun onLayoutChange(
+                            v: View?,
+                            left: Int,
+                            top: Int,
+                            right: Int,
+                            bottom: Int,
+                            oldLeft: Int,
+                            oldTop: Int,
+                            oldRight: Int,
+                            oldBottom: Int
+                        ) {
+                            if (readingScrollView.height > 0 && readingContentTextView.height > 0) {
+                                readingContentTextView.removeOnLayoutChangeListener(this)
+                                val resolvedY = applyRestoredScrollPosition()
+                                isProgrammaticScrollOrLoad = false
+                                if (pendingSeekFraction != null && resolvedY != initialScrollY) {
+                                    repository.saveReadingProgressAsync(book.id, chapterIndex, resolvedY, updateOpenRecency = true)
+                                }
+                            }
+                        }
+                    }
+                    readingContentTextView.addOnLayoutChangeListener(layoutListener)
+                }
+                val resolvedY = applyRestoredScrollPosition()
+                if (!needsLayoutWait) {
+                    isProgrammaticScrollOrLoad = false
+                }
                 if (pendingSeekFraction != null && resolvedY != initialScrollY) {
                     repository.saveReadingProgressAsync(book.id, chapterIndex, resolvedY, updateOpenRecency = true)
                 }
@@ -1428,6 +1479,8 @@ class ReaderReadingView(
             }
             if (!posted && !postedHandled) {
                 readingScrollView.scrollTo(0, initialScrollY)
+                currentScrollY = initialScrollY
+                initialChapterLoadScrollY = initialScrollY
                 isProgrammaticScrollOrLoad = false
                 updateFullBookProgressIndicators()
             }
@@ -1538,16 +1591,24 @@ class ReaderReadingView(
 
     private fun scheduleDebouncedProgressSave() {
         val book = currentBook ?: return
+        val chapterSnapshot = currentChapterIndex
+        val scrollSnapshot = currentScrollY
         scrollSaveJob?.cancel()
         scrollSaveJob = viewScope.launch {
-            delay(500L)
-            repository.saveResumePosition(book.id, currentChapterIndex, currentScrollY, updateOpenRecency = true)
+            delay(200L)
+            repository.saveResumePosition(book.id, chapterSnapshot, scrollSnapshot, updateOpenRecency = true)
         }
     }
 
     fun saveCurrentProgressImmediately() {
         val book = currentBook ?: return
         scrollSaveJob?.cancel()
+        repository.saveSyncResumeCheckpoint(
+            bookId = book.id,
+            chapterIndex = currentChapterIndex,
+            scrollY = currentScrollY,
+            commitImmediately = true
+        )
         repository.saveReadingProgressAsync(book.id, currentChapterIndex, currentScrollY, updateOpenRecency = true)
     }
 

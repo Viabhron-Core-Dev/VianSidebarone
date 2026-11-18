@@ -649,7 +649,9 @@ class FloatingMiniAppBridge private constructor(private val context: Context) {
             "ROUTING_DIAG: BRIDGE_TOGGLE_MINI_APP type=$appType targetId=$targetInstanceId caller=$caller"
         )
         val instanceId = targetInstanceId
-            ?: durableStore.getAllSnapshots().firstOrNull { it.appType == appType }?.instanceId
+            ?: durableStore.getAllSnapshots().firstOrNull {
+                if (isReaderMiniApp(appType)) isReaderMiniApp(it.appType) else it.appType == appType
+            }?.instanceId
             ?: "miniapp_$appType"
 
         val activeWindow = windowManager.getWindow(instanceId) as? FloatingMiniAppWindow

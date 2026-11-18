@@ -1006,4 +1006,139 @@ class ReaderArchitectureAndBackupTest {
         assertEquals(-1, afterDeleteInstance.getCurrentBookIdForTesting())
         afterDeleteInstance.onDestroy()
     }
+
+    @Test
+    fun testColdStartRestoresBookChapterScrollAndSavedFontSizeAcrossProcessDeath() = runBlocking {
+        val dir = tempFolder.newFolder("cold_font_scroll_restore")
+        val novelFile = File(dir, "font_restore.txt").apply {
+            writeText((1..6).joinToString("\n\n") { ch ->
+                "Chapter $ch: Section $ch\n" + (1..25).joinToString("\n") { "Paragraph $it of chapter $ch." }
+            })
+        }
+        val imported = repo.importBookFile(novelFile, "Font Restore Book", markOpenedOnImport = true)!!
+        repo.saveResumePosition(imported.id, chapterIndex = 3, scrollY = 640, updateOpenRecency = true)
+        ReaderPreferences.setDefaultFontSizeSp(context, 21f)
+
+        // Simulate an older persisted snapshot that had stale fontSize=14 and cold_start=false
+        val store = com.example.feature.floating.DurableMiniAppStore.getInstance(context)
+        store.clearAll()
+        val staleSnap = com.example.feature.floating.MiniAppRecoverySnapshot(
+            instanceId = "miniapp_reader",
+            appType = "reader",
+            state = com.example.feature.floating.MiniAppState.ACTIVE,
+            windowBounds = com.example.core.WindowBounds(60, 120, 480, 620),
+            payload = mutableMapOf(
+                ReaderMiniAppInstance.KEY_SCREEN_MODE to ReaderScreenMode.READING.name,
+                ReaderMiniAppInstance.KEY_BOOK_ID to imported.id.toString(),
+                ReaderMiniAppInstance.KEY_CHAPTER_INDEX to "3",
+                ReaderMiniAppInstance.KEY_SCROLL_Y to "640",
+                ReaderMiniAppInstance.KEY_FONT_SIZE to "14.0",
+                ReaderMiniAppInstance.KEY_COLD_START to "false"
+            )
+        )
+        store.saveSnapshot(staleSnap)
+
+        // Simulate genuine process restart: warm session tracker cleared, bridge reset
+        ReaderSessionTracker.resetForTesting()
+        com.example.feature.floating.FloatingMiniAppBridge.resetForTesting()
+        val wm = com.example.core.FloatingWindowManager.getInstance(context)
+        wm.unregisterAll()
+
+        try {
+            val bridge = com.example.feature.floating.FloatingMiniAppBridge.getInstance(context)
+            val restored = bridge.restoreActiveMiniApps()
+            assertEquals(1, restored.size)
+            val win = restored.first()
+            val instance = win.getReaderInstanceForTesting()!!
+            instance.awaitPendingJobsForTesting()
+            instance.getReadingViewForTesting()?.awaitPendingJobsForTesting()
+
+            assertEquals(ReaderScreenMode.READING, instance.getCurrentScreenModeForTesting())
+            assertEquals(imported.id, instance.getCurrentBookIdForTesting())
+            val readView = instance.getReadingViewForTesting()!!
+            assertEquals(3, readView.currentChapterIndex)
+            assertEquals(640, readView.currentScrollY)
+            assertEquals(21f, readView.currentFontSizeSp, 0.01f)
+        } finally {
+            wm.unregisterAll()
+            com.example.feature.floating.FloatingMiniAppBridge.resetForTesting()
+            store.clearAll()
+            ReaderSessionTracker.resetForTesting()
+        }
+    }
+
+    @Test
+    fun testProcessKillDuringReadingRecoversSyncCheckpointAndWarmFoldUnfoldPreservesSession() = runBlocking {
+        val dir = tempFolder.newFolder("kill_during_reading")
+        val novelFile = File(dir, "kill_restore.txt").apply {
+            writeText((1..5).joinToString("\n\n") { ch ->
+                "Chapter $ch: Kill Test $ch\n" + (1..20).joinToString("\n") { "Line $it of chapter $ch." }
+            })
+        }
+        val imported = repo.importBookFile(novelFile, "Kill Recovery Book", markOpenedOnImport = true)!!
+        repo.saveResumePosition(imported.id, chapterIndex = 1, scrollY = 120, updateOpenRecency = true)
+
+        val wm = com.example.core.FloatingWindowManager.getInstance(context)
+        val store = com.example.feature.floating.DurableMiniAppStore.getInstance(context)
+        wm.unregisterAll()
+        store.clearAll()
+        com.example.feature.floating.FloatingMiniAppBridge.resetForTesting()
+        ReaderSessionTracker.resetForTesting()
+
+        try {
+            val bridge = com.example.feature.floating.FloatingMiniAppBridge.getInstance(context)
+            val win = bridge.openMiniApp("miniapp_reader", "reader", com.example.core.WindowBounds(50, 100, 480, 620))
+            val instance = win.getReaderInstanceForTesting()!!
+            instance.awaitPendingJobsForTesting()
+            val readView = instance.getReadingViewForTesting()!!
+            readView.awaitPendingJobsForTesting()
+            assertEquals(1, readView.currentChapterIndex)
+
+            // Simulate warm fold -> unfold: must stay in warm session without resetting
+            var sleepOk = false
+            bridge.sleepMiniApp("miniapp_reader") { sleepOk = it }
+            assertTrue("Warm sleep must succeed", sleepOk)
+            val sleepingSnap = store.loadSnapshot("miniapp_reader")!!
+            assertEquals("false", sleepingSnap.payload[ReaderMiniAppInstance.KEY_COLD_START])
+            assertTrue(ReaderSessionTracker.isWarmSession("miniapp_reader"))
+
+            bridge.wakeMiniApp("miniapp_reader")
+            val wokenWin = wm.getWindow("miniapp_reader") as com.example.feature.floating.FloatingMiniAppWindow
+            val wokenInstance = wokenWin.getReaderInstanceForTesting()!!
+            wokenInstance.awaitPendingJobsForTesting()
+            wokenInstance.getReadingViewForTesting()?.awaitPendingJobsForTesting()
+            assertEquals(ReaderScreenMode.READING, wokenInstance.getCurrentScreenModeForTesting())
+            assertEquals(imported.id, wokenInstance.getCurrentBookIdForTesting())
+            assertEquals(1, wokenInstance.getReadingViewForTesting()?.currentChapterIndex)
+
+            // Simulate user scrolling in chapter 2 and abrupt process kill right after checkpoint save
+            val liveRead = wokenInstance.getReadingViewForTesting()!!
+            liveRead.openChapter(2, initialScrollY = 0)
+            liveRead.awaitPendingJobsForTesting()
+            liveRead.simulateUserScrollForTesting(scrollY = 485)
+            // Synchronous checkpoint written on scroll/pause before process kill
+            repo.saveSyncResumeCheckpoint(imported.id, chapterIndex = 2, scrollY = 485, commitImmediately = true)
+
+            // Process death simulation: destroy window & clear in-memory session without calling closeMiniApp
+            wm.unregisterWindow("miniapp_reader")
+            ReaderSessionTracker.resetForTesting()
+            com.example.feature.floating.FloatingMiniAppBridge.resetForTesting()
+
+            val coldBridge = com.example.feature.floating.FloatingMiniAppBridge.getInstance(context)
+            val coldWin = coldBridge.openMiniApp("miniapp_reader", "reader")
+            val coldInstance = coldWin.getReaderInstanceForTesting()!!
+            coldInstance.awaitPendingJobsForTesting()
+            coldInstance.getReadingViewForTesting()?.awaitPendingJobsForTesting()
+
+            assertEquals(ReaderScreenMode.READING, coldInstance.getCurrentScreenModeForTesting())
+            assertEquals(imported.id, coldInstance.getCurrentBookIdForTesting())
+            assertEquals(2, coldInstance.getReadingViewForTesting()?.currentChapterIndex)
+            assertEquals(485, coldInstance.getReadingViewForTesting()?.currentScrollY)
+        } finally {
+            wm.unregisterAll()
+            com.example.feature.floating.FloatingMiniAppBridge.resetForTesting()
+            store.clearAll()
+            ReaderSessionTracker.resetForTesting()
+        }
+    }
 }

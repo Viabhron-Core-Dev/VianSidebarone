@@ -63,6 +63,14 @@ class ReaderMiniAppInstance(
     private var currentScrollY: Int = 0
     private var currentFontSizeSp: Float = 16f
     private var pendingAutoOpenLastReadBook: Boolean = true
+    private var coldStartSnapshotResume: ColdStartResumeHint? = null
+
+    private data class ColdStartResumeHint(
+        val bookId: Int,
+        val chapterIndex: Int,
+        val scrollY: Int,
+        val timestampMs: Long
+    )
 
     private var hostContext: Context? = null
     private var rootContainer: FrameLayout? = null
@@ -174,14 +182,35 @@ class ReaderMiniAppInstance(
         if (isColdStart) {
             // Cold app/process restart: schedule auto-open of the last-read book once views attach
             pendingAutoOpenLastReadBook = true
+            val snapMode = payload[KEY_SCREEN_MODE]
+            val snapBookId = payload[KEY_BOOK_ID]?.toIntOrNull() ?: -1
+            coldStartSnapshotResume = if (snapMode == ReaderScreenMode.READING.name && snapBookId > 0) {
+                ColdStartResumeHint(
+                    bookId = snapBookId,
+                    chapterIndex = (payload[KEY_CHAPTER_INDEX]?.toIntOrNull() ?: 0).coerceAtLeast(0),
+                    scrollY = (payload[KEY_SCROLL_Y]?.toIntOrNull() ?: 0).coerceAtLeast(0),
+                    timestampMs = payload["timestamp"]?.toLongOrNull() ?: snapshot.timestamp
+                )
+            } else {
+                null
+            }
             currentScreenMode = ReaderScreenMode.LIBRARY
             currentBookId = -1
             currentChapterIndex = 0
             currentScrollY = 0
-            currentFontSizeSp = payload[KEY_FONT_SIZE]?.toFloatOrNull() ?: 16f
+            val ctx = hostContext
+            currentFontSizeSp = if (ctx != null &&
+                ctx.getSharedPreferences(ReaderPreferences.PREFS_NAME, Context.MODE_PRIVATE)
+                    .contains(ReaderPreferences.KEY_DEFAULT_FONT_SIZE)
+            ) {
+                ReaderPreferences.getDefaultFontSizeSp(ctx)
+            } else {
+                payload[KEY_FONT_SIZE]?.toFloatOrNull()?.coerceIn(12f, 28f) ?: 16f
+            }
             libraryView?.selectTab(ReaderLibraryTab.RECENT)
         } else {
             pendingAutoOpenLastReadBook = false
+            coldStartSnapshotResume = null
             val modeStr = payload[KEY_SCREEN_MODE] ?: ReaderScreenMode.LIBRARY.name
             currentScreenMode = try {
                 ReaderScreenMode.valueOf(modeStr)
@@ -191,7 +220,7 @@ class ReaderMiniAppInstance(
             currentBookId = payload[KEY_BOOK_ID]?.toIntOrNull() ?: -1
             currentChapterIndex = payload[KEY_CHAPTER_INDEX]?.toIntOrNull() ?: 0
             currentScrollY = payload[KEY_SCROLL_Y]?.toIntOrNull() ?: 0
-            currentFontSizeSp = payload[KEY_FONT_SIZE]?.toFloatOrNull() ?: 16f
+            currentFontSizeSp = payload[KEY_FONT_SIZE]?.toFloatOrNull()?.coerceIn(12f, 28f) ?: 16f
         }
 
         ReaderSessionTracker.markWarmSession(instanceId)
@@ -225,15 +254,19 @@ class ReaderMiniAppInstance(
             KEY_CHAPTER_INDEX to activeCh.toString(),
             KEY_SCROLL_Y to activeScroll.toString(),
             KEY_FONT_SIZE to activeFont.toString(),
-            KEY_COLD_START to "false",
+            KEY_COLD_START to if (pendingAutoOpenLastReadBook) "true" else "false",
             "app_type" to appType
         )
     }
 
     override fun createContentView(context: Context): View {
         hostContext = context
+        val prefs = context.getSharedPreferences(ReaderPreferences.PREFS_NAME, Context.MODE_PRIVATE)
+        val hasSavedDefaultFont = prefs.contains(ReaderPreferences.KEY_DEFAULT_FONT_SIZE)
         val defaultFont = ReaderPreferences.getDefaultFontSizeSp(context)
-        if (currentFontSizeSp == 16f && defaultFont != 16f) {
+        if (pendingAutoOpenLastReadBook && hasSavedDefaultFont) {
+            currentFontSizeSp = defaultFont
+        } else if (currentFontSizeSp == 16f && defaultFont != 16f) {
             currentFontSizeSp = defaultFont
         }
 
@@ -291,7 +324,11 @@ class ReaderMiniAppInstance(
             },
             onBackToLibrary = {
                 pendingAutoOpenLastReadBook = false
+                coldStartSnapshotResume = null
                 openBookJob?.cancel()
+                currentBookId = -1
+                currentChapterIndex = 0
+                currentScrollY = 0
                 currentScreenMode = ReaderScreenMode.LIBRARY
                 onChapterTitleChanged?.invoke(null)
                 onActiveBookChanged?.invoke(null)
@@ -333,9 +370,54 @@ class ReaderMiniAppInstance(
         openBookJob = instanceScope.launch {
             if (!pendingAutoOpenLastReadBook || lifecycleState == MiniAppLifecycleState.DESTROYED) return@launch
             val repo = com.example.data.LibraryRepository(ctx)
-            val lastReadBook = withContext(Dispatchers.IO) {
+            val resolvedBook = withContext(Dispatchers.IO) {
                 try {
-                    repo.getLastActiveReaderBook()
+                    val primary = repo.getLastActiveReaderBook()
+                    if (primary != null) {
+                        val hint = coldStartSnapshotResume
+                        if (hint != null && hint.bookId == primary.id &&
+                            hint.timestampMs >= primary.lastActivityTimestamp &&
+                            (hint.chapterIndex != primary.lastReadChapter || hint.scrollY != primary.lastReadScrollY)
+                        ) {
+                            val safeCh = if (primary.totalChapters > 0) {
+                                hint.chapterIndex.coerceIn(0, primary.totalChapters - 1)
+                            } else {
+                                hint.chapterIndex.coerceAtLeast(0)
+                            }
+                            val safeScroll = hint.scrollY.coerceAtLeast(0)
+                            repo.saveResumePosition(primary.id, safeCh, safeScroll, updateOpenRecency = true)
+                            primary.copy(
+                                lastReadChapter = safeCh,
+                                lastReadScrollY = safeScroll,
+                                lastActivityTimestamp = hint.timestampMs
+                            )
+                        } else {
+                            primary
+                        }
+                    } else {
+                        // Backward-compatible recovery ONLY if last_active_reader_book_id was unset
+                        // and snapshot identifies a valid non-deleted book in Room (never Recent[0])
+                        val hint = coldStartSnapshotResume
+                        if (hint != null && hint.bookId > 0) {
+                            repo.getBook(hint.bookId)?.let { book ->
+                                val safeCh = if (book.totalChapters > 0) {
+                                    hint.chapterIndex.coerceIn(0, book.totalChapters - 1)
+                                } else {
+                                    hint.chapterIndex.coerceAtLeast(0)
+                                }
+                                val safeScroll = hint.scrollY.coerceAtLeast(0)
+                                repo.setLastActiveReaderBookId(book.id)
+                                if (hint.timestampMs >= book.lastActivityTimestamp) {
+                                    repo.saveResumePosition(book.id, safeCh, safeScroll, updateOpenRecency = true)
+                                    book.copy(lastReadChapter = safeCh, lastReadScrollY = safeScroll)
+                                } else {
+                                    book
+                                }
+                            }
+                        } else {
+                            null
+                        }
+                    }
                 } catch (_: Throwable) {
                     null
                 }
@@ -344,21 +426,26 @@ class ReaderMiniAppInstance(
                 return@launch
             }
             pendingAutoOpenLastReadBook = false
-            if (lastReadBook == null) {
+            coldStartSnapshotResume = null
+            if (resolvedBook == null) {
                 return@launch
             }
-            if (repo.hasBookBinary(lastReadBook)) {
-                repo.markBookBinaryActive(lastReadBook.id)
-                openBook(lastReadBook)
+            val prefs = ctx.getSharedPreferences(ReaderPreferences.PREFS_NAME, Context.MODE_PRIVATE)
+            if (prefs.contains(ReaderPreferences.KEY_DEFAULT_FONT_SIZE)) {
+                currentFontSizeSp = ReaderPreferences.getDefaultFontSizeSp(ctx)
+            }
+            if (repo.hasBookBinary(resolvedBook)) {
+                repo.markBookBinaryActive(resolvedBook.id)
+                openBook(resolvedBook)
             } else {
                 currentScreenMode = ReaderScreenMode.LIBRARY
                 currentBookId = -1
                 onChapterTitleChanged?.invoke(null)
                 onActiveBookChanged?.invoke(null)
                 onReadingToolbarVisibilityChanged?.invoke(false)
-                libraryView?.setSelectedBookId(lastReadBook.id)
+                libraryView?.setSelectedBookId(resolvedBook.id)
                 libraryView?.loadBooks()
-                libraryView?.promptReimportForBook(lastReadBook)
+                libraryView?.promptReimportForBook(resolvedBook)
             }
         }
     }

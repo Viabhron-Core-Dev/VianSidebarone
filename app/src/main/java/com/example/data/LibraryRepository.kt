@@ -120,7 +120,7 @@ class LibraryRepository(private val context: Context) {
         context.getSharedPreferences("FloatingReaderPrefs", Context.MODE_PRIVATE)
             .edit()
             .putInt("active_binary_book_id", bookId)
-            .apply()
+            .commit()
     }
 
     /**
@@ -136,13 +136,111 @@ class LibraryRepository(private val context: Context) {
         context.getSharedPreferences("FloatingReaderPrefs", Context.MODE_PRIVATE)
             .edit()
             .putInt("last_active_reader_book_id", bookId)
-            .apply()
+            .commit()
+    }
+
+    data class SyncResumeCheckpoint(
+        val bookId: Int,
+        val chapterIndex: Int,
+        val scrollY: Int,
+        val timestampMs: Long
+    )
+
+    fun saveSyncResumeCheckpoint(
+        bookId: Int,
+        chapterIndex: Int,
+        scrollY: Int,
+        timestampMs: Long = System.currentTimeMillis(),
+        commitImmediately: Boolean = false
+    ) {
+        if (bookId <= 0) return
+        val editor = context.getSharedPreferences("FloatingReaderPrefs", Context.MODE_PRIVATE)
+            .edit()
+            .putInt("reader_sync_resume_book_id", bookId)
+            .putInt("reader_sync_resume_chapter", chapterIndex.coerceAtLeast(0))
+            .putInt("reader_sync_resume_scroll_y", scrollY.coerceAtLeast(0))
+            .putLong("reader_sync_resume_ts", timestampMs)
+        if (commitImmediately) {
+            editor.commit()
+        } else {
+            editor.apply()
+        }
+    }
+
+    fun readSyncResumeCheckpoint(expectedBookId: Int): SyncResumeCheckpoint? {
+        if (expectedBookId <= 0) return null
+        val prefs = context.getSharedPreferences("FloatingReaderPrefs", Context.MODE_PRIVATE)
+        val savedBookId = prefs.getInt("reader_sync_resume_book_id", -1)
+        if (savedBookId != expectedBookId) return null
+        val ts = prefs.getLong("reader_sync_resume_ts", 0L)
+        if (ts <= 0L) return null
+        return SyncResumeCheckpoint(
+            bookId = savedBookId,
+            chapterIndex = prefs.getInt("reader_sync_resume_chapter", 0).coerceAtLeast(0),
+            scrollY = prefs.getInt("reader_sync_resume_scroll_y", 0).coerceAtLeast(0),
+            timestampMs = ts
+        )
+    }
+
+    fun clearSyncResumeCheckpoint(bookId: Int? = null) {
+        val prefs = context.getSharedPreferences("FloatingReaderPrefs", Context.MODE_PRIVATE)
+        if (bookId != null && prefs.getInt("reader_sync_resume_book_id", -1) != bookId) {
+            return
+        }
+        prefs.edit()
+            .remove("reader_sync_resume_book_id")
+            .remove("reader_sync_resume_chapter")
+            .remove("reader_sync_resume_scroll_y")
+            .remove("reader_sync_resume_ts")
+            .commit()
     }
 
     suspend fun getLastActiveReaderBook(): EpubBook? = withContext(Dispatchers.IO) {
         val lastId = getLastActiveReaderBookId()
-        if (lastId <= 0) return@withContext null
-        dao.getBookById(lastId)
+        if (lastId > 0) {
+            val book = dao.getBookById(lastId)
+            if (book == null) {
+                // Referenced book was deleted from Room; clear stale pointer and do not fall back to Recent
+                setLastActiveReaderBookId(-1)
+                clearSyncResumeCheckpoint(lastId)
+                return@withContext null
+            }
+            return@withContext applyNewerCheckpointIfPresent(book)
+        }
+
+        // Safe metadata-based recovery fallback ONLY when last_active_reader_book_id is unset:
+        // check active_binary_book_id (never blindly picking Recent[0]).
+        val activeBinaryId = getActiveBinaryBookId()
+        if (activeBinaryId > 0) {
+            val activeBook = dao.getBookById(activeBinaryId)
+            if (activeBook != null && activeBook.lastOpenedTimestamp > 0L) {
+                setLastActiveReaderBookId(activeBook.id)
+                return@withContext applyNewerCheckpointIfPresent(activeBook)
+            }
+        }
+        null
+    }
+
+    private suspend fun applyNewerCheckpointIfPresent(book: EpubBook): EpubBook {
+        val checkpoint = readSyncResumeCheckpoint(book.id) ?: return book
+        if (checkpoint.timestampMs >= book.lastActivityTimestamp &&
+            (checkpoint.chapterIndex != book.lastReadChapter || checkpoint.scrollY != book.lastReadScrollY)
+        ) {
+            val safeChapter = if (book.totalChapters > 0) {
+                checkpoint.chapterIndex.coerceIn(0, book.totalChapters - 1)
+            } else {
+                checkpoint.chapterIndex.coerceAtLeast(0)
+            }
+            val safeScrollY = checkpoint.scrollY.coerceAtLeast(0)
+            val reconciled = book.copy(
+                lastReadChapter = safeChapter,
+                lastReadScrollY = safeScrollY,
+                lastActivityTimestamp = checkpoint.timestampMs
+            )
+            dao.updateBook(reconciled)
+            return reconciled
+        }
+        return book
     }
 
     private fun isManagedStorageFile(file: File): Boolean {
@@ -215,6 +313,7 @@ class LibraryRepository(private val context: Context) {
         if (getLastActiveReaderBookId() == book.id) {
             setLastActiveReaderBookId(-1)
         }
+        clearSyncResumeCheckpoint(book.id)
         LogKeeper.log(context, TAG, "BOOK_DELETED id=${book.id} title='${book.title}' (Tracker unlinked)")
         ReaderEventManager.notifyLibraryChanged(context)
     }
@@ -437,6 +536,7 @@ class LibraryRepository(private val context: Context) {
 
         // Replacement succeeded: safely prune previous active book's binary/cache
         pruneInactiveBookBinaries(keepBookId = updatedBook.id)
+        setLastActiveReaderBookId(updatedBook.id)
 
         LogKeeper.log(context, TAG, "BOOK_REIMPORTED id=${updatedBook.id} title='${updatedBook.title}' chapters=$totalChapters")
         ReaderEventManager.notifyLibraryChanged(context)
@@ -467,6 +567,9 @@ class LibraryRepository(private val context: Context) {
         if (existingExactBinary != null) {
             destFile.delete()
             pruneInactiveBookBinaries(keepBookId = existingExactBinary.id)
+            if (markOpenedOnImport) {
+                setLastActiveReaderBookId(existingExactBinary.id)
+            }
             LogKeeper.log(context, TAG, "IMPORT_EXACT_BINARY_DUPLICATE reusing id=${existingExactBinary.id}")
             return existingExactBinary
         }
@@ -568,13 +671,15 @@ class LibraryRepository(private val context: Context) {
         } else {
             chapterIndex.coerceAtLeast(0)
         }
+        val safeScrollY = scrollY.coerceAtLeast(0)
         val updated = existing.copy(
             lastReadChapter = safeChapter,
-            lastReadScrollY = scrollY.coerceAtLeast(0),
+            lastReadScrollY = safeScrollY,
             lastOpenedTimestamp = if (updateOpenRecency) now else existing.lastOpenedTimestamp,
             lastActivityTimestamp = now
         )
         dao.updateBook(updated)
+        saveSyncResumeCheckpoint(bookId, safeChapter, safeScrollY, timestampMs = now, commitImmediately = false)
         if (updateOpenRecency) {
             setLastActiveReaderBookId(bookId)
         }

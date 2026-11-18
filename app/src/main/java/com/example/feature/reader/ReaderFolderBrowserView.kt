@@ -320,8 +320,8 @@ class ReaderFolderBrowserView(
         searchRowLayout.addView(clearSearchBtn)
         rootLayout.addView(searchRowLayout)
 
-        // Scrollable list (bottom padding prevents Continue FAB from obscuring final row)
-        listScrollBottomPaddingPx = if (embeddedInLibrary) dp(52) else 0
+        // Scrollable list (bottom padding prevents Continue FAB and floating pill from obscuring final row)
+        listScrollBottomPaddingPx = if (embeddedInLibrary) dp(86) else 0
         listScrollView = ScrollView(context).apply {
             clipToPadding = false
             if (listScrollBottomPaddingPx > 0) {

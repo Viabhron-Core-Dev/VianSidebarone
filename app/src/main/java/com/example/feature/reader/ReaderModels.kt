@@ -307,6 +307,10 @@ object ReaderPreferences {
 
     fun setDefaultFontSizeSp(context: Context, sizeSp: Float) {
         val clamped = sizeSp.coerceIn(12f, 28f)
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putFloat(KEY_DEFAULT_FONT_SIZE, clamped)
+            .commit()
         OverlaySyncManager.syncFloat(context, KEY_DEFAULT_FONT_SIZE, clamped, PREFS_NAME)
         ReaderEventManager.notifySettingsChanged()
     }
@@ -318,6 +322,10 @@ object ReaderPreferences {
 
     fun setLineSpacingMultiplier(context: Context, mult: Float) {
         val clamped = mult.coerceIn(1.0f, 2.2f)
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putFloat(KEY_LINE_SPACING, clamped)
+            .commit()
         OverlaySyncManager.syncFloat(context, KEY_LINE_SPACING, clamped, PREFS_NAME)
         ReaderEventManager.notifySettingsChanged()
     }
@@ -328,6 +336,10 @@ object ReaderPreferences {
     }
 
     fun setThemePreset(context: Context, preset: String) {
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putString(KEY_THEME_PRESET, preset)
+            .commit()
         OverlaySyncManager.syncString(context, KEY_THEME_PRESET, preset, PREFS_NAME)
         ReaderEventManager.notifySettingsChanged()
     }
@@ -339,6 +351,10 @@ object ReaderPreferences {
 
     fun setAutoScrollSpeed(context: Context, speed: Float) {
         val clamped = speed.coerceIn(0.5f, 3.0f)
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putFloat(KEY_AUTO_SCROLL_SPEED, clamped)
+            .commit()
         OverlaySyncManager.syncFloat(context, KEY_AUTO_SCROLL_SPEED, clamped, PREFS_NAME)
         ReaderEventManager.notifySettingsChanged()
     }
@@ -350,6 +366,10 @@ object ReaderPreferences {
 
     fun setTtsSpeechRate(context: Context, rate: Float) {
         val clamped = rate.coerceIn(0.5f, 2.0f)
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putFloat(KEY_TTS_SPEECH_RATE, clamped)
+            .commit()
         OverlaySyncManager.syncFloat(context, KEY_TTS_SPEECH_RATE, clamped, PREFS_NAME)
         ReaderEventManager.notifySettingsChanged()
     }

@@ -740,22 +740,45 @@ class ReaderMiniAppTest {
             instanceId = "library_fab_test",
             onBookSelected = { openedBooks.add(it) }
         )
+        fun collectAllDescendants(root: android.view.View): List<android.view.View> {
+            val result = mutableListOf(root)
+            if (root is android.view.ViewGroup) {
+                for (i in 0 until root.childCount) {
+                    result.addAll(collectAllDescendants(root.getChildAt(i)))
+                }
+            }
+            return result
+        }
+        val readerWin = com.example.feature.floating.FloatingMiniAppWindow("library_pill_check", testContext, "reader")
         try {
-            // Redundant Library header bar ("Library" + top action buttons) must be removed;
-            // three-control utility bar must be integrated as a compact sticker instead of a separate bar in root column.
+            readerWin.createContentView(testContext)
+            // 1. Header bar and obsolete Sort / + File / Search bottom utility controls are absent
             assertFalse("Redundant Library header bar must be removed", libView.hasHeaderBarForTesting())
-            assertFalse("Three-control bar must not be a permanent bar in root column", libView.isUtilityBarInRootColumnForTesting())
+            assertFalse("Obsolete Library bottom utility bar must be removed", libView.hasBottomUtilityBarForTesting())
+            assertFalse("Library bottom utility sticker must not be visible", libView.isUtilityStickerVisibleForTesting())
+            val allLibraryViews = collectAllDescendants(libView)
+            assertTrue(
+                "Obsolete Sort / + File / Search utility controls must not exist in Library view tree",
+                allLibraryViews.none { v ->
+                    val desc = v.contentDescription?.toString() ?: ""
+                    val text = (v as? android.widget.TextView)?.text?.toString() ?: ""
+                    desc == "Cycle library sort order" || desc == "Toggle Library Search" || text == "+ File"
+                }
+            )
+
+            // 2. Unwanted full-width bottom strip is absent (rootLayout bottom padding == 0 on both tabs)
+            assertEquals("Root Library column must have zero bottom strip padding on Recent tab", 0, libView.getRootLayoutBottomPaddingPxForTesting())
             val rootChildren = libView.getRootContentColumnChildrenForTesting()
             assertTrue(rootChildren.size >= 4)
             assertEquals(libView.getTabBarViewForTesting(), rootChildren[0])
-            val sticker = libView.getUtilityStickerViewForTesting()
-            assertTrue("Library 3-control sticker must be visible on Recent tab", libView.isUtilityStickerVisibleForTesting())
-            assertTrue(
-                "Three-control sticker must retain Sort, + File, and Search plus dividers",
-                libView.getUtilityStickerChildrenForTesting().size >= 5
-            )
 
-            // Continue button is compact circular play-only (▶) without "Continue" text label
+            // 3. Shared three-control floating window pill [ × | — | ↘ ] remains unchanged
+            assertNotNull("Shared floating window pill must exist", readerWin.getBottomRightStickerViewForTesting())
+            assertTrue("Shared floating window pill must remain visible", readerWin.isBottomRightStickerVisible)
+            assertTrue("Resize control in shared pill must remain visible", readerWin.isStickerResizeVisibleForTesting())
+            assertTrue("Resize divider in shared pill must remain visible", readerWin.isStickerResizeDividerVisibleForTesting())
+
+            // 4. Continue button is compact circular play-only (▶) without "Continue" text label
             assertEquals("Continue Reading", libView.getContinueFabContentDescForTesting())
             assertEquals("▶", libView.getContinueFabLabelTextForTesting())
             assertFalse(
@@ -781,16 +804,17 @@ class ReaderMiniAppTest {
             libView.setRecentBooksForTesting(listOf(lastBook))
             assertTrue("Continue FAB must be visible on Recent tab", libView.isContinueFabVisibleForTesting())
             assertTrue(
-                "Recent scroll container must reserve bottom padding clear of Continue FAB",
-                libView.getBookListScrollViewBottomPaddingPxForTesting() >= 50
+                "Recent scroll container must reserve bottom padding clear of Continue FAB and shared pill",
+                libView.getBookListScrollViewBottomPaddingPxForTesting() >= 80
             )
 
             libView.selectTab(ReaderLibraryTab.FILE_EXPLORER)
-            assertFalse("Library 3-control sticker must hide in File Explorer tab", libView.isUtilityStickerVisibleForTesting())
+            assertEquals("Root Library column must have zero bottom strip padding on File Explorer tab", 0, libView.getRootLayoutBottomPaddingPxForTesting())
+            assertFalse("Bottom utility controls must remain absent in File Explorer tab", libView.isUtilityStickerVisibleForTesting())
             assertTrue("Continue FAB must remain visible on File Explorer tab", libView.isContinueFabVisibleForTesting())
             assertTrue(
-                "Explorer scroll container must reserve bottom padding clear of Continue FAB",
-                libView.getEmbeddedExplorerForTesting().getListScrollViewBottomPaddingPxForTesting() >= 50
+                "Explorer scroll container must reserve bottom padding clear of Continue FAB and shared pill",
+                libView.getEmbeddedExplorerForTesting().getListScrollViewBottomPaddingPxForTesting() >= 80
             )
 
             // Clicking Continue FAB from Explorer opens the actual last-read book
@@ -808,6 +832,7 @@ class ReaderMiniAppTest {
             assertTrue("Missing binary must not blindly open empty reader", openedBooks.isEmpty())
         } finally {
             tempBookFile.delete()
+            readerWin.onDestroy()
             libView.releaseResources()
         }
     }
