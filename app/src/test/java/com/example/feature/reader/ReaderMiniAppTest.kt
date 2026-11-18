@@ -690,19 +690,24 @@ class ReaderMiniAppTest {
                 totalChapters = 5
             )
             readView.loadBook(bookWithTitle)
+            val expectedChapterTitle = readView.getMinimalHeaderTitleForTesting()
+            assertTrue(expectedChapterTitle.isNotEmpty())
+            assertFalse("Minimal chapter header must NOT show full book name", expectedChapterTitle.contains("Northern Archipelago"))
 
-            // Top window bar stays "Reader" without embedding book name
-            assertEquals("Reader", readerWin.getTopBarTitleTextForTesting())
-
-            // Minimal header omits book name and keeps tight padding
-            val minimalHeader = readView.getMinimalHeaderTitleForTesting()
-            assertTrue(minimalHeader.isNotEmpty())
-            assertFalse("Minimal header must NOT show full book name", minimalHeader.contains("Northern Archipelago"))
-            assertTrue(readView.getTopHeaderVerticalPaddingPxForTesting() <= 6)
+            // Scope 2.A: Chapter title renders in floating window top bar and separate header bar is detached
+            assertEquals(expectedChapterTitle, readerWin.getTopBarTitleTextForTesting())
+            assertTrue(
+                "Separate chapter header underneath top bar must be detached",
+                readView.getTopHeaderLayoutForTesting().parent == null
+            )
 
             // Bottom toolbar shows wrapped full book name (maxLines == 3, multi-line)
             assertEquals(longTitle, readView.getToolbarBookTitleTextForTesting())
             assertEquals(3, readView.getToolbarBookTitleMaxLinesForTesting())
+
+            // Returning to Library resets floating top bar back to "Reader"
+            readView.navigateBackToLibraryForTesting()
+            assertEquals("Reader", readerWin.getTopBarTitleTextForTesting())
 
             // Fallback to filename when book title is blank
             assertEquals(
@@ -737,11 +742,26 @@ class ReaderMiniAppTest {
         )
         try {
             // Redundant Library header bar ("Library" + top action buttons) must be removed;
-            // first child of root content column is the segmented tabBar.
+            // three-control utility bar must be integrated as a compact sticker instead of a separate bar in root column.
             assertFalse("Redundant Library header bar must be removed", libView.hasHeaderBarForTesting())
+            assertFalse("Three-control bar must not be a permanent bar in root column", libView.isUtilityBarInRootColumnForTesting())
             val rootChildren = libView.getRootContentColumnChildrenForTesting()
             assertTrue(rootChildren.size >= 4)
             assertEquals(libView.getTabBarViewForTesting(), rootChildren[0])
+            val sticker = libView.getUtilityStickerViewForTesting()
+            assertTrue("Library 3-control sticker must be visible on Recent tab", libView.isUtilityStickerVisibleForTesting())
+            assertTrue(
+                "Three-control sticker must retain Sort, + File, and Search plus dividers",
+                libView.getUtilityStickerChildrenForTesting().size >= 5
+            )
+
+            // Continue button is compact circular play-only (▶) without "Continue" text label
+            assertEquals("Continue Reading", libView.getContinueFabContentDescForTesting())
+            assertEquals("▶", libView.getContinueFabLabelTextForTesting())
+            assertFalse(
+                "Continue button must not display text label",
+                libView.getContinueFabLabelTextForTesting().contains("Continue", ignoreCase = true)
+            )
 
             // Hidden when no last-read book exists
             libView.setRecentBooksForTesting(emptyList())
@@ -762,14 +782,15 @@ class ReaderMiniAppTest {
             assertTrue("Continue FAB must be visible on Recent tab", libView.isContinueFabVisibleForTesting())
             assertTrue(
                 "Recent scroll container must reserve bottom padding clear of Continue FAB",
-                libView.getBookListScrollViewBottomPaddingPxForTesting() >= 80
+                libView.getBookListScrollViewBottomPaddingPxForTesting() >= 50
             )
 
             libView.selectTab(ReaderLibraryTab.FILE_EXPLORER)
+            assertFalse("Library 3-control sticker must hide in File Explorer tab", libView.isUtilityStickerVisibleForTesting())
             assertTrue("Continue FAB must remain visible on File Explorer tab", libView.isContinueFabVisibleForTesting())
             assertTrue(
                 "Explorer scroll container must reserve bottom padding clear of Continue FAB",
-                libView.getEmbeddedExplorerForTesting().getListScrollViewBottomPaddingPxForTesting() >= 80
+                libView.getEmbeddedExplorerForTesting().getListScrollViewBottomPaddingPxForTesting() >= 50
             )
 
             // Clicking Continue FAB from Explorer opens the actual last-read book

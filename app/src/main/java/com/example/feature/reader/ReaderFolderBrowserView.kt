@@ -121,14 +121,14 @@ class ReaderFolderBrowserView(
             orientation = LinearLayout.VERTICAL
             layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
             if (embeddedInLibrary) {
-                setPadding(0, dp(2), 0, 0)
+                setPadding(0, dp(1), 0, 0)
             } else {
-                setPadding(dp(8), dp(6), dp(8), dp(42))
+                setPadding(dp(6), dp(4), dp(6), dp(38))
             }
         }
 
         // Top Bar
-        topBarBottomPaddingPx = dp(2)
+        topBarBottomPaddingPx = dp(1)
         val topBar = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -264,7 +264,7 @@ class ReaderFolderBrowserView(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
             ).apply {
-                bottomMargin = dp(4)
+                bottomMargin = dp(2)
             }
         }
 
@@ -633,11 +633,11 @@ class ReaderFolderBrowserView(
         accent: Boolean,
         onClick: () -> Unit
     ): LinearLayout {
-        entryCardVerticalPaddingPx = dp(4)
+        entryCardVerticalPaddingPx = dp(3)
         return LinearLayout(appContext).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            minimumHeight = dp(42)
+            minimumHeight = dp(38)
             background = GradientDrawable().apply {
                 setColor(Color.parseColor("#14141D"))
                 cornerRadius = dpF(8f)
@@ -649,7 +649,7 @@ class ReaderFolderBrowserView(
             ).apply {
                 setMargins(dp(1), dp(1), dp(1), dp(1))
             }
-            setPadding(dp(8), entryCardVerticalPaddingPx, dp(8), entryCardVerticalPaddingPx)
+            setPadding(dp(7), entryCardVerticalPaddingPx, dp(7), entryCardVerticalPaddingPx)
             isClickable = true
             isFocusable = true
             setOnClickListener { onClick() }

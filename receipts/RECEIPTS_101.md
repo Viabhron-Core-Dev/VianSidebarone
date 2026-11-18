@@ -415,4 +415,33 @@
 * Any deviation from what was requested, and why: Because JVM tests run against mockable `android.jar` stubs where `Rect(l,t,r,b)`, `View.getVisibility()`, `TextView.getText()`, `ViewGroup.getChildCount()`, and `View.performClick()` are no-op stubs, added Kotlin backing state getters and an 8-Int `computeSafeDisplayBoundsFromInsets` overload alongside live Android View setters. Removed `"Library"` header bar shortcuts per Phase 3 specification (Book Tracker remains accessible via Reader Settings -> Open Book Tracker and per-book Details -> Full Tracker; SAF import remains on the `+ File` chip and empty states).
 * Any known issue or follow-up needed: Physical-device testing required to confirm double-tap maximize bounds under gesture vs 3-button navigation, display cutouts, rotation re-layout, Continue FAB clearance above the `[ × | — | ↘ ]` sticker across both tabs, and Reading toolbar multi-line title layout.
 
+---
+
+### Receipt 124
+* Timestamp: 2026-11-18 18:32 UTC
+* One-line summary of what was requested: Consolidated floating window framework fixes (maximize above nav bar, resize sticker/divider hide, off-screen dragging + persistence) and Reader UI/session improvements (chapter title in top bar, independent last active book restore, circular `▶` Continue button, compact 3-control Library sticker, denser Library/Explorer padding).
+* Exact files touched:
+  - `app/src/main/java/com/example/feature/floating/FloatingMiniAppWindow.kt`
+  - `app/src/main/java/com/example/data/LibraryRepository.kt`
+  - `app/src/main/java/com/example/feature/reader/ReaderReadingView.kt`
+  - `app/src/main/java/com/example/feature/reader/ReaderMiniAppInstance.kt`
+  - `app/src/main/java/com/example/feature/reader/ReaderLibraryView.kt`
+  - `app/src/main/java/com/example/feature/reader/ReaderFolderBrowserView.kt`
+  - `app/src/test/java/com/example/feature/floating/FloatingMiniAppFrameworkTest.kt`
+  - `app/src/test/java/com/example/feature/reader/ReaderMiniAppTest.kt`
+  - `app/src/test/java/com/example/feature/reader/ReaderArchitectureAndBackupTest.kt`
+  - `blueprint/BLUEPRINT.md`
+  - `receipts/RECEIPTS_101.md`
+* What was actually done — factual, not persuasive:
+  1. Updated `FloatingMiniAppWindow.kt` to combine `navigationBars()`, `statusBars()`, `displayCutout()`, `tappableElement()`, `mandatorySystemGestures()`, live `rootWindowInsets`, `display.cutout`, `realSize - appSize` frame diffs, and Android dimension fallbacks inside `getSafeDisplayBounds()`, plus live `OnApplyWindowInsetsListener` reconciliation while maximized.
+  2. Updated `updateStickerResizeVisibility()` to hide both `stickerResizeDividerView` and `stickerResizeButtonView` (`View.GONE`, `isEnabled = false`, `isClickable = false`) and relayout the sticker while maximized.
+  3. Enabled `FLAG_LAYOUT_NO_LIMITS` in normal floating mode, added `computeReachableDragPosition()` allowing off-screen drag beyond all edges/corners while preserving a reachable top-bar grab area, updated resize max dimensions for off-screen bounds, and persisted off-screen bounds across drag/fold/unfold/maximize/IME.
+  4. Added `onChapterTitleChanged` in `ReaderReadingView.kt` and `ReaderMiniAppInstance.kt`, detached `topHeaderLayout` from `ReaderReadingView.mainLayout`, and rendered the active chapter title in `FloatingMiniAppWindow.titleView` (resetting to `"Reader"` on return to Library/Explorer).
+  5. Added independent `last_active_reader_book_id` persistence (`getLastActiveReaderBookId`, `setLastActiveReaderBookId`, `getLastActiveReaderBook`) in `LibraryRepository.kt` (cleared on book deletion) and switched `ReaderMiniAppInstance.tryAutoOpenLastReadBook()` away from `getRecentBooks().firstOrNull()`.
+  6. Converted `ReaderLibraryView.continueFab` into a `38dp` circular `"▶"` button (`contentDescription = "Continue Reading"`), moved `Sort | + File | Search` into a compact bottom-start pill sticker hiding on Explorer/Details, and reduced vertical padding in `ReaderLibraryView.kt` and `ReaderFolderBrowserView.kt`.
+  7. Added/updated regression tests across `FloatingMiniAppFrameworkTest.kt`, `ReaderMiniAppTest.kt`, and `ReaderArchitectureAndBackupTest.kt`, plus fixed a timing poll in `testPreventFalseNextProgressShortChapterCompletionAndResumeSeparation`.
+* How it was verified: Local build (`compile_applet` -> `Build succeeded - the applet is compiled`) and targeted JVM unit tests (`gradle :app:testDebugUnitTest --tests "com.example.feature.floating.FloatingMiniAppFrameworkTest" --tests "com.example.feature.reader.ReaderMiniAppTest" --tests "com.example.feature.reader.ReaderArchitectureAndBackupTest" --console=plain`) — **127/127 passed** (`FloatingMiniAppFrameworkTest` 98/98, `ReaderMiniAppTest` 18/18, `ReaderArchitectureAndBackupTest` 11/11; 0 failures/errors/skipped). Not tested on a physical Android device or emulator (`View.visibility`, `WindowInsets`, cutouts, and touch drags simulated on JVM).
+* Any deviation from what was requested, and why: Replaced `View.visibility`/`childCount`/`text` assertions against mockable `android.jar` stubs with Kotlin backing state accessors where Android framework stubs return default zeroes; kept platform-generated `debug.keystore`/`debug.keystore.base64` untouched per system build guidelines.
+* Any known issue or follow-up needed: Physical-device testing required for gesture vs 3-button navigation maximize bounds, display cutouts, off-screen drag feel, and Library sticker spacing on narrow floating windows.
+
 

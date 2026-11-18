@@ -227,6 +227,10 @@ class FloatingMiniAppWindow(
     private var stickerResizeButtonView: TextView? = null
     var isStickerResizeVisible: Boolean = true
         private set
+    var isStickerResizeDividerVisible: Boolean = true
+        private set
+    var isStickerResizeClickableState: Boolean = true
+        private set
     var isBottomRightStickerVisible: Boolean = true
         private set
     private var titleView: TextView? = null
@@ -372,7 +376,10 @@ class FloatingMiniAppWindow(
     fun getStickerResizeButtonForTesting(): TextView? = stickerResizeButtonView
     fun getStickerResizeDividerForTesting(): View? = stickerResizeDividerView
     fun isStickerResizeVisibleForTesting(): Boolean = isStickerResizeVisible
-    fun isStickerResizeDividerVisibleForTesting(): Boolean = isStickerResizeVisible
+    fun isStickerResizeDividerVisibleForTesting(): Boolean = isStickerResizeDividerVisible
+    fun isStickerResizeClickableForTesting(): Boolean = isStickerResizeClickableState
+    fun getResizeHandleViewForTesting(): View? = stickerResizeButtonView
+    fun getResizeDividerViewForTesting(): View? = stickerResizeDividerView
     fun getTopBarViewForTesting(): LinearLayout? = topBarView
     fun getTopBarIconViewForTesting(): ImageView? = topBarIconView
     fun getTopBarTitleTextForTesting(): String = titleView?.text?.toString() ?: windowTitle
@@ -488,7 +495,8 @@ class FloatingMiniAppWindow(
     init {
         layoutParams.flags = layoutParams.flags or
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+            WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             layoutParams.fitInsetsTypes = 0
             layoutParams.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
@@ -756,8 +764,45 @@ class FloatingMiniAppWindow(
         updateStickerResizeVisibility(isMaximized)
         root.addView(sticker)
 
-        // 5. Attach IME Insets Listener
+        // 5. Attach IME & System-Bar Insets Listener
         ViewCompat.setOnApplyWindowInsetsListener(root) { _, insets ->
+            if (isMaximized) {
+                val sysVis = insets.getInsets(
+                    WindowInsetsCompat.Type.systemBars() or
+                        WindowInsetsCompat.Type.displayCutout() or
+                        WindowInsetsCompat.Type.tappableElement()
+                )
+                val sysIgn = insets.getInsetsIgnoringVisibility(
+                    WindowInsetsCompat.Type.systemBars() or
+                        WindowInsetsCompat.Type.displayCutout()
+                )
+                val gestureInsets = insets.getInsets(WindowInsetsCompat.Type.mandatorySystemGestures())
+                val liveTop = maxOf(sysVis.top, sysIgn.top, gestureInsets.top)
+                val liveBottom = maxOf(sysVis.bottom, sysIgn.bottom, gestureInsets.bottom)
+                val liveLeft = maxOf(sysVis.left, sysIgn.left)
+                val liveRight = maxOf(sysVis.right, sysIgn.right)
+                val baseSafe = getSafeDisplayBounds(context, forceRefresh = false)
+                val fullRight = maxOf(baseSafe.right, lastSafeBoundsDisplayWidth)
+                val fullBottom = maxOf(baseSafe.bottom, lastSafeBoundsDisplayHeight)
+                val desiredLeft = maxOf(baseSafe.x, liveLeft)
+                val desiredTop = maxOf(baseSafe.y, liveTop)
+                val desiredRight = minOf(baseSafe.right, (fullRight - liveRight).coerceAtLeast(desiredLeft + 300))
+                val desiredBottom = minOf(baseSafe.bottom, (fullBottom - liveBottom).coerceAtLeast(desiredTop + 400))
+                val desiredW = (desiredRight - desiredLeft).coerceAtLeast(300)
+                val desiredH = (desiredBottom - desiredTop).coerceAtLeast(400)
+                if (bounds.x != desiredLeft || bounds.y != desiredTop || bounds.width != desiredW || bounds.height != desiredH) {
+                    val tightened = WindowBounds(desiredLeft, desiredTop, desiredW, desiredH)
+                    cachedSafeDisplayBounds = tightened
+                    bounds = tightened.copyBounds()
+                    layoutParams.x = bounds.x
+                    layoutParams.y = bounds.y
+                    layoutParams.width = bounds.width
+                    layoutParams.height = bounds.height
+                    (manager ?: FloatingWindowManager.getInstance(context)).updateBounds(windowId, bounds)
+                    relayoutEmbeddedSurface(bounds.width, getContentViewportHeight(bounds.height))
+                }
+            }
+
             val imeVisible = insets.isVisible(WindowInsetsCompat.Type.ime())
             val imeHeight = insets.getInsets(WindowInsetsCompat.Type.ime()).bottom
             LogKeeper.log(
@@ -1678,11 +1723,16 @@ class FloatingMiniAppWindow(
                     }
                 }
             },
-            onActiveBookChanged = { _ ->
-                // Minimal reading mode keeps top bar clean with "Reader" only;
-                // full book name is shown inside the reading bottom toolbar when revealed.
-                windowTitle = "Reader"
-                titleView?.text = "Reader"
+            onActiveBookChanged = { activeBook ->
+                if (activeBook == null) {
+                    windowTitle = "Reader"
+                    titleView?.text = "Reader"
+                }
+            },
+            onChapterTitleChanged = { chapterTitle ->
+                val resolvedTitle = chapterTitle?.trim()?.takeIf { it.isNotEmpty() } ?: "Reader"
+                windowTitle = resolvedTitle
+                titleView?.text = resolvedTitle
             },
             onOpenTracker = { activeBookId ->
                 FloatingMiniAppBridge.getInstance(context).launchBookTrackerFromReader(instanceId, activeBookId)
@@ -2275,11 +2325,16 @@ class FloatingMiniAppWindow(
 
         // Title
         titleView = TextView(context).apply {
-            text = if (readerMode) "Reader" else windowTitle
+            text = if (readerMode) windowTitle.ifBlank { "Reader" } else windowTitle
             setTextColor(Color.WHITE)
-            textSize = if (readerMode) 13f else 14f
+            textSize = if (readerMode) 12.5f else 14f
             typeface = Typeface.DEFAULT_BOLD
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            maxLines = 1
+            isSingleLine = true
+            ellipsize = android.text.TextUtils.TruncateAt.END
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+                marginEnd = (6 * density).toInt()
+            }
         }
         bar.addView(titleView)
 
@@ -2955,8 +3010,21 @@ class FloatingMiniAppWindow(
 
                     if (isDragging) {
                         val safeBounds = cachedDragSafeBounds ?: getSafeDisplayBounds(context).also { cachedDragSafeBounds = it }
-                        val newX = (initialBoundsX + dx.toInt()).coerceIn(safeBounds.x, maxOf(safeBounds.x, safeBounds.right - bounds.width))
-                        val newY = (initialBoundsY + dy.toInt()).coerceIn(safeBounds.y, maxOf(safeBounds.y, safeBounds.bottom - bounds.height))
+                        val density = context.resources.displayMetrics.density
+                        val topBarH = getTopBarHeightPx()
+                        val minGrabW = minOf(bounds.width, (72 * density).toInt().coerceAtLeast(48))
+                        val minGrabH = maxOf(topBarH, (32 * density).toInt().coerceAtLeast(28))
+                        val reachable = computeReachableDragPosition(
+                            candidateX = initialBoundsX + dx.toInt(),
+                            candidateY = initialBoundsY + dy.toInt(),
+                            windowWidth = bounds.width,
+                            windowHeight = bounds.height,
+                            safeBounds = safeBounds,
+                            minVisibleGrabWidthPx = minGrabW,
+                            minVisibleTopBarHeightPx = minGrabH
+                        )
+                        val newX = reachable.first
+                        val newY = reachable.second
 
                         if (newX != bounds.x || newY != bounds.y) {
                             bounds.x = newX
@@ -3065,9 +3133,16 @@ class FloatingMiniAppWindow(
     private fun updateStickerResizeVisibility(maximized: Boolean) {
         val visible = !maximized
         isStickerResizeVisible = visible
+        isStickerResizeDividerVisible = visible
+        isStickerResizeClickableState = visible
         val resizeVis = if (visible) View.VISIBLE else View.GONE
         stickerResizeDividerView?.visibility = resizeVis
-        stickerResizeButtonView?.visibility = resizeVis
+        stickerResizeButtonView?.apply {
+            visibility = resizeVis
+            isEnabled = visible
+            isClickable = visible
+        }
+        bottomRightStickerView?.requestLayout()
         if (maximized) {
             isResizing = false
         }
@@ -3151,11 +3226,11 @@ class FloatingMiniAppWindow(
                     val safeBounds = cachedSafeBounds ?: getSafeDisplayBounds(context).also { cachedSafeBounds = it }
                     val minW = (240 * density).toInt()
                     val minH = (200 * density).toInt()
-                    val maxW = safeBounds.right - bounds.x
-                    val maxH = safeBounds.bottom - bounds.y
+                    val maxW = maxOf(minW, safeBounds.width)
+                    val maxH = maxOf(minH, safeBounds.height)
 
-                    val newW = (startWidth + dw).coerceIn(minW, maxOf(minW, maxW))
-                    val newH = (startHeight + dh).coerceIn(minH, maxOf(minH, maxH))
+                    val newW = (startWidth + dw).coerceIn(minW, maxW)
+                    val newH = (startHeight + dh).coerceIn(minH, maxH)
 
                     if (newW != bounds.width || newH != bounds.height) {
                         bounds.width = newW
@@ -3247,28 +3322,104 @@ class FloatingMiniAppWindow(
             return cached
         }
 
+        val dm = context.resources.displayMetrics
+        val statusBarRes = context.resources.getIdentifier("status_bar_height", "dimen", "android")
+        val statusBarFallbackH = if (statusBarRes > 0) context.resources.getDimensionPixelSize(statusBarRes) else (24 * dm.density).toInt()
+        val navBarRes = context.resources.getIdentifier("navigation_bar_height", "dimen", "android")
+        val navBarFallbackH = if (navBarRes > 0) context.resources.getDimensionPixelSize(navBarRes) else (48 * dm.density).toInt()
+
         val safeBounds = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             val metrics = wm.currentWindowMetrics
+            val displayRect = metrics.bounds
             val windowInsets = metrics.windowInsets
-            val visibleInsets = windowInsets.getInsets(
-                WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout()
-            )
+            val barMask = WindowInsets.Type.systemBars() or
+                WindowInsets.Type.navigationBars() or
+                WindowInsets.Type.statusBars() or
+                WindowInsets.Type.displayCutout() or
+                WindowInsets.Type.tappableElement()
+            val visibleInsets = windowInsets.getInsets(barMask)
             val ignoringVisInsets = windowInsets.getInsetsIgnoringVisibility(
-                WindowInsets.Type.systemBars()
+                WindowInsets.Type.systemBars() or
+                    WindowInsets.Type.navigationBars() or
+                    WindowInsets.Type.statusBars() or
+                    WindowInsets.Type.displayCutout()
             )
+            val mandatoryGestureInsets = windowInsets.getInsets(WindowInsets.Type.mandatorySystemGestures())
+
+            var leftInset = maxOf(visibleInsets.left, ignoringVisInsets.left)
+            var topInset = maxOf(visibleInsets.top, ignoringVisInsets.top, mandatoryGestureInsets.top)
+            var rightInset = maxOf(visibleInsets.right, ignoringVisInsets.right)
+            var bottomInset = maxOf(visibleInsets.bottom, ignoringVisInsets.bottom, mandatoryGestureInsets.bottom)
+
+            // Also inspect live rootWindowInsets from attached overlay view if available
+            try {
+                val liveRootInsets = getView()?.rootWindowInsets
+                if (liveRootInsets != null) {
+                    val liveVis = liveRootInsets.getInsets(barMask)
+                    val liveIgn = liveRootInsets.getInsetsIgnoringVisibility(
+                        WindowInsets.Type.systemBars() or
+                            WindowInsets.Type.navigationBars() or
+                            WindowInsets.Type.statusBars() or
+                            WindowInsets.Type.displayCutout()
+                    )
+                    val liveGest = liveRootInsets.getInsets(WindowInsets.Type.mandatorySystemGestures())
+                    leftInset = maxOf(leftInset, liveVis.left, liveIgn.left)
+                    topInset = maxOf(topInset, liveVis.top, liveIgn.top, liveGest.top)
+                    rightInset = maxOf(rightInset, liveVis.right, liveIgn.right)
+                    bottomInset = maxOf(bottomInset, liveVis.bottom, liveIgn.bottom, liveGest.bottom)
+                }
+            } catch (_: Throwable) {}
+
+            // Also check display cutout & usable display frame difference (real vs app usable size)
+            try {
+                @Suppress("DEPRECATION")
+                val display = wm.defaultDisplay
+                if (display != null) {
+                    val cutout = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) display.cutout else null
+                    if (cutout != null) {
+                        leftInset = maxOf(leftInset, cutout.safeInsetLeft)
+                        topInset = maxOf(topInset, cutout.safeInsetTop)
+                        rightInset = maxOf(rightInset, cutout.safeInsetRight)
+                        bottomInset = maxOf(bottomInset, cutout.safeInsetBottom)
+                    }
+                    val realPt = android.graphics.Point()
+                    val appPt = android.graphics.Point()
+                    @Suppress("DEPRECATION")
+                    display.getRealSize(realPt)
+                    @Suppress("DEPRECATION")
+                    display.getSize(appPt)
+                    if (realPt.x > 0 && realPt.y > 0 && appPt.x > 0 && appPt.y > 0) {
+                        val frameDiffRight = (realPt.x - appPt.x).coerceAtLeast(0)
+                        val frameDiffBottom = (realPt.y - appPt.y).coerceAtLeast(0)
+                        rightInset = maxOf(rightInset, frameDiffRight)
+                        bottomInset = maxOf(bottomInset, frameDiffBottom)
+                    }
+                }
+            } catch (_: Throwable) {}
+
+            if (dm.heightPixels in 1 until displayRect.height()) {
+                val dmDiffBottom = (displayRect.height() - dm.heightPixels).coerceAtLeast(0)
+                if (bottomInset == 0 && dmDiffBottom > 0) {
+                    bottomInset = maxOf(bottomInset, (dmDiffBottom - topInset).coerceAtLeast(navBarFallbackH))
+                }
+            }
+            if (topInset <= 0) {
+                topInset = statusBarFallbackH
+            }
+            if (bottomInset <= 0) {
+                bottomInset = navBarFallbackH
+            }
+
             computeSafeDisplayBoundsFromInsets(
-                displayRect = metrics.bounds,
-                leftInset = maxOf(visibleInsets.left, ignoringVisInsets.left),
-                topInset = maxOf(visibleInsets.top, ignoringVisInsets.top),
-                rightInset = maxOf(visibleInsets.right, ignoringVisInsets.right),
-                bottomInset = maxOf(visibleInsets.bottom, ignoringVisInsets.bottom)
+                displayRect = displayRect,
+                leftInset = leftInset,
+                topInset = topInset,
+                rightInset = rightInset,
+                bottomInset = bottomInset
             )
         } else {
-            val dm = context.resources.displayMetrics
-            val statusBarRes = context.resources.getIdentifier("status_bar_height", "dimen", "android")
-            val statusBarH = if (statusBarRes > 0) context.resources.getDimensionPixelSize(statusBarRes) else (24 * dm.density).toInt()
-            val navBarRes = context.resources.getIdentifier("navigation_bar_height", "dimen", "android")
-            val navBarH = if (navBarRes > 0) context.resources.getDimensionPixelSize(navBarRes) else (48 * dm.density).toInt()
+            val statusBarH = statusBarFallbackH
+            val navBarH = navBarFallbackH
 
             var resolvedBounds: WindowBounds? = null
             try {
@@ -3282,12 +3433,13 @@ class FloatingMiniAppWindow(
                     @Suppress("DEPRECATION")
                     display.getSize(appPt)
                     if (realPt.x > 0 && realPt.y > 0 && appPt.x > 0 && appPt.y > 0) {
+                        val rawBottom = (realPt.y - appPt.y).coerceAtLeast(0)
                         resolvedBounds = computeSafeDisplayBoundsFromInsets(
                             displayRect = Rect(0, 0, realPt.x, realPt.y),
                             leftInset = 0,
                             topInset = statusBarH,
                             rightInset = (realPt.x - appPt.x).coerceAtLeast(0),
-                            bottomInset = (realPt.y - appPt.y).coerceAtLeast(0)
+                            bottomInset = if (rawBottom > 0) rawBottom else navBarH
                         )
                     }
                 }
@@ -3882,6 +4034,35 @@ class FloatingMiniAppWindow(
         )
 
         /**
+         * Computes a drag position that permits the floating window to move partially or substantially
+         * off-screen beyond left, right, top, bottom, and corner edges while always preserving a reachable
+         * top-bar grab region inside [safeBounds] so the window never becomes unrecoverable.
+         */
+        fun computeReachableDragPosition(
+            candidateX: Int,
+            candidateY: Int,
+            windowWidth: Int,
+            windowHeight: Int,
+            safeBounds: WindowBounds,
+            minVisibleGrabWidthPx: Int = 96,
+            minVisibleTopBarHeightPx: Int = 32
+        ): Pair<Int, Int> {
+            val effectiveGrabW = minVisibleGrabWidthPx.coerceIn(32, maxOf(32, windowWidth))
+            val effectiveGrabH = minVisibleTopBarHeightPx.coerceIn(24, maxOf(24, windowHeight))
+
+            val minX = safeBounds.x - windowWidth + effectiveGrabW
+            val maxX = maxOf(minX, safeBounds.right - effectiveGrabW)
+            // Keep the top bar reachable within [safeBounds.y, safeBounds.bottom - effectiveGrabH]
+            val minY = safeBounds.y
+            val maxY = maxOf(minY, safeBounds.bottom - effectiveGrabH)
+
+            return Pair(
+                candidateX.coerceIn(minX, maxX),
+                candidateY.coerceIn(minY, maxY)
+            )
+        }
+
+        /**
          * Phase 14.1 Controlled Experiment toggle:
          * When true, Main skips requesting focus and showing IME on imeBridgeEditText,
          * serving strictly as the Focus Carrier window while Heavy's EmbeddedNoteEditText
@@ -3890,5 +4071,50 @@ class FloatingMiniAppWindow(
          */
         @Volatile
         var EXPERIMENT_HEAVY_NATIVE_IME: Boolean = true
+    }
+
+    /**
+     * Returns the actual applied [WindowManager.LayoutParams] bounds (`x`, `y`, `width`, `height`)
+     * for verification in unit and integration tests.
+     */
+    fun getAppliedLayoutParamsBoundsForTesting(): WindowBounds =
+        WindowBounds(layoutParams.x, layoutParams.y, layoutParams.width, layoutParams.height)
+
+    /**
+     * Simulates dragging the floating window by (`dx`, `dy`) via the top-bar drag clamp logic
+     * and persists the resulting normal floating bounds to [DurableMiniAppStore], matching `ACTION_MOVE` + `ACTION_UP`.
+     */
+    fun simulateTopBarDragForTesting(dx: Int, dy: Int): WindowBounds {
+        if (isMaximized) return bounds.copyBounds()
+        if (isImeShifted) {
+            bounds.y = layoutParams.y
+            normalFloatingBounds.y = layoutParams.y
+            isImeShifted = false
+            imeShiftOffsetY = 0
+        }
+        val safeBounds = getSafeDisplayBounds(context)
+        val density = context.resources.displayMetrics.density
+        val topBarH = getTopBarHeightPx()
+        val minGrabW = minOf(bounds.width, (72 * density).toInt().coerceAtLeast(48))
+        val minGrabH = maxOf(topBarH, (32 * density).toInt().coerceAtLeast(28))
+        val (newX, newY) = computeReachableDragPosition(
+            candidateX = bounds.x + dx,
+            candidateY = bounds.y + dy,
+            windowWidth = bounds.width,
+            windowHeight = bounds.height,
+            safeBounds = safeBounds,
+            minVisibleGrabWidthPx = minGrabW,
+            minVisibleTopBarHeightPx = minGrabH
+        )
+        bounds.x = newX
+        bounds.y = newY
+        normalFloatingBounds.x = newX
+        normalFloatingBounds.y = newY
+        layoutParams.x = newX
+        layoutParams.y = newY
+        (manager ?: FloatingWindowManager.getInstance(context)).updateBounds(windowId, bounds)
+        normalFloatingBounds = bounds.copyBounds()
+        durableStore.updateWindowBounds(instanceId, normalFloatingBounds)
+        return bounds.copyBounds()
     }
 }

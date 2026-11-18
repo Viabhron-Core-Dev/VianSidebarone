@@ -3893,4 +3893,123 @@ class FloatingMiniAppFrameworkTest {
             readerWin.onDestroy()
         }
     }
+
+    @Test
+    fun testMaximizeAppliedLayoutParamsNeverOverlapSystemBarsAndRestoreExactBounds() {
+        val noteWin = FloatingMiniAppWindow("max_applied_note", testContext, "test_notes")
+        val initialNormal = WindowBounds(85, 160, 420, 560)
+        noteWin.setWindowBounds(initialNormal)
+        noteWin.createContentView(testContext)
+        try {
+            val safeBounds = noteWin.getSafeDisplayBounds(testContext, forceRefresh = true)
+            noteWin.toggleMaximize()
+            val appliedMax = noteWin.getAppliedLayoutParamsBoundsForTesting()
+            assertEquals("Applied LayoutParams x must match safeBounds.x", safeBounds.x, appliedMax.x)
+            assertEquals("Applied LayoutParams y must match safeBounds.y", safeBounds.y, appliedMax.y)
+            assertEquals("Applied LayoutParams width must match safeBounds.width", safeBounds.width, appliedMax.width)
+            assertEquals("Applied LayoutParams height must match safeBounds.height", safeBounds.height, appliedMax.height)
+            assertTrue("Maximized window bottom must not exceed safeBounds.bottom", appliedMax.bottom <= safeBounds.bottom)
+            assertFalse("Resize button must be hidden when maximized", noteWin.isStickerResizeVisibleForTesting())
+            assertFalse("Resize divider must be hidden when maximized", noteWin.isStickerResizeDividerVisibleForTesting())
+            assertFalse("Resize button must not be clickable when maximized", noteWin.isStickerResizeClickableForTesting())
+            assertNotNull(noteWin.getResizeHandleViewForTesting())
+            assertNotNull(noteWin.getResizeDividerViewForTesting())
+
+            noteWin.toggleMaximize()
+            val appliedRestored = noteWin.getAppliedLayoutParamsBoundsForTesting()
+            assertEquals(initialNormal.x, appliedRestored.x)
+            assertEquals(initialNormal.y, appliedRestored.y)
+            assertEquals(initialNormal.width, appliedRestored.width)
+            assertEquals(initialNormal.height, appliedRestored.height)
+            assertTrue("Resize button must restore to VISIBLE", noteWin.isStickerResizeVisibleForTesting())
+            assertTrue("Resize divider must restore to VISIBLE", noteWin.isStickerResizeDividerVisibleForTesting())
+            assertTrue("Resize button must be clickable again", noteWin.isStickerResizeClickableForTesting())
+        } finally {
+            noteWin.onDestroy()
+        }
+    }
+
+    @Test
+    fun testOffScreenDraggingAllowsPartialOffScreenWhilePreservingReachableTopBarGrabArea() {
+        val cases = listOf(
+            "drag_note" to "test_notes",
+            "drag_reader" to "reader"
+        )
+        for ((id, type) in cases) {
+            val win = FloatingMiniAppWindow(id, testContext, type)
+            val safeBounds = win.getSafeDisplayBounds(testContext, forceRefresh = true)
+            val winW = 260
+            val winH = 320
+            win.setWindowBounds(WindowBounds(safeBounds.x + 20, safeBounds.y + 30, winW, winH))
+            win.createContentView(testContext)
+            try {
+                // Drag substantially off-screen beyond left & top-corner attempt
+                val leftDrag = win.simulateTopBarDragForTesting(dx = -5000, dy = -5000)
+                assertTrue("Window must be allowed past left screen edge (x=${leftDrag.x}, safeX=${safeBounds.x})", leftDrag.x < safeBounds.x)
+                assertTrue("Reachable right portion of top bar must stay >= safeBounds.x", leftDrag.x + winW > safeBounds.x)
+                assertTrue("Top bar must remain at or below safeBounds.y", leftDrag.y >= safeBounds.y)
+
+                // Drag substantially off-screen beyond right & bottom edges
+                val rightBottomDrag = win.simulateTopBarDragForTesting(dx = 10000, dy = 10000)
+                assertTrue("Window must be allowed past right screen edge", rightBottomDrag.x + winW > safeBounds.right)
+                assertTrue("Window must be allowed past bottom screen edge", rightBottomDrag.y + winH > safeBounds.bottom)
+                assertTrue("Reachable left portion of top bar must remain inside safeBounds.right", rightBottomDrag.x < safeBounds.right)
+                assertTrue("Top bar must remain reachable above bottom system bar", rightBottomDrag.y < safeBounds.bottom)
+            } finally {
+                win.onDestroy()
+            }
+        }
+    }
+
+    @Test
+    fun testOffScreenPositionPersistsAcrossFoldUnfoldMaximizeAndImeWithoutCorruptingPosition() {
+        DurableMiniAppStore.resetForTesting()
+        val store = DurableMiniAppStore.getInstance(testContext)
+        store.clearAll()
+        FloatingMiniAppBridge.resetForTesting()
+        val wm = com.example.core.FloatingWindowManager.getInstance(testContext)
+        wm.unregisterAll()
+
+        val bridge = FloatingMiniAppBridge.getInstance(testContext)
+        val initial = WindowBounds(40, 120, 260, 320)
+        val win = bridge.openMiniApp("offscreen_persist_note", "test_notes", initial)
+        try {
+            val dragged = win.simulateTopBarDragForTesting(dx = -160, dy = 200)
+            assertTrue("Dragged X should be off-screen negative or < safeBounds.x", dragged.x < initial.x)
+
+            // Verify durable store persisted exact off-screen offset
+            val savedAfterDrag = store.loadSnapshot("offscreen_persist_note")!!
+            assertEquals(dragged.x, savedAfterDrag.windowBounds.x)
+            assertEquals(dragged.y, savedAfterDrag.windowBounds.y)
+
+            // IME shift and dismiss must preserve exact off-screen X and restore exact Y
+            win.simulateImeVisibilityForTesting(isKeyboardOpen = true, keypadHeight = 600, displayBottom = 180)
+            win.simulateImeVisibilityForTesting(isKeyboardOpen = false, keypadHeight = 0, displayBottom = 480)
+            assertEquals(dragged.x, win.normalFloatingBounds.x)
+            assertEquals(dragged.y, win.normalFloatingBounds.y)
+
+            // Maximize and unmaximize from off-screen position must restore exact off-screen position
+            win.toggleMaximize()
+            assertTrue(win.isMaximized)
+            win.toggleMaximize()
+            assertFalse(win.isMaximized)
+            assertEquals(dragged.x, win.bounds.x)
+            assertEquals(dragged.y, win.bounds.y)
+
+            // Fold / sleep -> wake must restore exact off-screen position
+            bridge.sleepMiniApp("offscreen_persist_note")
+            val sleepingSnap = store.loadSnapshot("offscreen_persist_note")!!
+            assertEquals(dragged.x, sleepingSnap.windowBounds.x)
+            assertEquals(dragged.y, sleepingSnap.windowBounds.y)
+
+            bridge.wakeMiniApp("offscreen_persist_note")
+            val woken = wm.getWindow("offscreen_persist_note") as FloatingMiniAppWindow
+            assertEquals(dragged.x, woken.bounds.x)
+            assertEquals(dragged.y, woken.bounds.y)
+        } finally {
+            wm.unregisterAll()
+            FloatingMiniAppBridge.resetForTesting()
+            store.clearAll()
+        }
+    }
 }

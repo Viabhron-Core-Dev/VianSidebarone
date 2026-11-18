@@ -690,7 +690,10 @@ class ReaderArchitectureAndBackupTest {
             // 6. Meaningful manual scrolling on Chapter 13 (normal chapter) advances Tracker to 14 and updates scrollY
             readingView.simulateUserScrollForTesting(scrollY = 420, scrollableRangePx = 1200)
             readingView.awaitPendingJobsForTesting()
-            Thread.sleep(150) // allow persistentIoScope to finish async saveResumePosition
+            val deadlineMs = System.currentTimeMillis() + 2000L
+            while (fakeDb.epubDao().getBookById(bookId)?.lastReadScrollY != 420 && System.currentTimeMillis() < deadlineMs) {
+                Thread.sleep(20)
+            }
             assertEquals(14, fakeDb.trackerDao().getByLinkedEpubId(bookId)!!.readChapters)
             val savedEpub = fakeDb.epubDao().getBookById(bookId)!!
             assertEquals(13, savedEpub.lastReadChapter)
@@ -953,5 +956,54 @@ class ReaderArchitectureAndBackupTest {
         warmInstance.awaitPendingJobsForTesting()
         assertEquals(ReaderScreenMode.LIBRARY, warmInstance.getCurrentScreenModeForTesting())
         warmInstance.onDestroy()
+    }
+
+    @Test
+    fun testLastActiveReaderBookPersistsIndependentlyOfRecentBooks() = runBlocking {
+        val dir = tempFolder.newFolder("independent_last_active")
+        val file1 = File(dir, "book_one.txt").apply {
+            writeText((1..4).joinToString("\n\n") { "Chapter $it: First Book $it\nBody text for first book $it." })
+        }
+        val file2 = File(dir, "book_two.txt").apply {
+            writeText((1..4).joinToString("\n\n") { "Chapter $it: Second Book $it\nBody text for second book $it." })
+        }
+
+        // 1. Import both books; set Book 1 as newest in Recent Books (higher lastOpenedTimestamp),
+        //    but explicitly set Book 2 as the last active Reader book and give Book 2 a live binary.
+        val book1 = repo.importBookFile(file1, "Book One", markOpenedOnImport = false)!!
+        val book2 = repo.importBookFile(file2, "Book Two", markOpenedOnImport = false)!!
+
+        // Save Book 2 at chapter 2, scroll 190 and mark it as last active Reader book
+        repo.saveResumePosition(book2.id, chapterIndex = 2, scrollY = 190, updateOpenRecency = false)
+        repo.setLastActiveReaderBookId(book2.id)
+
+        // Make Book 1 appear first in Recent Books with a much higher lastOpenedTimestamp
+        fakeDb.epubDao().updateBook(book1.copy(lastOpenedTimestamp = Long.MAX_VALUE / 2))
+        assertEquals("Recent Books first entry must be Book One", book1.id, repo.getRecentBooks().first().id)
+
+        // 2. Cold start Reader must restore Book Two (independent of Recent Books list order)
+        val coldInstance = ReaderMiniAppInstance("indep_cold", "reader")
+        coldInstance.onCreate(null)
+        coldInstance.createContentView(context)
+        coldInstance.awaitPendingJobsForTesting()
+        coldInstance.getReadingViewForTesting()?.awaitPendingJobsForTesting()
+
+        assertEquals(ReaderScreenMode.READING, coldInstance.getCurrentScreenModeForTesting())
+        assertEquals("Reader must open actual last active Book Two instead of Recent[0]", book2.id, coldInstance.getCurrentBookIdForTesting())
+        assertEquals(2, coldInstance.getReadingViewForTesting()?.currentChapterIndex)
+        assertEquals(190, coldInstance.getReadingViewForTesting()?.currentScrollY)
+        coldInstance.onDestroy()
+
+        // 3. Deleting the last active book must clear last_active_reader_book_id and open Library (not Recent[0])
+        repo.deleteBook(repo.getBook(book2.id)!!)
+        assertEquals(-1, repo.getLastActiveReaderBookId())
+
+        val afterDeleteInstance = ReaderMiniAppInstance("indep_after_del", "reader")
+        afterDeleteInstance.onCreate(null)
+        afterDeleteInstance.createContentView(context)
+        afterDeleteInstance.awaitPendingJobsForTesting()
+        assertEquals("With no valid last active book, Reader must open Library cleanly", ReaderScreenMode.LIBRARY, afterDeleteInstance.getCurrentScreenModeForTesting())
+        assertEquals(-1, afterDeleteInstance.getCurrentBookIdForTesting())
+        afterDeleteInstance.onDestroy()
     }
 }

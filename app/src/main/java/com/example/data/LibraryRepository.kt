@@ -123,6 +123,28 @@ class LibraryRepository(private val context: Context) {
             .apply()
     }
 
+    /**
+     * Independent pointer to the book most recently opened/active in Reader, decoupled from
+     * the Recent Books list order and edits.
+     */
+    fun getLastActiveReaderBookId(): Int {
+        return context.getSharedPreferences("FloatingReaderPrefs", Context.MODE_PRIVATE)
+            .getInt("last_active_reader_book_id", -1)
+    }
+
+    fun setLastActiveReaderBookId(bookId: Int) {
+        context.getSharedPreferences("FloatingReaderPrefs", Context.MODE_PRIVATE)
+            .edit()
+            .putInt("last_active_reader_book_id", bookId)
+            .apply()
+    }
+
+    suspend fun getLastActiveReaderBook(): EpubBook? = withContext(Dispatchers.IO) {
+        val lastId = getLastActiveReaderBookId()
+        if (lastId <= 0) return@withContext null
+        dao.getBookById(lastId)
+    }
+
     private fun isManagedStorageFile(file: File): Boolean {
         return try {
             val path = file.canonicalPath
@@ -189,6 +211,9 @@ class LibraryRepository(private val context: Context) {
         if (origFile.exists() && isManagedStorageFile(origFile)) origFile.delete()
         if (getActiveBinaryBookId() == book.id) {
             setActiveBinaryBookId(-1)
+        }
+        if (getLastActiveReaderBookId() == book.id) {
+            setLastActiveReaderBookId(-1)
         }
         LogKeeper.log(context, TAG, "BOOK_DELETED id=${book.id} title='${book.title}' (Tracker unlinked)")
         ReaderEventManager.notifyLibraryChanged(context)
@@ -492,6 +517,9 @@ class LibraryRepository(private val context: Context) {
 
         // Replacement import/parse/persist succeeded -> now prune previous active book binaries & caches
         pruneInactiveBookBinaries(keepBookId = readyBook.id)
+        if (markOpenedOnImport) {
+            setLastActiveReaderBookId(readyBook.id)
+        }
 
         LogKeeper.log(context, TAG, "BOOK_IMPORTED id=$id title='$finalTitle' author='$finalAuthor' chapters=$totalChapters")
         ReaderEventManager.notifyLibraryChanged(context)
@@ -547,6 +575,9 @@ class LibraryRepository(private val context: Context) {
             lastActivityTimestamp = now
         )
         dao.updateBook(updated)
+        if (updateOpenRecency) {
+            setLastActiveReaderBookId(bookId)
+        }
     }
 
     /**

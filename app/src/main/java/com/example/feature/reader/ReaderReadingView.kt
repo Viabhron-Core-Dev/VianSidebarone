@@ -69,6 +69,7 @@ class ReaderReadingView(
     private val instanceId: String? = null,
     private val onRequestWindowFocusable: ((Boolean) -> Unit)? = null,
     private val onActiveBookChanged: ((EpubBook?) -> Unit)? = null,
+    private val onChapterTitleChanged: ((String?) -> Unit)? = null,
     private val onOpenReaderSettings: (() -> Unit)? = null,
     private val onToolbarVisibilityChanged: ((Boolean) -> Unit)? = null,
     private val onBackToLibrary: () -> Unit
@@ -358,26 +359,19 @@ class ReaderReadingView(
         }
         mainLayout.addView(topBookProgressBar)
 
-        // --- Compact Minimal Header (Chapter title only; no book name in minimal mode) ---
-        topHeaderVerticalPaddingPx = dp(2)
+        // Chapter title is hosted directly in the floating window top bar (not a separate row below it)
+        topHeaderVerticalPaddingPx = 0
         topHeaderLayout = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setBackgroundColor(Color.parseColor("#0D0D12"))
-            setPadding(dp(12), topHeaderVerticalPaddingPx, dp(12), topHeaderVerticalPaddingPx)
+            visibility = View.GONE
         }
-
         chapterTitleTopView = TextView(context).apply {
             text = "Chapter"
-            textSize = 11f
-            setTextColor(Color.parseColor("#9BA3B8"))
             maxLines = 1
             isSingleLine = true
             ellipsize = TextUtils.TruncateAt.END
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         }
         topHeaderLayout.addView(chapterTitleTopView)
-        mainLayout.addView(topHeaderLayout)
 
         // --- High-Water Progress Undo Banner ---
         undoBannerLayout = LinearLayout(context).apply {
@@ -1061,6 +1055,7 @@ class ReaderReadingView(
         saveCurrentProgressImmediately()
         stopAutoScroll()
         stopTts()
+        onChapterTitleChanged?.invoke(null)
         onActiveBookChanged?.invoke(null)
         onBackToLibrary()
     }
@@ -1185,9 +1180,10 @@ class ReaderReadingView(
         val chTitle = chapterTitleOverride
             ?: chaptersList.getOrNull(currentChapterIndex)?.title?.takeIf { it.isNotBlank() }
             ?: "Chapter ${currentChapterIndex + 1}"
-        // Minimal reading mode displays chapter title only (never full book name)
+        // Display current chapter title in the shared floating window top bar
         minimalHeaderTitleState = chTitle
         chapterTitleTopView.text = chTitle
+        onChapterTitleChanged?.invoke(chTitle)
         val bookName = resolveDisplayBookName(currentBook)
         toolbarBookTitleTextState = bookName
         toolbarBookTitleView.text = bookName

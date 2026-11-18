@@ -34,6 +34,7 @@ class ReaderMiniAppInstance(
     override val appType: String = APP_TYPE,
     var onRequestWindowFocusable: ((Boolean) -> Unit)? = null,
     var onActiveBookChanged: ((EpubBook?) -> Unit)? = null,
+    var onChapterTitleChanged: ((String?) -> Unit)? = null,
     var onOpenTracker: ((Int) -> Unit)? = null,
     var onOpenReaderSettings: (() -> Unit)? = null,
     var onReadingToolbarVisibilityChanged: ((Boolean) -> Unit)? = null
@@ -278,6 +279,9 @@ class ReaderMiniAppInstance(
             onActiveBookChanged = { book ->
                 onActiveBookChanged?.invoke(book)
             },
+            onChapterTitleChanged = { chapterTitle ->
+                onChapterTitleChanged?.invoke(chapterTitle)
+            },
             onOpenReaderSettings = {
                 onOpenReaderSettings?.invoke()
             },
@@ -289,6 +293,7 @@ class ReaderMiniAppInstance(
                 pendingAutoOpenLastReadBook = false
                 openBookJob?.cancel()
                 currentScreenMode = ReaderScreenMode.LIBRARY
+                onChapterTitleChanged?.invoke(null)
                 onActiveBookChanged?.invoke(null)
                 onReadingToolbarVisibilityChanged?.invoke(false)
                 showCurrentScreen()
@@ -330,7 +335,7 @@ class ReaderMiniAppInstance(
             val repo = com.example.data.LibraryRepository(ctx)
             val lastReadBook = withContext(Dispatchers.IO) {
                 try {
-                    repo.getRecentBooks().firstOrNull()
+                    repo.getLastActiveReaderBook()
                 } catch (_: Throwable) {
                     null
                 }
@@ -348,6 +353,7 @@ class ReaderMiniAppInstance(
             } else {
                 currentScreenMode = ReaderScreenMode.LIBRARY
                 currentBookId = -1
+                onChapterTitleChanged?.invoke(null)
                 onActiveBookChanged?.invoke(null)
                 onReadingToolbarVisibilityChanged?.invoke(false)
                 libraryView?.setSelectedBookId(lastReadBook.id)
@@ -417,6 +423,7 @@ class ReaderMiniAppInstance(
         if (repo != null && !repo.hasBookBinary(book)) {
             currentScreenMode = ReaderScreenMode.LIBRARY
             currentBookId = -1
+            onChapterTitleChanged?.invoke(null)
             onActiveBookChanged?.invoke(null)
             onReadingToolbarVisibilityChanged?.invoke(false)
             showCurrentScreen()
@@ -424,6 +431,7 @@ class ReaderMiniAppInstance(
             libraryView?.promptReimportForBook(book)
             return
         }
+        repo?.setLastActiveReaderBookId(book.id)
         ReaderSessionTracker.markWarmSession(instanceId)
         currentBookId = book.id
         currentChapterIndex = book.lastReadChapter
@@ -459,11 +467,13 @@ class ReaderMiniAppInstance(
                         }
                         if (book != null && repo.hasBookBinary(book)) {
                             repo.markBookBinaryActive(book.id)
+                            repo.setLastActiveReaderBookId(book.id)
                             onActiveBookChanged?.invoke(book)
                             rView.loadBook(book, currentChapterIndex, currentScrollY, currentFontSizeSp)
                         } else {
                             currentScreenMode = ReaderScreenMode.LIBRARY
                             currentBookId = -1
+                            onChapterTitleChanged?.invoke(null)
                             onActiveBookChanged?.invoke(null)
                             onReadingToolbarVisibilityChanged?.invoke(false)
                             showCurrentScreen()
@@ -476,6 +486,7 @@ class ReaderMiniAppInstance(
                 }
             }
             currentScreenMode == ReaderScreenMode.FOLDER_BROWSER -> {
+                onChapterTitleChanged?.invoke(null)
                 onActiveBookChanged?.invoke(null)
                 onReadingToolbarVisibilityChanged?.invoke(false)
                 val fView = folderBrowserView ?: return
@@ -483,6 +494,7 @@ class ReaderMiniAppInstance(
                 fView.loadRootFolder()
             }
             else -> {
+                onChapterTitleChanged?.invoke(null)
                 onActiveBookChanged?.invoke(null)
                 onReadingToolbarVisibilityChanged?.invoke(false)
                 val lView = libraryView ?: return
