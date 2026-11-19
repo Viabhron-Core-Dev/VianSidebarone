@@ -35,3 +35,50 @@
   - Total: **157/157** JVM tests passed. Not tested on a physical Android device or emulator.
 * Any deviation from what was requested, and why: None in behavior. Created `RECEIPTS_102.md` for Receipt 125 because `RECEIPTS_101.md` is at 448 lines and appending there would risk exceeding the 500-line cap.
 * Any known issue or follow-up needed: Physical-device testing required to visually verify the bottom edge of the Reader Library window across `Recent` and `File Explorer` tabs (including scroll clearance above `▶` and `[ × | — | ↘ ]`), real `ScrollView` pixel scroll restoration timing on large multi-chapter EPUBs, and OS force-stop / process-kill recovery end-to-end.
+
+### Receipt 126
+* Timestamp: 2026-11-19 21:03 UTC
+* One-line summary of what was requested: Implement standalone Floating Trigger buttons (with backward compatibility for legacy container-navigation IDs), separate Dictionary & Translation floating mini-app UI shells, shared Dictionary & Translation Settings, three exported `ACTION_PROCESS_TEXT` text-selection popup actions (`Read aloud`, `Meaning`, `Translate`), and built-in Android `TextToSpeech` Read Aloud with focused unit tests.
+* Exact files touched:
+  - Created:
+    - `app/src/main/java/com/example/feature/floating/trigger/FloatingTriggerStore.kt`
+    - `app/src/main/java/com/example/feature/floating/trigger/FloatingTriggerButtonWindow.kt`
+    - `app/src/main/java/com/example/feature/floating/trigger/FloatingTriggerManager.kt`
+    - `app/src/main/java/com/example/feature/language/LanguageMiniAppUiHelper.kt`
+    - `app/src/main/java/com/example/feature/language/DictionaryMiniAppInstance.kt`
+    - `app/src/main/java/com/example/feature/language/TranslationMiniAppInstance.kt`
+    - `app/src/main/java/com/example/feature/settings/DictionaryTranslationSettingsScreen.kt`
+    - `app/src/main/java/com/example/feature/selection/SelectionTextHelper.kt`
+    - `app/src/main/java/com/example/feature/selection/ReadAloudController.kt`
+    - `app/src/main/java/com/example/feature/selection/SelectionPopupShell.kt`
+    - `app/src/main/java/com/example/feature/selection/ReadAloudSelectionActivity.kt`
+    - `app/src/main/java/com/example/feature/selection/MeaningSelectionActivity.kt`
+    - `app/src/main/java/com/example/feature/selection/TranslateSelectionActivity.kt`
+    - `app/src/test/java/com/example/feature/floating/trigger/FloatingTriggerTest.kt`
+    - `app/src/test/java/com/example/feature/language/DictionaryAndTranslationMiniAppTest.kt`
+    - `app/src/test/java/com/example/feature/selection/SelectionActionsAndReadAloudTest.kt`
+  - Modified:
+    - `app/src/main/AndroidManifest.xml`
+    - `app/src/main/res/values/themes.xml`
+    - `app/src/main/java/com/example/SettingsActivity.kt`
+    - `app/src/main/java/com/example/core/HandleService.kt`
+    - `app/src/main/java/com/example/feature/settings/AddElementActivity.kt`
+    - `app/src/main/java/com/example/feature/element/ElementActionDispatcher.kt`
+    - `app/src/main/java/com/example/feature/sidebar/HybridGridPageView.kt`
+    - `app/src/main/java/com/example/feature/sidebar/AppsPageView.kt`
+    - `app/src/main/java/com/example/feature/sidebar/WidgetsGridPageView.kt`
+    - `app/src/main/java/com/example/feature/floating/FloatingMiniAppBridge.kt`
+    - `app/src/main/java/com/example/feature/floating/FloatingMiniAppWindow.kt`
+    - `blueprint/BLUEPRINT.md`
+    - `receipts/RECEIPTS_102.md`
+* What was actually done — factual, not persuasive:
+  1. **Floating Trigger**: Added `FloatingTriggerStore`, `FloatingTriggerButtonWindow`, and `FloatingTriggerManager` for standalone 48dp circular floating buttons with tap-to-dispatch via `ElementActionDispatcher.execute`, long-press-to-drag repositioning with display-bounds clamping and synchronous `.commit()` persistence, startup restoration in `HandleService.attachHandles()`, and `FloatingTriggerCompat` backward-compatible routing so legacy `floating_trigger:<containerId>` IDs still open `SidebarManager.openContainerById(...)`. Updated `AddElementActivity`, `ElementActionDispatcher`, `HybridGridPageView`, `AppsPageView`, and `WidgetsGridPageView`.
+  2. **Separate Dictionary & Translation Mini-Apps**: Added `DictionaryMiniAppInstance` (`appType = "dictionary"`), `TranslationMiniAppInstance` (`appType = "translation"`), and shared styling/bounds helper `LanguageMiniAppUiHelper`. Hosted both directly in Main via `FloatingMiniAppBridge` and `FloatingMiniAppWindow` with compact initial bounds, separate durable sleep/wake/close snapshots, top-bar `Edit` buttons opening shared `dictionary_translation_settings`, untouched `[ × | — | ↘ ]` controls, honest unconfigured placeholders (no fake lookups/translations), and separate entries under `Add Element -> Floating Windows`.
+  3. **Shared Dictionary & Translation Settings**: Added Compose M3 `DictionaryTranslationSettingsScreen` with clearly separated Dictionary (StarDict planned, 0 imported status) and Translation (models/packs 0 installed, language preferences placeholder) sections; wired route `dictionary_translation_settings` and `MainSettingsScreen` item in `SettingsActivity`.
+  4. **Text-Selection Popup Actions & Built-In `TextToSpeech` Read Aloud**: Added `SelectionTextHelper`, `ReadAloudController` (built-in Android `TextToSpeech`, slower/faster `0.5x–2.0x` controls, init/language/speak error handling, cross-popup `ReadAloudSessionCoordinator` preemption, clean `release()`/`shutdown()`), `SelectionPopupShell`, translucent `Theme.VianSide.SelectionPopup` in `themes.xml`, and three exported `ACTION_PROCESS_TEXT` (`text/plain`) activities (`ReadAloudSelectionActivity`, `MeaningSelectionActivity`, `TranslateSelectionActivity`) registered in `AndroidManifest.xml`.
+  5. **Tests**: Added `FloatingTriggerTest` (6 tests), `DictionaryAndTranslationMiniAppTest` (5 tests), and `SelectionActionsAndReadAloudTest` (6 tests) using the project's pure JVM JUnit 4 + `FakeSharedPreferences` harness.
+* How it was verified: Local build (`compile_applet` -> `Build succeeded - the applet is compiled`) and local JVM unit tests:
+  - `gradle :app:testDebugUnitTest --tests "com.example.feature.floating.trigger.FloatingTriggerTest" --tests "com.example.feature.language.DictionaryAndTranslationMiniAppTest" --tests "com.example.feature.selection.SelectionActionsAndReadAloudTest" --tests "com.example.feature.settings.SettingsNavigationStructureTest" --tests "com.example.feature.element.ElementIdParserTest" --tests "com.example.feature.element.ElementSystemTest" --tests "com.example.feature.floating.FloatingMiniAppFrameworkTest" --tests "com.example.feature.reader.ReaderMiniAppTest" --console=plain` -> `BUILD SUCCESSFUL` (**151/151** tests passed; 0 failures, 0 errors, 0 skipped).
+  - Not tested on a physical Android device or emulator.
+* Any deviation from what was requested, and why: Unit tests use the project's existing pure JVM JUnit 4 + `FakeSharedPreferences` harness (with a `TtsEngineAdapter` fake for `ReadAloudController`) rather than Robolectric, because Robolectric is not in `app/build.gradle.kts` and adding new dependencies was explicitly out of scope.
+* Any known issue or follow-up needed: Dictionary lookup (StarDict parsing/import/DB) and Translation engines/language packs are intentionally unconfigured UI placeholders pending future phases. Physical-device QA is required to verify overlay long-press drag ergonomics, IME focus in floating Dictionary/Translation windows, `ACTION_PROCESS_TEXT` menu entries across third-party host apps (which vary in support), and real Android `TextToSpeech` voice playback.

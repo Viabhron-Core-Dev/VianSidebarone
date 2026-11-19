@@ -545,6 +545,11 @@ class HandleService : Service(), SharedPreferences.OnSharedPreferenceChangeListe
                 LogKeeper.logError(this, "HandleService", "Failed to attach handle view ${config.id}", e)
             }
         }
+        try {
+            com.example.feature.floating.trigger.FloatingTriggerManager.getInstance(this).restoreActiveTriggers()
+        } catch (e: Throwable) {
+            LogKeeper.logError(this, "HandleService", "Failed to restore active floating triggers", e)
+        }
     }
 
     private fun detachHandles() {
@@ -624,6 +629,7 @@ class HandleService : Service(), SharedPreferences.OnSharedPreferenceChangeListe
         SidebarManager.getInstance(this).dismiss()
         SidebarManager.getInstance(this).unregisterReceiver(this)
         com.example.feature.element.ElementActionRegistry.getInstance(this).unregisterReceiver(this)
+        com.example.feature.floating.trigger.FloatingTriggerManager.getInstance(this).detachAll()
         detachHandles()
         MainProcessRecovery.onServiceDestroyed()
     }

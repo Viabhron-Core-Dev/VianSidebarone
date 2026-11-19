@@ -263,15 +263,14 @@ class AddElementActivity : ComponentActivity() {
         addHeader("Floating Windows")
         if (!isFloatingTrigger) {
             addItem(android.R.drawable.ic_menu_crop, "Floating Trigger") {
-                val intent = Intent(this, AddElementActivity::class.java).apply {
-                    putExtra("IS_FLOATING_TRIGGER_SELECTION", true)
-                    putExtra("PAGE_ID", pageId)
-                    putExtra("CONTAINER_ID", containerId)
-                    putExtra("IS_HYBRID_GRID", isHybridGrid)
-                    putExtra("PAGE_TYPE", pageType)
-                }
-                startActivityForResult(intent, 700)
+                showFloatingTriggerAssociationDialog(pageId, containerId, isHybridGrid, pageType)
             }
+        }
+        addItem(android.R.drawable.ic_menu_search, "Dictionary") {
+            handleElementSelected("system:dictionary_floating", "Dictionary")
+        }
+        addItem(android.R.drawable.ic_menu_sort_alphabetically, "Translation") {
+            handleElementSelected("system:translation_floating", "Translation")
         }
         addItem(com.example.R.drawable.ic_library_books, "eBook Reader") {
             handleElementSelected("system:ebook_reader", "eBook Reader")
@@ -378,6 +377,9 @@ class AddElementActivity : ComponentActivity() {
                 val finalId = if (requestCode == 500 && id.startsWith("widget:")) {
                     "popup_widget:" + id.removePrefix("widget:")
                 } else if (requestCode == 700) {
+                    com.example.feature.floating.trigger.FloatingTriggerManager
+                        .getInstance(this)
+                        .ensureActiveTrigger(id, displayName)
                     "floating_trigger:$id"
                 } else {
                     id
@@ -394,5 +396,57 @@ class AddElementActivity : ComponentActivity() {
                 com.example.core.LogKeeper.writeLog("AddElementActivity", "ShortcutPicker cancelled or failed.")
             }
         }
+    }
+
+    private fun showFloatingTriggerAssociationDialog(
+        pageId: String?,
+        containerId: String,
+        isHybridGrid: Boolean,
+        pageType: String?
+    ) {
+        val existingElements = com.example.feature.floating.trigger.FloatingTriggerStore
+            .getInstance(this)
+            .discoverExistingSidebarGridElements()
+
+        if (existingElements.isEmpty()) {
+            launchFullFloatingTriggerPicker(pageId, containerId, isHybridGrid, pageType)
+            return
+        }
+
+        val labels = existingElements.map { it.label }.toMutableList().apply {
+            add("Browse all Sidebar elements…")
+        }.toTypedArray()
+
+        android.app.AlertDialog.Builder(this)
+            .setTitle("Associate Floating Trigger")
+            .setItems(labels) { _, which ->
+                if (which < existingElements.size) {
+                    val chosen = existingElements[which]
+                    com.example.feature.floating.trigger.FloatingTriggerManager
+                        .getInstance(this)
+                        .ensureActiveTrigger(chosen.id, chosen.label)
+                    handleElementSelected("floating_trigger:${chosen.id}", "Trigger: ${chosen.label}")
+                } else {
+                    launchFullFloatingTriggerPicker(pageId, containerId, isHybridGrid, pageType)
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun launchFullFloatingTriggerPicker(
+        pageId: String?,
+        containerId: String,
+        isHybridGrid: Boolean,
+        pageType: String?
+    ) {
+        val intent = Intent(this, AddElementActivity::class.java).apply {
+            putExtra("IS_FLOATING_TRIGGER_SELECTION", true)
+            putExtra("PAGE_ID", pageId)
+            putExtra("CONTAINER_ID", containerId)
+            putExtra("IS_HYBRID_GRID", isHybridGrid)
+            putExtra("PAGE_TYPE", pageType)
+        }
+        startActivityForResult(intent, 700)
     }
 }

@@ -141,9 +141,10 @@ object ElementActionDispatcher {
                 }
 
                 is SidebarItem.FloatingTrigger -> {
-                    LogKeeper.log(context, TAG, "Triggering container element: ${item.targetId}")
-                    SidebarManager.getInstance(context).openContainerById(item.targetId)
-                    true
+                    LogKeeper.log(context, TAG, "Dispatching floating trigger element: ${item.targetId}")
+                    com.example.feature.floating.trigger.FloatingTriggerManager
+                        .getInstance(context)
+                        .handleSidebarTriggerItem(item)
                 }
 
                 is SidebarItem.Folder -> {

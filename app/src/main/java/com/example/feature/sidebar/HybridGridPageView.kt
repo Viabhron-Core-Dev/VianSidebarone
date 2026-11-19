@@ -569,7 +569,9 @@ class HybridGridPageView(
                                         com.example.feature.miniapps.MiniAppManager.toggleApp(context, parsed.pageType)
                                     }
                                     is SidebarItem.FloatingTrigger -> {
-                                        com.example.feature.sidebar.SidebarManager.getInstance(context).openContainerById(parsed.targetId)
+                                        com.example.feature.floating.trigger.FloatingTriggerManager
+                                            .getInstance(context)
+                                            .handleSidebarTriggerItem(parsed)
                                     }
                                     is SidebarItem.Folder -> {
                                         showFolderPopup(elementView, parsed, appsManager)

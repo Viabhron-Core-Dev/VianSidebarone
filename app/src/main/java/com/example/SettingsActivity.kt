@@ -162,6 +162,13 @@ fun SettingsNavigationApp(initialRoute: String, onFinish: () -> Unit) {
                 onBack = { navigateBack() }
             )
         }
+        currentRoute == com.example.feature.settings.ROUTE_DICTIONARY_TRANSLATION_SETTINGS ||
+            currentRoute == "dictionary_settings" ||
+            currentRoute == "translation_settings" -> {
+            com.example.feature.settings.DictionaryTranslationSettingsScreen(
+                onBack = { navigateBack() }
+            )
+        }
         else -> {
             MainSettingsScreen(
                 onNavigateToHandles = { navigateTo("handles") },
@@ -169,6 +176,9 @@ fun SettingsNavigationApp(initialRoute: String, onFinish: () -> Unit) {
                 onNavigateToCallRecorder = { navigateTo("call_recorder") },
                 onNavigateToScreenCap = { navigateTo("screencap") },
                 onNavigateToReaderSettings = { navigateTo("reader_settings") },
+                onNavigateToDictionaryTranslation = {
+                    navigateTo(com.example.feature.settings.ROUTE_DICTIONARY_TRANSLATION_SETTINGS)
+                },
                 onNavigateToPermissions = { navigateTo("permissions") },
                 onBack = onFinish
             )
@@ -184,6 +194,7 @@ fun MainSettingsScreen(
     onNavigateToCallRecorder: () -> Unit,
     onNavigateToScreenCap: () -> Unit,
     onNavigateToReaderSettings: () -> Unit = {},
+    onNavigateToDictionaryTranslation: () -> Unit = {},
     onNavigateToPermissions: () -> Unit,
     onBack: () -> Unit
 ) {
@@ -223,6 +234,16 @@ fun MainSettingsScreen(
                     modifier = Modifier
                         .clickable { onNavigateToReaderSettings() }
                         .testTag("settings_item_reader_settings")
+                )
+                HorizontalDivider()
+            }
+            item {
+                ListItem(
+                    headlineContent = { Text("Dictionary & Translation") },
+                    supportingContent = { Text("Configure offline dictionaries, StarDict status, translation packs, and language settings") },
+                    modifier = Modifier
+                        .clickable { onNavigateToDictionaryTranslation() }
+                        .testTag("settings_item_dictionary_translation")
                 )
                 HorizontalDivider()
             }

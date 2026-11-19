@@ -461,7 +461,9 @@ class WidgetsGridPageView(
                                         try { context.startActivity(intent) } catch (e: Exception) {}
                                     }
                                 } else if (parsed is SidebarItem.FloatingTrigger) {
-                                    com.example.feature.sidebar.SidebarManager.getInstance(context).openContainerById(parsed.targetId)
+                                    com.example.feature.floating.trigger.FloatingTriggerManager
+                                        .getInstance(context)
+                                        .handleSidebarTriggerItem(parsed)
                                 } else if (parsed is SidebarItem.Link) {
                                     com.example.feature.element.ElementActionDispatcher.execute(context, parsed)
                                 } else if (parsed is SidebarItem.QuickTile) {

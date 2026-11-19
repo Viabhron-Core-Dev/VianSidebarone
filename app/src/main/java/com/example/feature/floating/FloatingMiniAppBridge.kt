@@ -77,7 +77,15 @@ class FloatingMiniAppBridge private constructor(private val context: Context) {
 
     fun isReaderMiniApp(appType: String): Boolean = (appType == "reader" || appType == "ebook_reader")
 
-    fun isMainOnlyMiniApp(appType: String): Boolean = isNoteMiniApp(appType) || isReaderMiniApp(appType)
+    fun isDictionaryMiniApp(appType: String): Boolean = (appType == com.example.feature.language.DictionaryMiniAppInstance.APP_TYPE)
+
+    fun isTranslationMiniApp(appType: String): Boolean = (appType == com.example.feature.language.TranslationMiniAppInstance.APP_TYPE)
+
+    fun isMainOnlyMiniApp(appType: String): Boolean =
+        isNoteMiniApp(appType) ||
+            isReaderMiniApp(appType) ||
+            isDictionaryMiniApp(appType) ||
+            isTranslationMiniApp(appType)
 
     /**
      * Opens or wakes the Main-process floating Reader window and loads the specified [epubBookId]
@@ -207,6 +215,22 @@ class FloatingMiniAppBridge private constructor(private val context: Context) {
         }
     }
 
+    fun launchDictionaryTranslationSettings(sourceInstanceId: String? = null) {
+        try {
+            val intent = Intent(context, com.example.SettingsActivity::class.java).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                putExtra("start_route", com.example.feature.settings.ROUTE_DICTIONARY_TRANSLATION_SETTINGS)
+                if (!sourceInstanceId.isNullOrBlank()) {
+                    putExtra("source_miniapp_instance_id", sourceInstanceId)
+                }
+            }
+            context.startActivity(intent)
+            LogKeeper.log(context, TAG, "OPEN_DICTIONARY_TRANSLATION_SETTINGS source=$sourceInstanceId")
+        } catch (e: Throwable) {
+            LogKeeper.log(context, TAG, "Failed to launch Dictionary & Translation Settings: ${e.message}")
+        }
+    }
+
     internal fun getHiddenReaderInstanceIdForTesting(): String? = hiddenReaderInstanceIdForExternal
 
     /**
@@ -280,11 +304,23 @@ class FloatingMiniAppBridge private constructor(private val context: Context) {
             return existing
         }
 
-        // Determine bounds from initialBounds, saved snapshot, or defaults
+        // Determine bounds from initialBounds, saved snapshot, or compact type-aware defaults
         val savedSnapshot = durableStore.loadSnapshot(instanceId)
         val bounds = initialBounds?.copyBounds()
             ?: savedSnapshot?.windowBounds?.copyBounds()
-            ?: WindowBounds(120, 150, 650, 850)
+            ?: when {
+                isDictionaryMiniApp(appType) -> com.example.feature.language.LanguageMiniAppUiHelper.computeCompactDictionaryBounds(
+                    context = context,
+                    screenWidth = windowManager.screenWidth,
+                    screenHeight = windowManager.screenHeight
+                )
+                isTranslationMiniApp(appType) -> com.example.feature.language.LanguageMiniAppUiHelper.computeCompactTranslationBounds(
+                    context = context,
+                    screenWidth = windowManager.screenWidth,
+                    screenHeight = windowManager.screenHeight
+                )
+                else -> WindowBounds(120, 150, 650, 850)
+            }
 
         val isReader = isReaderMiniApp(appType)
         val isWarmReaderSession = isReader && com.example.feature.reader.ReaderSessionTracker.isWarmSession(instanceId)

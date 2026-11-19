@@ -584,7 +584,9 @@ class AppsPageView(
                         onCloseSidebar()
                     }
                 } else if (item is SidebarItem.FloatingTrigger) {
-                    com.example.feature.sidebar.SidebarManager.getInstance(context).openContainerById(item.targetId)
+                    com.example.feature.floating.trigger.FloatingTriggerManager
+                        .getInstance(context)
+                        .handleSidebarTriggerItem(item)
                     currentFolderPopup?.dismiss()
                     onCloseSidebar()
                 } else if (item is SidebarItem.Folder) {
