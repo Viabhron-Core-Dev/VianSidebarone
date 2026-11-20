@@ -186,7 +186,8 @@ object LogKeeper {
     @Synchronized
     private fun appendToFile(context: Context, fileName: String, text: String) {
         try {
-            val logFile = File(context.filesDir, fileName)
+            val filesDir = context.filesDir ?: return
+            val logFile = File(filesDir, fileName)
             // Trim if file exceeds MAX_LOG_SIZE
             if (logFile.exists() && logFile.length() > MAX_LOG_SIZE) {
                 try {
@@ -254,7 +255,8 @@ object LogKeeper {
 
     private fun readLogFile(context: Context, fileName: String): String {
         return try {
-            val file = File(context.filesDir, fileName)
+            val filesDir = context.filesDir ?: return "No records in $fileName."
+            val file = File(filesDir, fileName)
             if (file.exists() && file.length() > 0L) {
                 file.readText()
             } else {
@@ -280,7 +282,8 @@ object LogKeeper {
 
     private fun deleteLogFile(context: Context, fileName: String) {
         try {
-            val file = File(context.filesDir, fileName)
+            val filesDir = context.filesDir ?: return
+            val file = File(filesDir, fileName)
             if (file.exists()) {
                 file.delete()
             }

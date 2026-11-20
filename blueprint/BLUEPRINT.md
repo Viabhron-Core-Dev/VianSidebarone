@@ -757,6 +757,22 @@
   - `compile_applet` succeeded (`Build succeeded - the applet is compiled`).
   - Targeted JVM unit tests passed (**151/151** across 8 suites, 0 failures/errors/skipped): `FloatingTriggerTest` (6/6), `DictionaryAndTranslationMiniAppTest` (5/5), `SelectionActionsAndReadAloudTest` (6/6), `FloatingMiniAppFrameworkTest` (98/98), `ReaderMiniAppTest` (18/18), `ElementIdParserTest` (12/12), `ElementSystemTest` (4/4), `SettingsNavigationStructureTest` (2/2). Physical-device verification remains required for real Android overlay dragging, keyboard IME input, `ACTION_PROCESS_TEXT` host-app menu visibility, and live `TextToSpeech` audio playback.
 
+### Phase 14.23: Focused Floating Trigger Target Eligibility Audit & `LiteReader_Log.txt` Cleanup (COMPLETED)
+- **1. Dispatcher-Derived Floating Trigger Target Eligibility (`FloatingTriggerStore.kt`, `FloatingTriggerManager.kt`, `AddElementActivity.kt`)**:
+  - Audited `ElementActionDispatcher.execute(...)` vs. `ElementIdParser.parse(...)` and replaced broad parse-based acceptance with explicit `FloatingTriggerTargetValidation` (`ValidStandalone`, `LegacyContainer`, `Unsupported`) derived directly from standalone `ElementActionDispatcher` branches (`onShowFolder = null`, `onShowWidget = null`).
+  - **Eligible Standalone Targets**: `App` (non-blank package), `Link` (non-blank UUID and valid non-placeholder URL), `Pwa` (non-blank ID), `QuickTile`, `VolumeAction`, `MediaAction`, `DisplayAction`, `SystemAction`, `SettingsShortcut`, `IntentAction` (non-blank URI), and non-widget `PageWindow`.
+  - **Strictly Excluded Targets**: `Folder`, `PopupWidget`, `Widget`, `Spacer`, recursive `FloatingTrigger`, `page_window:widget`, and malformed/incomplete known-prefix IDs (preventing `popup_widget:` or invalid known-prefix IDs from falling back to `LegacyContainer`), while preserving backward compatibility for legacy container-navigation IDs (e.g. `left_0_swipe_right`, `notes`).
+  - **Picker & Runtime Enforcement**:
+    - Filtered `FloatingTriggerStore.discoverExistingSidebarGridElements()` using `FloatingTriggerCompat.resolveExecutableItem(...)`.
+    - Updated `AddElementActivity` full-picker fallback (`IS_FLOATING_TRIGGER_SELECTION == true`) to hide `Widget`, `Popup Widget`, `Folder`, and `Floating Trigger`, force `IS_HYBRID_GRID = false` in `launchFullFloatingTriggerPicker` so inner pickers return `ELEMENT_ID` to `requestCode = 700` instead of inserting raw items into a Hybrid Grid, and guard `handleElementSelected` / `onActivityResult(700)` with `FloatingTriggerCompat.validateTarget(...)` + user-facing `AlertDialog`/`Toast` explanations.
+    - Enforced validation in `FloatingTriggerManager` across `handleSidebarTriggerItem`, `toggleTriggerForElement`, `ensureActiveTrigger`, `executeAssociatedElement` (showing clear user feedback instead of silently attaching/running dead triggers), and `restoreActiveTriggers()` (safely skipping & deactivating unsupported persisted targets without crashing).
+- **2. `app/LiteReader_Log.txt` & `LogKeeper.kt` Cleanup**:
+  - Verified lines 1198–1221 (`2026-11-19 21:02:...`, `[pid-0] [Test worker]`) in `app/LiteReader_Log.txt` were generated during the Phase 14.22 JVM test run when mock `Context.filesDir == null` resolved `File(null, "LiteReader_Log.txt")` to `app/LiteReader_Log.txt`.
+  - Removed ONLY those 24 newly appended lines from `app/LiteReader_Log.txt` (preserving lines 1–1197 verbatim) and guarded `LogKeeper.kt` (`appendToFile`, `readLogFile`, `deleteLogFile`) against `context.filesDir == null` so future JVM unit tests do not pollute the repository file.
+- **3. Verification**:
+  - `compile_applet` succeeded (`Build succeeded - the applet is compiled`).
+  - Targeted JVM unit tests (`--rerun-tasks`) passed **156/156** across 8 suites (`FloatingTriggerTest` 11/11, `ElementIdParserTest` 12/12, `ElementSystemTest` 4/4, `FloatingMiniAppFrameworkTest` 98/98, `ReaderMiniAppTest` 18/18, `SettingsNavigationStructureTest` 2/2, `DictionaryAndTranslationMiniAppTest` 5/5, `SelectionActionsAndReadAloudTest` 6/6; 0 failures/errors/skipped), and `app/LiteReader_Log.txt` stayed clean at 1197 lines. Physical-device testing remains required for live overlay picker dialogs, Hybrid Grid trigger placement, and Toast/dialog feedback.
+
 ---
 
 ## Phase 14: PWA Engine & External AI App Integration (Tier 5 - Highest Complexity)

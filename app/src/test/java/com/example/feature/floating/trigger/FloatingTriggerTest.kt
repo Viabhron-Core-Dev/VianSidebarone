@@ -272,4 +272,174 @@ class FloatingTriggerTest {
 
         bridge.closeMiniApp(dictWindow.instanceId, deleteDurable = true)
     }
+
+    @Test
+    fun testAllDispatcherExecutableTypesAreEligible() {
+        val validTargets = listOf(
+            "app:com.example.notes",
+            "link:u1:{\"url\":\"https://example.com\",\"label\":\"Docs\"}",
+            "pwa:offline_wiki",
+            "quicktile:torch",
+            "volume:media_vol_up",
+            "media:play_pause",
+            "display:torch_toggle",
+            "system:dictionary_floating",
+            "settings_shortcut:wifi",
+            "intent:My%20Shortcut:intent%3A%23Intent%3Bend",
+            "page_window:calculator"
+        )
+
+        for (target in validTargets) {
+            val validation = FloatingTriggerCompat.validateTarget(context, target)
+            assertTrue(
+                "Expected '$target' to be ValidStandalone, got $validation",
+                validation is FloatingTriggerTargetValidation.ValidStandalone
+            )
+            assertTrue("Expected isStandaloneElementTarget=true for $target", FloatingTriggerCompat.isStandaloneElementTarget(context, target))
+            assertFalse("Expected isLegacyContainerTarget=false for $target", FloatingTriggerCompat.isLegacyContainerTarget(context, target))
+            assertNull(FloatingTriggerCompat.unsupportedReason(context, target))
+        }
+    }
+
+    @Test
+    fun testNonExecutableAndMalformedTargetsAreRejectedWithClearReason() {
+        val unsupportedTargets = listOf(
+            "",
+            "   ",
+            "folder:f1:{\"name\":\"Reading\",\"items\":[\"quicktile:torch\"]}",
+            "widget:42",
+            "popup_widget:99",
+            "spacer:sp1:{\"heightDp\":40}",
+            "floating_trigger:quicktile:torch",
+            "page_window:widget",
+            "quicktile:nonexistent_tile",
+            "system:does_not_exist",
+            "app:",
+            "intent:",
+            "pwa:",
+            "link:",
+            "link:bare_no_url:{}"
+        )
+
+        val manager = FloatingTriggerManager.getInstance(context)
+        manager.canDrawOverlaysCheck = { true }
+        var executedCount = 0
+        manager.actionExecutor = { _, _ ->
+            executedCount++
+            true
+        }
+        val notifiedMessages = mutableListOf<String>()
+        manager.userMessageNotifier = { _, msg -> notifiedMessages.add(msg) }
+
+        for (target in unsupportedTargets) {
+            val validation = FloatingTriggerCompat.validateTarget(context, target)
+            assertTrue(
+                "Expected '$target' to be Unsupported (never ValidStandalone or LegacyContainer), got $validation",
+                validation is FloatingTriggerTargetValidation.Unsupported
+            )
+            assertFalse("isStandaloneElementTarget must be false for $target", FloatingTriggerCompat.isStandaloneElementTarget(context, target))
+            assertFalse("isLegacyContainerTarget must be false for $target", FloatingTriggerCompat.isLegacyContainerTarget(context, target))
+            assertNotNull("unsupportedReason must explain rejection for $target", FloatingTriggerCompat.unsupportedReason(context, target))
+
+            assertNull("ensureActiveTrigger must reject '$target'", manager.ensureActiveTrigger(target, "Bad Target"))
+            assertFalse("toggleTriggerForElement must reject '$target'", manager.toggleTriggerForElement(target, "Bad Target"))
+            assertFalse("executeAssociatedElement must refuse '$target'", manager.executeAssociatedElement(target))
+            assertFalse(
+                "handleSidebarTriggerItem must refuse unsupported '$target'",
+                manager.handleSidebarTriggerItem(SidebarItem.FloatingTrigger(target, "Trigger: Bad"))
+            )
+        }
+
+        assertEquals("Unsupported targets must never execute via actionExecutor", 0, executedCount)
+        assertTrue("User-facing rejection feedback must be emitted", notifiedMessages.isNotEmpty())
+        assertEquals("Unsupported targets must never create trigger records", 0, FloatingTriggerStore.getInstance(context).getAllTriggers().size)
+        assertEquals("Unsupported targets must never attach floating windows", 0, manager.getActiveWindowCount())
+    }
+
+    @Test
+    fun testDiscoverExistingSidebarGridElementsFiltersUnsupportedTargets() {
+        val sidebarPrefs = context.getSharedPreferences("FloatingReaderPrefs", Context.MODE_PRIVATE)
+        val hybridArray = org.json.JSONArray().apply {
+            put(org.json.JSONObject().put("elementId", "quicktile:torch"))
+            put(org.json.JSONObject().put("elementId", "system:dictionary_floating"))
+            put(org.json.JSONObject().put("elementId", "app:com.example.reader"))
+            put(org.json.JSONObject().put("elementId", "link:lnk1:{\"url\":\"https://example.org\",\"label\":\"Example\"}"))
+            put(org.json.JSONObject().put("elementId", "pwa:demo_pwa"))
+            put(org.json.JSONObject().put("elementId", "folder:fld1:{\"name\":\"Apps\",\"items\":[]}"))
+            put(org.json.JSONObject().put("elementId", "widget:12"))
+            put(org.json.JSONObject().put("elementId", "popup_widget:15"))
+            put(org.json.JSONObject().put("elementId", "spacer:sp1:{\"heightDp\":50}"))
+            put(org.json.JSONObject().put("elementId", "floating_trigger:quicktile:wifi"))
+            put(org.json.JSONObject().put("elementId", "quicktile:nonexistent"))
+        }
+        sidebarPrefs.edit()
+            .putString("hybrid_grid_page1", hybridArray.toString())
+            .commit()
+
+        val discovered = FloatingTriggerStore.getInstance(context).discoverExistingSidebarGridElements()
+        val discoveredIds = discovered.map { it.id }
+
+        assertTrue(discoveredIds.contains("quicktile:torch"))
+        assertTrue(discoveredIds.contains("system:dictionary_floating"))
+        assertTrue(discoveredIds.contains("app:com.example.reader"))
+        assertTrue(discoveredIds.any { it.startsWith("link:lnk1") })
+        assertTrue(discoveredIds.contains("pwa:demo_pwa"))
+
+        assertFalse("Folder must be filtered out", discovered.any { it is SidebarItem.Folder })
+        assertFalse("Widget must be filtered out", discovered.any { it is SidebarItem.Widget })
+        assertFalse("PopupWidget must be filtered out", discovered.any { it is SidebarItem.PopupWidget })
+        assertFalse("Spacer must be filtered out", discovered.any { it is SidebarItem.Spacer })
+        assertFalse("FloatingTrigger must be filtered out", discovered.any { it is SidebarItem.FloatingTrigger })
+        assertEquals(5, discovered.size)
+    }
+
+    @Test
+    fun testRestoreActiveTriggersSkipsUnsupportedPersistedRecordsWithoutCrashing() {
+        val store = FloatingTriggerStore.getInstance(context)
+        store.saveTrigger(FloatingTriggerRecord("ft_valid", "quicktile:torch", "Torch", 120, 220, active = true))
+        store.saveTrigger(FloatingTriggerRecord("ft_folder", "folder:f1:{\"name\":\"Box\",\"items\":[]}", "Box", 120, 220, active = true))
+        store.saveTrigger(FloatingTriggerRecord("ft_widget", "widget:7", "Clock Widget", 120, 220, active = true))
+        store.saveTrigger(FloatingTriggerRecord("ft_popup_widget", "popup_widget:9", "Popup Clock", 120, 220, active = true))
+        store.saveTrigger(FloatingTriggerRecord("ft_spacer", "spacer:s1:{\"heightDp\":30}", "Spacer", 120, 220, active = true))
+        store.saveTrigger(FloatingTriggerRecord("ft_recursive", "floating_trigger:quicktile:wifi", "Nested", 120, 220, active = true))
+
+        FloatingTriggerManager.resetForTesting()
+        FloatingTriggerStore.resetForTesting()
+
+        val manager = FloatingTriggerManager.getInstance(context)
+        manager.canDrawOverlaysCheck = { true }
+        val restored = manager.restoreActiveTriggers()
+
+        assertEquals("Only the single valid persisted trigger must restore", 1, restored)
+        assertNotNull(manager.getActiveWindow("ft_valid"))
+        assertNull(manager.getActiveWindow("ft_folder"))
+        assertNull(manager.getActiveWindow("ft_widget"))
+        assertNull(manager.getActiveWindow("ft_popup_widget"))
+        assertNull(manager.getActiveWindow("ft_spacer"))
+        assertNull(manager.getActiveWindow("ft_recursive"))
+
+        val reloadedStore = FloatingTriggerStore.getInstance(context)
+        assertTrue(reloadedStore.getTrigger("ft_valid")!!.active)
+        assertFalse(reloadedStore.getTrigger("ft_folder")!!.active)
+        assertFalse(reloadedStore.getTrigger("ft_widget")!!.active)
+        assertFalse(reloadedStore.getTrigger("ft_popup_widget")!!.active)
+        assertFalse(reloadedStore.getTrigger("ft_spacer")!!.active)
+        assertFalse(reloadedStore.getTrigger("ft_recursive")!!.active)
+    }
+
+    @Test
+    fun testAddElementActivityFullPickerFallbackAppliesSameEligibilityRules() {
+        val candidates = listOf(
+            File("src/main/java/com/example/feature/settings/AddElementActivity.kt"),
+            File("app/src/main/java/com/example/feature/settings/AddElementActivity.kt"),
+            File("../app/src/main/java/com/example/feature/settings/AddElementActivity.kt")
+        )
+        val source = candidates.first { it.isFile }.readText()
+
+        assertTrue("Full picker must hide Widget, Popup Widget, and Folder during trigger selection", source.contains("if (!isFloatingTrigger)"))
+        assertTrue("launchFullFloatingTriggerPicker must force IS_HYBRID_GRID=false", source.contains("putExtra(\"IS_HYBRID_GRID\", false)"))
+        assertTrue("Full picker must validate via FloatingTriggerCompat.validateTarget", source.contains("FloatingTriggerCompat"))
+        assertTrue("Full picker must show user-facing explanation on unsupported selection", source.contains("showUnsupportedFloatingTriggerExplanation"))
+    }
 }
+

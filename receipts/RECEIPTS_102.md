@@ -82,3 +82,34 @@
   - Not tested on a physical Android device or emulator.
 * Any deviation from what was requested, and why: Unit tests use the project's existing pure JVM JUnit 4 + `FakeSharedPreferences` harness (with a `TtsEngineAdapter` fake for `ReadAloudController`) rather than Robolectric, because Robolectric is not in `app/build.gradle.kts` and adding new dependencies was explicitly out of scope.
 * Any known issue or follow-up needed: Dictionary lookup (StarDict parsing/import/DB) and Translation engines/language packs are intentionally unconfigured UI placeholders pending future phases. Physical-device QA is required to verify overlay long-press drag ergonomics, IME focus in floating Dictionary/Translation windows, `ACTION_PROCESS_TEXT` menu entries across third-party host apps (which vary in support), and real Android `TextToSpeech` voice playback.
+
+### Receipt 127
+* Timestamp: 2026-11-19 23:06 UTC
+* One-line summary of what was requested: Audit and fix Floating Trigger target eligibility so only genuinely executable Sidebar elements (per `ElementActionDispatcher`) can be associated or restored, and clean up the unexpected `[Test worker]` modification to `app/LiteReader_Log.txt`.
+* Exact files touched:
+  - `app/src/main/java/com/example/feature/floating/trigger/FloatingTriggerStore.kt`
+  - `app/src/main/java/com/example/feature/floating/trigger/FloatingTriggerManager.kt`
+  - `app/src/main/java/com/example/feature/settings/AddElementActivity.kt`
+  - `app/src/main/java/com/example/core/LogKeeper.kt`
+  - `app/LiteReader_Log.txt`
+  - `app/src/test/java/com/example/feature/floating/trigger/FloatingTriggerTest.kt`
+  - `blueprint/BLUEPRINT.md`
+  - `receipts/RECEIPTS_102.md`
+* What was actually done — factual, not persuasive:
+  1. **Floating Trigger Target Eligibility (`FloatingTriggerStore.kt`, `FloatingTriggerManager.kt`)**:
+     - Added `FloatingTriggerTargetValidation` (`ValidStandalone`, `LegacyContainer`, `Unsupported`) and `FloatingTriggerCompat.validateItem` / `validateTarget` / `resolveExecutableItem` / `unsupportedReason` aligned directly with standalone `ElementActionDispatcher.execute` branches (`onShowFolder = null`, `onShowWidget = null`).
+     - Allowed executable types (`App`, `Link`, `Pwa`, `QuickTile`, `VolumeAction`, `MediaAction`, `DisplayAction`, `SystemAction`, `SettingsShortcut`, `IntentAction`, non-widget `PageWindow`) with non-empty target field validation, while explicitly rejecting `Folder`, `PopupWidget`, `Widget`, `Spacer`, recursive `FloatingTrigger`, `page_window:widget`, and malformed known-prefix IDs (preventing `popup_widget:` or invalid known-prefix IDs from falling back to `LegacyContainer`), while preserving backward compatibility for legacy container IDs (e.g. `left_0_swipe_right`, `notes`).
+     - Updated `FloatingTriggerStore.discoverExistingSidebarGridElements()` to filter exclusively via `FloatingTriggerCompat.resolveExecutableItem`.
+     - Updated `FloatingTriggerManager` (`handleSidebarTriggerItem`, `toggleTriggerForElement`, `ensureActiveTrigger`, `restoreActiveTriggers`, `executeAssociatedElement`) to enforce `FloatingTriggerCompat.validateTarget`, surface user-facing rejection explanations via `userMessageNotifier`, skip and deactivate unsupported persisted records on restore without crashing, and refuse execution of unsupported targets.
+  2. **Picker & Fallback Parity (`AddElementActivity.kt`)**:
+     - When `IS_FLOATING_TRIGGER_SELECTION == true`, changed title to `"Select trigger action"`, hid `Widget`, `Popup Widget`, and `Folder` rows alongside `Floating Trigger`, forced `IS_HYBRID_GRID = false` in `launchFullFloatingTriggerPicker` (fixing direct-to-grid bypass when invoked from a Hybrid Grid page), guarded `finishWithId` gesture configuration, and validated `handleElementSelected` and `onActivityResult(700)` via `FloatingTriggerCompat.validateTarget` with `showUnsupportedFloatingTriggerExplanation(...)` (`AlertDialog`/`Toast`).
+  3. **Log Cleanup & Prevention (`app/LiteReader_Log.txt`, `LogKeeper.kt`)**:
+     - Removed the 24 `[2026-11-19 21:02:...]` `[pid-0] [Test worker]` lines (lines 1198–1221) appended to `app/LiteReader_Log.txt` during the Phase 14.22 test run, preserving lines 1–1197 intact.
+     - Added `context.filesDir ?: return` null guards in `LogKeeper.kt` (`appendToFile`, `readLogFile`, `deleteLogFile`) so JVM unit tests using mock contexts without `filesDir` do not write into `app/LiteReader_Log.txt`.
+  4. **Tests (`FloatingTriggerTest.kt`)**:
+     - Added 5 unit tests verifying all 11 valid dispatcher-executable types, rejection of Folder/Widget/PopupWidget/Spacer/FloatingTrigger/widget-window/malformed IDs with reasons and zero execution, `discoverExistingSidebarGridElements()` filtering, `restoreActiveTriggers()` safe skipping/deactivation of unsupported persisted records, and `AddElementActivity` full-picker parity.
+* How it was verified: Local build (`compile_applet` -> `Build succeeded - the applet is compiled`) and local JVM unit tests:
+  - `gradle :app:testDebugUnitTest --tests "com.example.feature.floating.trigger.FloatingTriggerTest" --tests "com.example.feature.element.ElementIdParserTest" --tests "com.example.feature.element.ElementSystemTest" --tests "com.example.feature.floating.FloatingMiniAppFrameworkTest" --tests "com.example.feature.reader.ReaderMiniAppTest" --tests "com.example.feature.settings.SettingsNavigationStructureTest" --tests "com.example.feature.language.DictionaryAndTranslationMiniAppTest" --tests "com.example.feature.selection.SelectionActionsAndReadAloudTest" --rerun-tasks --console=plain` -> `BUILD SUCCESSFUL` (**156/156** tests passed: `FloatingTriggerTest` 11/11, `ElementIdParserTest` 12/12, `ElementSystemTest` 4/4, `FloatingMiniAppFrameworkTest` 98/98, `ReaderMiniAppTest` 18/18, `SettingsNavigationStructureTest` 2/2, `DictionaryAndTranslationMiniAppTest` 5/5, `SelectionActionsAndReadAloudTest` 6/6; 0 failures, 0 errors, 0 skipped).
+  - Verified `app/LiteReader_Log.txt` remained unchanged at 1197 lines after running the unit tests. Not tested on a physical Android device or emulator.
+* Any deviation from what was requested, and why: None.
+* Any known issue or follow-up needed: Physical-device testing is required to confirm live overlay alert dialogs, Toast notifications, and end-to-end Floating Trigger selection inside Hybrid Grid edit mode on Android.

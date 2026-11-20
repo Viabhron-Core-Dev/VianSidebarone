@@ -51,8 +51,10 @@ class AddElementActivity : ComponentActivity() {
             setOnClickListener { finish() }
         }
         
+        val isFloatingTrigger = intent.getBooleanExtra("IS_FLOATING_TRIGGER_SELECTION", false)
+
         val titleView = TextView(this).apply {
-            text = "Add element"
+            text = if (isFloatingTrigger) "Select trigger action" else "Add element"
             setTextColor(Color.WHITE)
             textSize = 20f
             setTypeface(null, Typeface.BOLD)
@@ -128,12 +130,13 @@ class AddElementActivity : ComponentActivity() {
         val pageId = intent.getStringExtra("PAGE_ID")
         val containerId = intent.getStringExtra("CONTAINER_ID") ?: "sidebar"
         val isHybridGrid = intent.getBooleanExtra("IS_HYBRID_GRID", false)
+        val effectiveIsHybridGrid = isHybridGrid && !isFloatingTrigger
         val pageType = intent.getStringExtra("PAGE_TYPE")
 
         com.example.core.LogKeeper.log(
             this,
             "MiniAppLaunchRouting",
-            "ROUTING_DIAG: ADD_ELEMENT_ACTIVITY_CREATED pageId=$pageId containerId=$containerId isHybrid=$isHybridGrid pageType=$pageType"
+            "ROUTING_DIAG: ADD_ELEMENT_ACTIVITY_CREATED pageId=$pageId containerId=$containerId isHybrid=$isHybridGrid isFloatingTrigger=$isFloatingTrigger pageType=$pageType"
         )
 
         addHeader("Default actions")
@@ -141,7 +144,7 @@ class AddElementActivity : ComponentActivity() {
             val appIntent = Intent(this, AppPickerActivity::class.java).apply {
                 putExtra("PAGE_ID", pageId)
                 putExtra("CONTAINER_ID", containerId)
-                putExtra("IS_HYBRID_GRID", isHybridGrid)
+                putExtra("IS_HYBRID_GRID", effectiveIsHybridGrid)
                 putExtra("PAGE_TYPE", pageType)
             }
             startActivityForResult(appIntent, 200)
@@ -150,7 +153,7 @@ class AddElementActivity : ComponentActivity() {
             val sIntent = Intent(this, ShortcutPickerActivity::class.java).apply {
                 putExtra("PAGE_ID", pageId)
                 putExtra("CONTAINER_ID", containerId)
-                putExtra("IS_HYBRID_GRID", isHybridGrid)
+                putExtra("IS_HYBRID_GRID", effectiveIsHybridGrid)
                 putExtra("PAGE_TYPE", pageType)
             }
             startActivityForResult(sIntent, 300)
@@ -159,70 +162,73 @@ class AddElementActivity : ComponentActivity() {
             val iIntent = Intent(this, IntentPickerActivity::class.java).apply {
                 putExtra("PAGE_ID", pageId)
                 putExtra("CONTAINER_ID", containerId)
-                putExtra("IS_HYBRID_GRID", isHybridGrid)
+                putExtra("IS_HYBRID_GRID", effectiveIsHybridGrid)
                 putExtra("PAGE_TYPE", pageType)
             }
             startActivityForResult(iIntent, 301)
         }
-        addItem(android.R.drawable.ic_menu_gallery, "Widget") {
-            val intent = Intent(this, com.example.WidgetPickerActivity::class.java).apply {
-                putExtra("ACTION_TYPE", "RETURN_ID")
-                putExtra("PAGE_ID", pageId)
-                putExtra("CONTAINER_ID", containerId)
-                putExtra("IS_HYBRID_GRID", isHybridGrid)
-                putExtra("PAGE_TYPE", pageType)
+        if (!isFloatingTrigger) {
+            addItem(android.R.drawable.ic_menu_gallery, "Widget") {
+                val intent = Intent(this, com.example.WidgetPickerActivity::class.java).apply {
+                    putExtra("ACTION_TYPE", "RETURN_ID")
+                    putExtra("PAGE_ID", pageId)
+                    putExtra("CONTAINER_ID", containerId)
+                    putExtra("IS_HYBRID_GRID", effectiveIsHybridGrid)
+                    putExtra("PAGE_TYPE", pageType)
+                }
+                startActivityForResult(intent, 400)
             }
-            startActivityForResult(intent, 400)
-        }
-        
-        addItem(android.R.drawable.ic_menu_gallery, "Popup Widget") {
-            val intent = Intent(this, com.example.WidgetPickerActivity::class.java).apply {
-                putExtra("ACTION_TYPE", "RETURN_ID")
-                putExtra("PAGE_ID", pageId)
-                putExtra("CONTAINER_ID", containerId)
-                putExtra("IS_HYBRID_GRID", isHybridGrid)
-                putExtra("PAGE_TYPE", pageType)
+
+            addItem(android.R.drawable.ic_menu_gallery, "Popup Widget") {
+                val intent = Intent(this, com.example.WidgetPickerActivity::class.java).apply {
+                    putExtra("ACTION_TYPE", "RETURN_ID")
+                    putExtra("PAGE_ID", pageId)
+                    putExtra("CONTAINER_ID", containerId)
+                    putExtra("IS_HYBRID_GRID", effectiveIsHybridGrid)
+                    putExtra("PAGE_TYPE", pageType)
+                }
+                startActivityForResult(intent, 500)
             }
-            startActivityForResult(intent, 500)
         }
 
         addHeader("Special items")
-        val isFloatingTrigger = intent.getBooleanExtra("IS_FLOATING_TRIGGER_SELECTION", false)
-        addItem(android.R.drawable.ic_menu_more, "Folder") {
-            val options = arrayOf("Grid", "Stack")
-            android.app.AlertDialog.Builder(this)
-                .setTitle("Folder style")
-                .setItems(options) { _, which ->
-                    val input = android.widget.EditText(this)
-                    input.hint = "Folder Name"
-                    input.setText("New Folder")
-                    android.app.AlertDialog.Builder(this)
-                        .setTitle("Folder Name")
-                        .setView(input)
-                        .setPositiveButton("OK") { _, _ ->
-                            val folderName = input.text.toString().takeIf { it.isNotEmpty() } ?: "New Folder"
-                            val uuid = java.util.UUID.randomUUID().toString()
-                            val folderJson = JSONObject().apply {
-                                put("name", folderName)
-                                put("colorHex", "#444444")
-                                put("items", org.json.JSONArray())
-                                put("folderStyle", which)
-                                put("popupColumns", 3)
-                                put("popupRows", 3)
+        if (!isFloatingTrigger) {
+            addItem(android.R.drawable.ic_menu_more, "Folder") {
+                val options = arrayOf("Grid", "Stack")
+                android.app.AlertDialog.Builder(this)
+                    .setTitle("Folder style")
+                    .setItems(options) { _, which ->
+                        val input = android.widget.EditText(this)
+                        input.hint = "Folder Name"
+                        input.setText("New Folder")
+                        android.app.AlertDialog.Builder(this)
+                            .setTitle("Folder Name")
+                            .setView(input)
+                            .setPositiveButton("OK") { _, _ ->
+                                val folderName = input.text.toString().takeIf { it.isNotEmpty() } ?: "New Folder"
+                                val uuid = java.util.UUID.randomUUID().toString()
+                                val folderJson = JSONObject().apply {
+                                    put("name", folderName)
+                                    put("colorHex", "#444444")
+                                    put("items", org.json.JSONArray())
+                                    put("folderStyle", which)
+                                    put("popupColumns", 3)
+                                    put("popupRows", 3)
+                                }
+                                val folderId = "folder:$uuid:${folderJson.toString()}"
+                                handleElementSelected(folderId, folderName)
                             }
-                            val folderId = "folder:$uuid:${folderJson.toString()}"
-                            handleElementSelected(folderId, folderName)
-                        }
-                        .setNegativeButton("Cancel", null)
-                        .show()
-                }
-                .show()
+                            .setNegativeButton("Cancel", null)
+                            .show()
+                    }
+                    .show()
+            }
         }
         addItem(com.example.R.drawable.ic_language, "Link") {
             val linkIntent = Intent(this, LinkPickerActivity::class.java).apply {
                 putExtra("PAGE_ID", pageId)
                 putExtra("CONTAINER_ID", containerId)
-                putExtra("IS_HYBRID_GRID", isHybridGrid)
+                putExtra("IS_HYBRID_GRID", effectiveIsHybridGrid)
                 putExtra("PAGE_TYPE", pageType)
             }
             startActivityForResult(linkIntent, 302)
@@ -231,7 +237,7 @@ class AddElementActivity : ComponentActivity() {
             val pwaIntent = Intent(this, com.example.feature.pwa.PwaListActivity::class.java).apply {
                 putExtra("PAGE_ID", pageId)
                 putExtra("CONTAINER_ID", containerId)
-                putExtra("IS_HYBRID_GRID", isHybridGrid)
+                putExtra("IS_HYBRID_GRID", effectiveIsHybridGrid)
                 putExtra("PAGE_TYPE", pageType)
                 putExtra("IS_PICKING", true)
             }
@@ -245,7 +251,7 @@ class AddElementActivity : ComponentActivity() {
                 putExtra("TITLE", title)
                 putExtra("PAGE_ID", pageId)
                 putExtra("CONTAINER_ID", containerId)
-                putExtra("IS_HYBRID_GRID", isHybridGrid)
+                putExtra("IS_HYBRID_GRID", effectiveIsHybridGrid)
                 putExtra("PAGE_TYPE", pageType)
             }
             startActivityForResult(intent, 500)
@@ -296,7 +302,22 @@ class AddElementActivity : ComponentActivity() {
     private fun handleElementSelected(id: String, displayName: String? = null) {
         val pageId = intent.getStringExtra("PAGE_ID")
         val containerId = intent.getStringExtra("CONTAINER_ID") ?: "sidebar"
-        val isHybridGrid = intent.getBooleanExtra("IS_HYBRID_GRID", false)
+        val isFloatingTriggerSelection = intent.getBooleanExtra("IS_FLOATING_TRIGGER_SELECTION", false)
+        val isHybridGrid = intent.getBooleanExtra("IS_HYBRID_GRID", false) && !isFloatingTriggerSelection
+
+        if (isFloatingTriggerSelection) {
+            val validation = com.example.feature.floating.trigger.FloatingTriggerCompat
+                .validateTarget(this, id)
+            if (validation !is com.example.feature.floating.trigger.FloatingTriggerTargetValidation.ValidStandalone) {
+                val reason = (validation as? com.example.feature.floating.trigger.FloatingTriggerTargetValidation.Unsupported)?.reason
+                    ?: "This Sidebar element cannot run as a standalone Floating Trigger."
+                showUnsupportedFloatingTriggerExplanation(reason)
+                return
+            }
+            finishWithId(id)
+            return
+        }
+
         com.example.core.LogKeeper.log(
             this,
             "MiniAppLaunchRouting",
@@ -331,6 +352,7 @@ class AddElementActivity : ComponentActivity() {
     }
     
     private fun finishWithId(id: String) {
+        val isFloatingTriggerSelection = intent.getBooleanExtra("IS_FLOATING_TRIGGER_SELECTION", false)
         val targetId = com.example.feature.element.ElementPlacementHelper.assignInstanceIfNote(id)
         val containerId = intent.getStringExtra("CONTAINER_ID")
         com.example.core.LogKeeper.log(
@@ -346,22 +368,24 @@ class AddElementActivity : ComponentActivity() {
         }
         setResult(Activity.RESULT_OK, resultIntent)
 
-        val handleId = intent.getStringExtra("handle_id")
-        val gesture = intent.getStringExtra("gesture")
-        if (!handleId.isNullOrEmpty() && !gesture.isNullOrEmpty()) {
-            com.example.core.HandleManager.getInstance(this).configureGesture(handleId, gesture, id)
-        } else if (intent?.action == "SELECT_ELEMENT_FOR_HANDLE") {
-            val prefix = intent.getStringExtra("handle_prefix") ?: ""
-            val gest = intent.getStringExtra("gesture") ?: ""
-            if (prefix.isNotEmpty() && gest.isNotEmpty()) {
-                val prefs = getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
-                prefs.edit().putString("${prefix}$gest", "open_element:$id").apply()
-                
-                // Notify service to reload configuration
-                val updateIntent = Intent(this, com.example.core.HandleService::class.java).apply {
-                    action = "UPDATE_CONFIG"
+        if (!isFloatingTriggerSelection) {
+            val handleId = intent.getStringExtra("handle_id")
+            val gesture = intent.getStringExtra("gesture")
+            if (!handleId.isNullOrEmpty() && !gesture.isNullOrEmpty()) {
+                com.example.core.HandleManager.getInstance(this).configureGesture(handleId, gesture, id)
+            } else if (intent?.action == "SELECT_ELEMENT_FOR_HANDLE") {
+                val prefix = intent.getStringExtra("handle_prefix") ?: ""
+                val gest = intent.getStringExtra("gesture") ?: ""
+                if (prefix.isNotEmpty() && gest.isNotEmpty()) {
+                    val prefs = getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
+                    prefs.edit().putString("${prefix}$gest", "open_element:$id").apply()
+
+                    // Notify service to reload configuration
+                    val updateIntent = Intent(this, com.example.core.HandleService::class.java).apply {
+                        action = "UPDATE_CONFIG"
+                    }
+                    startService(updateIntent)
                 }
-                startService(updateIntent)
             }
         }
         finish()
@@ -374,13 +398,29 @@ class AddElementActivity : ComponentActivity() {
             val id = data.getStringExtra("ELEMENT_ID")
             val displayName = data.getStringExtra("DISPLAY_NAME")
             if (id != null) {
-                val finalId = if (requestCode == 500 && id.startsWith("widget:")) {
-                    "popup_widget:" + id.removePrefix("widget:")
-                } else if (requestCode == 700) {
-                    com.example.feature.floating.trigger.FloatingTriggerManager
+                if (requestCode == 700) {
+                    val validation = com.example.feature.floating.trigger.FloatingTriggerCompat
+                        .validateTarget(this, id)
+                    if (validation !is com.example.feature.floating.trigger.FloatingTriggerTargetValidation.ValidStandalone) {
+                        val reason = (validation as? com.example.feature.floating.trigger.FloatingTriggerTargetValidation.Unsupported)?.reason
+                            ?: "This Sidebar element cannot run as a standalone Floating Trigger."
+                        showUnsupportedFloatingTriggerExplanation(reason)
+                        return
+                    }
+                    val record = com.example.feature.floating.trigger.FloatingTriggerManager
                         .getInstance(this)
                         .ensureActiveTrigger(id, displayName)
-                    "floating_trigger:$id"
+                    if (record == null) {
+                        showUnsupportedFloatingTriggerExplanation(
+                            "Could not associate Floating Trigger with the selected Sidebar element."
+                        )
+                        return
+                    }
+                    handleElementSelected("floating_trigger:$id", displayName ?: "Trigger: ${record.label}")
+                    return
+                }
+                val finalId = if (requestCode == 500 && id.startsWith("widget:")) {
+                    "popup_widget:" + id.removePrefix("widget:")
                 } else {
                     id
                 }
@@ -409,7 +449,7 @@ class AddElementActivity : ComponentActivity() {
             .discoverExistingSidebarGridElements()
 
         if (existingElements.isEmpty()) {
-            launchFullFloatingTriggerPicker(pageId, containerId, isHybridGrid, pageType)
+            launchFullFloatingTriggerPicker(pageId, containerId, pageType)
             return
         }
 
@@ -422,12 +462,19 @@ class AddElementActivity : ComponentActivity() {
             .setItems(labels) { _, which ->
                 if (which < existingElements.size) {
                     val chosen = existingElements[which]
-                    com.example.feature.floating.trigger.FloatingTriggerManager
+                    val record = com.example.feature.floating.trigger.FloatingTriggerManager
                         .getInstance(this)
                         .ensureActiveTrigger(chosen.id, chosen.label)
-                    handleElementSelected("floating_trigger:${chosen.id}", "Trigger: ${chosen.label}")
+                    if (record != null) {
+                        handleElementSelected("floating_trigger:${chosen.id}", "Trigger: ${chosen.label}")
+                    } else {
+                        val reason = com.example.feature.floating.trigger.FloatingTriggerCompat
+                            .unsupportedReason(this, chosen.id)
+                            ?: "Selected Sidebar element cannot run as a standalone Floating Trigger."
+                        showUnsupportedFloatingTriggerExplanation(reason)
+                    }
                 } else {
-                    launchFullFloatingTriggerPicker(pageId, containerId, isHybridGrid, pageType)
+                    launchFullFloatingTriggerPicker(pageId, containerId, pageType)
                 }
             }
             .setNegativeButton("Cancel", null)
@@ -437,16 +484,28 @@ class AddElementActivity : ComponentActivity() {
     private fun launchFullFloatingTriggerPicker(
         pageId: String?,
         containerId: String,
-        isHybridGrid: Boolean,
         pageType: String?
     ) {
         val intent = Intent(this, AddElementActivity::class.java).apply {
             putExtra("IS_FLOATING_TRIGGER_SELECTION", true)
             putExtra("PAGE_ID", pageId)
             putExtra("CONTAINER_ID", containerId)
-            putExtra("IS_HYBRID_GRID", isHybridGrid)
+            putExtra("IS_HYBRID_GRID", false)
             putExtra("PAGE_TYPE", pageType)
         }
         startActivityForResult(intent, 700)
+    }
+
+    private fun showUnsupportedFloatingTriggerExplanation(reason: String) {
+        com.example.core.LogKeeper.log(this, "FloatingTriggerPicker", "UNSUPPORTED_TARGET reason=$reason")
+        if (!isFinishing && !isDestroyed) {
+            android.app.AlertDialog.Builder(this)
+                .setTitle("Unsupported Floating Trigger Target")
+                .setMessage(reason)
+                .setPositiveButton("OK", null)
+                .show()
+        } else {
+            android.widget.Toast.makeText(this, reason, android.widget.Toast.LENGTH_LONG).show()
+        }
     }
 }

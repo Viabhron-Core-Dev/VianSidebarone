@@ -5,7 +5,10 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
+import android.os.Handler
+import android.os.Looper
 import android.provider.Settings
+import android.widget.Toast
 import com.example.core.FloatingWindowManager
 import com.example.core.LogKeeper
 import com.example.feature.element.ElementActionDispatcher
@@ -48,23 +51,50 @@ class FloatingTriggerManager private constructor(private val context: Context) {
     }
 
     /**
+     * Injectable user-facing feedback hook when an unsupported trigger target is rejected.
+     */
+    internal var userMessageNotifier: (Context, String) -> Unit = { ctx, message ->
+        try {
+            if (Looper.myLooper() == Looper.getMainLooper()) {
+                Toast.makeText(ctx, message, Toast.LENGTH_LONG).show()
+            } else {
+                Handler(Looper.getMainLooper()).post {
+                    try {
+                        Toast.makeText(ctx, message, Toast.LENGTH_LONG).show()
+                    } catch (_: Throwable) {}
+                }
+            }
+        } catch (_: Throwable) {}
+    }
+
+    /**
      * Unified handler for [SidebarItem.FloatingTrigger] items tapped in the Sidebar or dispatched
      * through [ElementActionDispatcher].
      *
      * Preserves legacy behavior for persisted container-navigation IDs while activating/toggling
-     * standalone Floating Trigger buttons for element-backed IDs.
+     * standalone Floating Trigger buttons for genuinely executable element-backed IDs.
      */
     fun handleSidebarTriggerItem(item: SidebarItem.FloatingTrigger): Boolean {
         val targetId = item.targetId.trim()
-        if (targetId.isEmpty()) return false
-
-        if (FloatingTriggerCompat.isLegacyContainerTarget(context, targetId)) {
-            LogKeeper.log(context, TAG, "LEGACY_CONTAINER_TRIGGER target=$targetId")
-            SidebarManager.getInstance(context).openContainerById(targetId)
-            return true
+        return when (val validation = FloatingTriggerCompat.validateTarget(context, targetId)) {
+            is FloatingTriggerTargetValidation.LegacyContainer -> {
+                LogKeeper.log(context, TAG, "LEGACY_CONTAINER_TRIGGER target=${validation.containerId}")
+                SidebarManager.getInstance(context).openContainerById(validation.containerId)
+                true
+            }
+            is FloatingTriggerTargetValidation.ValidStandalone -> {
+                toggleTriggerForElement(targetId, item.label.removePrefix("Trigger:").trim())
+            }
+            is FloatingTriggerTargetValidation.Unsupported -> {
+                LogKeeper.log(
+                    context,
+                    TAG,
+                    "REJECT_UNSUPPORTED_SIDEBAR_TRIGGER target=$targetId reason=${validation.reason}"
+                )
+                userMessageNotifier(context, validation.reason)
+                false
+            }
         }
-
-        return toggleTriggerForElement(targetId, item.label.removePrefix("Trigger:").trim())
     }
 
     /**
@@ -72,11 +102,20 @@ class FloatingTriggerManager private constructor(private val context: Context) {
      * If already visible/active, hides and deactivates it; otherwise creates/activates and shows it.
      */
     fun toggleTriggerForElement(targetElementId: String, customLabel: String? = null): Boolean {
-        if (!FloatingTriggerCompat.isStandaloneElementTarget(context, targetElementId)) {
-            LogKeeper.log(context, TAG, "REJECT_INVALID_TRIGGER_TARGET target=$targetElementId")
+        val validation = FloatingTriggerCompat.validateTarget(context, targetElementId)
+        if (validation !is FloatingTriggerTargetValidation.ValidStandalone) {
+            val reason = when (validation) {
+                is FloatingTriggerTargetValidation.Unsupported -> validation.reason
+                is FloatingTriggerTargetValidation.LegacyContainer ->
+                    "Legacy container targets open Sidebar containers directly."
+                is FloatingTriggerTargetValidation.ValidStandalone -> ""
+            }
+            LogKeeper.log(context, TAG, "REJECT_INVALID_TRIGGER_TARGET target=$targetElementId reason=$reason")
+            userMessageNotifier(context, reason)
             return false
         }
-        val triggerId = FloatingTriggerCompat.triggerIdForElement(targetElementId)
+        val normalizedTargetId = targetElementId.trim()
+        val triggerId = FloatingTriggerCompat.triggerIdForElement(normalizedTargetId)
         val existingWindow = activeWindows[triggerId]
         val existingRecord = store.getTrigger(triggerId)
 
@@ -84,7 +123,7 @@ class FloatingTriggerManager private constructor(private val context: Context) {
             deactivateTrigger(triggerId)
             true
         } else {
-            ensureActiveTrigger(targetElementId, customLabel) != null
+            ensureActiveTrigger(normalizedTargetId, customLabel) != null
         }
     }
 
@@ -93,11 +132,21 @@ class FloatingTriggerManager private constructor(private val context: Context) {
      * and attached on screen (if overlay permission is available).
      */
     fun ensureActiveTrigger(targetElementId: String, customLabel: String? = null): FloatingTriggerRecord? {
-        if (!FloatingTriggerCompat.isStandaloneElementTarget(context, targetElementId)) {
+        val validation = FloatingTriggerCompat.validateTarget(context, targetElementId)
+        if (validation !is FloatingTriggerTargetValidation.ValidStandalone) {
+            val reason = when (validation) {
+                is FloatingTriggerTargetValidation.Unsupported -> validation.reason
+                is FloatingTriggerTargetValidation.LegacyContainer ->
+                    "Select a specific Sidebar action rather than a container ID."
+                is FloatingTriggerTargetValidation.ValidStandalone -> ""
+            }
+            LogKeeper.log(context, TAG, "REJECT_UNSUPPORTED_TRIGGER target=$targetElementId reason=$reason")
+            userMessageNotifier(context, reason)
             return null
         }
-        val parsed = ElementIdParser.parse(context, targetElementId) ?: return null
-        val triggerId = FloatingTriggerCompat.triggerIdForElement(targetElementId)
+        val normalizedTargetId = targetElementId.trim()
+        val parsed = validation.item
+        val triggerId = FloatingTriggerCompat.triggerIdForElement(normalizedTargetId)
         val resolvedLabel = customLabel?.takeIf { it.isNotBlank() } ?: parsed.label
         val existing = store.getTrigger(triggerId)
 
@@ -133,7 +182,7 @@ class FloatingTriggerManager private constructor(private val context: Context) {
 
         val record = FloatingTriggerRecord(
             triggerId = triggerId,
-            targetElementId = targetElementId,
+            targetElementId = normalizedTargetId,
             label = resolvedLabel,
             x = clampedX,
             y = clampedY,
@@ -183,7 +232,16 @@ class FloatingTriggerManager private constructor(private val context: Context) {
         val safeBottom = (24 * density).toInt()
 
         for (record in activeRecords) {
-            if (!FloatingTriggerCompat.isStandaloneElementTarget(context, record.targetElementId)) {
+            val validation = FloatingTriggerCompat.validateTarget(context, record.targetElementId)
+            if (validation !is FloatingTriggerTargetValidation.ValidStandalone) {
+                val reason = (validation as? FloatingTriggerTargetValidation.Unsupported)?.reason
+                    ?: "Not a standalone executable target"
+                LogKeeper.log(
+                    context,
+                    TAG,
+                    "TRIGGER_RESTORE_SKIPPED_UNSUPPORTED id=${record.triggerId} target=${record.targetElementId} reason=$reason"
+                )
+                store.setActive(record.triggerId, false)
                 continue
             }
             val (clampedX, clampedY) = FloatingTriggerBoundsHelper.clampPosition(
@@ -211,19 +269,22 @@ class FloatingTriggerManager private constructor(private val context: Context) {
 
     /**
      * Executes the associated Sidebar element action through [ElementActionDispatcher].
-     * Never dispatches a second independent action implementation.
+     * Never dispatches a second independent action implementation, and refuses unsupported targets.
      */
     fun executeAssociatedElement(targetElementId: String): Boolean {
-        if (targetElementId.startsWith("floating_trigger:")) {
-            LogKeeper.log(context, TAG, "TRIGGER_RECURSION_BLOCKED target=$targetElementId")
+        val validation = FloatingTriggerCompat.validateTarget(context, targetElementId)
+        if (validation !is FloatingTriggerTargetValidation.ValidStandalone) {
+            val reason = when (validation) {
+                is FloatingTriggerTargetValidation.Unsupported -> validation.reason
+                is FloatingTriggerTargetValidation.LegacyContainer ->
+                    "Container targets cannot run via standalone action execution."
+                is FloatingTriggerTargetValidation.ValidStandalone -> ""
+            }
+            LogKeeper.log(context, TAG, "TRIGGER_EXECUTION_BLOCKED target=$targetElementId reason=$reason")
+            userMessageNotifier(context, reason)
             return false
         }
-        val parsed = ElementIdParser.parse(context, targetElementId)
-        if (parsed == null) {
-            LogKeeper.log(context, TAG, "TRIGGER_TARGET_UNRESOLVED target=$targetElementId")
-            return false
-        }
-        return actionExecutor(context, parsed)
+        return actionExecutor(context, validation.item)
     }
 
     fun getActiveWindow(triggerId: String): FloatingTriggerButtonWindow? = activeWindows[triggerId]

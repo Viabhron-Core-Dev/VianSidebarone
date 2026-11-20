@@ -22,31 +22,188 @@ data class FloatingTriggerRecord(
 )
 
 /**
- * Compatibility helper for persisted `floating_trigger:<targetId>` elements.
+ * Explicit validation result for a candidate Floating Trigger target ID.
+ * Derived directly from the branches that [com.example.feature.element.ElementActionDispatcher.execute]
+ * can genuinely execute standalone (without a Sidebar anchor view or widget host).
+ */
+sealed class FloatingTriggerTargetValidation {
+    data class ValidStandalone(val item: SidebarItem) : FloatingTriggerTargetValidation()
+    data class LegacyContainer(val containerId: String) : FloatingTriggerTargetValidation()
+    data class Unsupported(val reason: String) : FloatingTriggerTargetValidation()
+}
+
+/**
+ * Compatibility & target-eligibility helper for persisted `floating_trigger:<targetId>` elements.
  *
  * Historically `floating_trigger:<containerId>` opened a Sidebar container via
  * `SidebarManager.openContainerById(containerId)` (e.g. `left_0_swipe_right` or `notes`).
- * Standalone Floating Trigger buttons associate with a Sidebar element ID
- * (e.g. `app:com.foo`, `system:torch`, `quicktile:wifi`, `link:...`, `pwa:...`).
+ * Standalone Floating Trigger buttons associate ONLY with Sidebar elements that can actually
+ * execute through the central [com.example.feature.element.ElementActionDispatcher] without a
+ * Sidebar anchor view or AppWidget host (e.g. `app:`, `link:`, `pwa:`, `quicktile:`, `volume:`,
+ * `media:`, `display:`, `system:`, `settings_shortcut:`, `intent:`, executable `page_window:`).
  *
- * Rule:
- * - If [targetId] parses as a real Sidebar element via [ElementIdParser.parse] (and is not
- *   a recursive `floating_trigger:`), it is a standalone Floating Trigger button.
- * - Otherwise, treat it as a legacy container-navigation target so existing saved container
- *   triggers continue working without silent breakage.
+ * Non-executable / container / host-dependent items (`folder:`, `widget:`, `popup_widget:`,
+ * `spacer:`, recursive `floating_trigger:`, or malformed element IDs with a known prefix) are
+ * strictly rejected and never misclassified as legacy containers.
  */
 object FloatingTriggerCompat {
-    fun isLegacyContainerTarget(context: Context, targetId: String): Boolean {
+    private val KNOWN_ELEMENT_PREFIXES = listOf(
+        "app:",
+        "intent:",
+        "floating_trigger:",
+        "quicktile:",
+        "system:",
+        "page_window:",
+        "volume:",
+        "media:",
+        "display:",
+        "settings_shortcut:",
+        "widget:",
+        "popup_widget:",
+        "folder:",
+        "link:",
+        "spacer:",
+        "pwa:"
+    )
+
+    fun hasKnownElementPrefix(targetId: String): Boolean {
         val trimmed = targetId.trim()
-        if (trimmed.isEmpty()) return false
+        return KNOWN_ELEMENT_PREFIXES.any { trimmed.startsWith(it) }
+    }
+
+    /**
+     * Authoritative item-level check matching [com.example.feature.element.ElementActionDispatcher.execute]
+     * when called standalone (`onShowFolder = null`, `onShowWidget = null`).
+     */
+    fun validateItem(item: SidebarItem): FloatingTriggerTargetValidation {
+        return when (item) {
+            is SidebarItem.App -> {
+                if (item.packageName.isNotBlank()) {
+                    FloatingTriggerTargetValidation.ValidStandalone(item)
+                } else {
+                    FloatingTriggerTargetValidation.Unsupported("App package name is missing.")
+                }
+            }
+            is SidebarItem.Link -> {
+                if (item.uuid.isNotBlank() && item.url.isNotBlank() && item.url != "https://") {
+                    FloatingTriggerTargetValidation.ValidStandalone(item)
+                } else {
+                    FloatingTriggerTargetValidation.Unsupported("Link URL is missing or invalid.")
+                }
+            }
+            is SidebarItem.Pwa -> {
+                if (item.pwaId.isNotBlank()) {
+                    FloatingTriggerTargetValidation.ValidStandalone(item)
+                } else {
+                    FloatingTriggerTargetValidation.Unsupported("Offline PWA identifier is missing.")
+                }
+            }
+            is SidebarItem.QuickTile,
+            is SidebarItem.VolumeAction,
+            is SidebarItem.MediaAction,
+            is SidebarItem.DisplayAction,
+            is SidebarItem.SystemAction,
+            is SidebarItem.SettingsShortcut -> {
+                FloatingTriggerTargetValidation.ValidStandalone(item)
+            }
+            is SidebarItem.IntentAction -> {
+                if (item.uri.isNotBlank()) {
+                    FloatingTriggerTargetValidation.ValidStandalone(item)
+                } else {
+                    FloatingTriggerTargetValidation.Unsupported("Intent URI is missing.")
+                }
+            }
+            is SidebarItem.PageWindow -> {
+                val baseType = item.pageType.substringBefore(":").trim()
+                if (baseType.isNotEmpty() && baseType != "widget") {
+                    FloatingTriggerTargetValidation.ValidStandalone(item)
+                } else {
+                    FloatingTriggerTargetValidation.Unsupported(
+                        "Widget windows cannot run as standalone Floating Triggers."
+                    )
+                }
+            }
+            is SidebarItem.Folder -> FloatingTriggerTargetValidation.Unsupported(
+                "Folders require a Sidebar anchor popup and cannot run as standalone Floating Triggers."
+            )
+            is SidebarItem.PopupWidget -> FloatingTriggerTargetValidation.Unsupported(
+                "Popup Widgets require a Sidebar anchor popup and cannot run as standalone Floating Triggers."
+            )
+            is SidebarItem.Widget -> FloatingTriggerTargetValidation.Unsupported(
+                "Embedded Widgets require a grid host and cannot run as standalone Floating Triggers."
+            )
+            is SidebarItem.Spacer -> FloatingTriggerTargetValidation.Unsupported(
+                "Spacers are layout elements and have no executable action."
+            )
+            is SidebarItem.FloatingTrigger -> FloatingTriggerTargetValidation.Unsupported(
+                "A Floating Trigger cannot target another Floating Trigger."
+            )
+        }
+    }
+
+    fun isExecutableElement(item: SidebarItem): Boolean {
+        return validateItem(item) is FloatingTriggerTargetValidation.ValidStandalone
+    }
+
+    fun validateTarget(context: Context, targetId: String): FloatingTriggerTargetValidation {
+        val trimmed = targetId.trim()
+        if (trimmed.isEmpty()) {
+            return FloatingTriggerTargetValidation.Unsupported("No target Sidebar element was specified.")
+        }
+        if (trimmed.startsWith("floating_trigger:")) {
+            return FloatingTriggerTargetValidation.Unsupported(
+                "A Floating Trigger cannot target another Floating Trigger."
+            )
+        }
+        if (trimmed.startsWith("popup_widget:")) {
+            return FloatingTriggerTargetValidation.Unsupported(
+                "Popup Widgets require a Sidebar anchor popup and cannot run as standalone Floating Triggers."
+            )
+        }
+        if (trimmed.startsWith("widget:")) {
+            return FloatingTriggerTargetValidation.Unsupported(
+                "Embedded Widgets require a grid host and cannot run as standalone Floating Triggers."
+            )
+        }
+        if (trimmed.startsWith("folder:")) {
+            return FloatingTriggerTargetValidation.Unsupported(
+                "Folders require a Sidebar anchor popup and cannot run as standalone Floating Triggers."
+            )
+        }
+        if (trimmed.startsWith("spacer:")) {
+            return FloatingTriggerTargetValidation.Unsupported(
+                "Spacers are layout elements and have no executable action."
+            )
+        }
+
         val parsed = ElementIdParser.parse(context, trimmed)
-        return parsed == null
+        if (parsed != null) {
+            return validateItem(parsed)
+        }
+
+        if (hasKnownElementPrefix(trimmed)) {
+            return FloatingTriggerTargetValidation.Unsupported(
+                "Selected element is unrecognized or incomplete and cannot be triggered."
+            )
+        }
+
+        return FloatingTriggerTargetValidation.LegacyContainer(trimmed)
+    }
+
+    fun isLegacyContainerTarget(context: Context, targetId: String): Boolean {
+        return validateTarget(context, targetId) is FloatingTriggerTargetValidation.LegacyContainer
     }
 
     fun isStandaloneElementTarget(context: Context, targetId: String): Boolean {
-        val trimmed = targetId.trim()
-        if (trimmed.isEmpty() || trimmed.startsWith("floating_trigger:")) return false
-        return ElementIdParser.parse(context, trimmed) != null
+        return validateTarget(context, targetId) is FloatingTriggerTargetValidation.ValidStandalone
+    }
+
+    fun resolveExecutableItem(context: Context, targetId: String): SidebarItem? {
+        return (validateTarget(context, targetId) as? FloatingTriggerTargetValidation.ValidStandalone)?.item
+    }
+
+    fun unsupportedReason(context: Context, targetId: String): String? {
+        return (validateTarget(context, targetId) as? FloatingTriggerTargetValidation.Unsupported)?.reason
     }
 
     /**
@@ -181,10 +338,9 @@ class FloatingTriggerStore private constructor(private val context: Context) {
 
         fun addCandidateId(rawId: String?) {
             val id = rawId?.trim() ?: return
-            if (id.isEmpty() || id.startsWith("floating_trigger:") || !seenIds.add(id)) return
-            val parsed = ElementIdParser.parse(context, id) ?: return
-            if (parsed is SidebarItem.FloatingTrigger || parsed is SidebarItem.Folder) return
-            results.add(parsed)
+            if (id.isEmpty() || !seenIds.add(id)) return
+            val executableItem = FloatingTriggerCompat.resolveExecutableItem(context, id) ?: return
+            results.add(executableItem)
         }
 
         for ((key, value) in sidebarPrefs.all) {
