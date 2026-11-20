@@ -243,6 +243,17 @@ class AddElementActivity : ComponentActivity() {
             }
             startActivityForResult(pwaIntent, 600)
         }
+
+        addHeader("Quick Calls")
+        addItem(android.R.drawable.sym_action_call, "Quick Calls") {
+            val quickCallIntent = Intent(this, com.example.feature.quickcall.QuickCallPickerActivity::class.java).apply {
+                putExtra("PAGE_ID", pageId)
+                putExtra("CONTAINER_ID", containerId)
+                putExtra("IS_HYBRID_GRID", effectiveIsHybridGrid)
+                putExtra("PAGE_TYPE", pageType)
+            }
+            startActivityForResult(quickCallIntent, 303)
+        }
         
         addHeader("Android actions")
         fun openActionPicker(category: String, title: String) {
@@ -338,6 +349,7 @@ class AddElementActivity : ComponentActivity() {
                 id.startsWith("app:") -> id.removePrefix("app:")
                 id.startsWith("pwa:") -> "Offline PWA"
                 id.startsWith("link:") -> "Link"
+                id.startsWith("quick_call:") -> com.example.feature.quickcall.QuickCallStore.getInstance(this).getRecordByElementId(id)?.displayName ?: "Quick Call"
                 id.startsWith("system:") -> id.removePrefix("system:").replace("_", " ").replaceFirstChar { it.uppercase() }
                 id.startsWith("widget:") -> "Widget"
                 id.startsWith("popup_widget:") -> "Popup Widget"

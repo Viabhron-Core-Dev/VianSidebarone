@@ -8,8 +8,10 @@ import android.view.WindowManager
 import com.example.core.FakeSharedPreferences
 import com.example.core.FloatingWindowManager
 import com.example.feature.element.ElementIdParser
+import com.example.feature.floating.DefaultMiniAppFactory
 import com.example.feature.floating.DurableMiniAppStore
 import com.example.feature.floating.FloatingMiniAppBridge
+import com.example.feature.floating.HeavyFloatingHost
 import com.example.feature.sidebar.SidebarItem
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -85,6 +87,7 @@ class FloatingTriggerTest {
         FloatingTriggerStore.resetForTesting()
         DurableMiniAppStore.resetForTesting()
         FloatingMiniAppBridge.resetForTesting()
+        HeavyFloatingHost.resetForTesting()
         val wm = FloatingWindowManager.getInstance(context)
         wm.getAllWindows().map { it.windowId }.forEach { wm.unregisterWindow(it) }
     }
@@ -94,6 +97,7 @@ class FloatingTriggerTest {
         FloatingTriggerManager.resetForTesting()
         FloatingTriggerStore.resetForTesting()
         FloatingMiniAppBridge.resetForTesting()
+        HeavyFloatingHost.resetForTesting()
         val wm = FloatingWindowManager.getInstance(context)
         wm.getAllWindows().map { it.windowId }.forEach { wm.unregisterWindow(it) }
     }
@@ -440,6 +444,146 @@ class FloatingTriggerTest {
         assertTrue("launchFullFloatingTriggerPicker must force IS_HYBRID_GRID=false", source.contains("putExtra(\"IS_HYBRID_GRID\", false)"))
         assertTrue("Full picker must validate via FloatingTriggerCompat.validateTarget", source.contains("FloatingTriggerCompat"))
         assertTrue("Full picker must show user-facing explanation on unsupported selection", source.contains("showUnsupportedFloatingTriggerExplanation"))
+    }
+
+    @Test
+    fun testEverySupportedRegisteredPageWindowTypeIsAccepted() {
+        val heavyHost = HeavyFloatingHost.getInstance(context)
+        val allSupportedTypes = LinkedHashSet<String>().apply {
+            addAll(FloatingTriggerCompat.MAIN_ONLY_MINI_APP_TYPES)
+            addAll(FloatingTriggerCompat.EMBEDDED_HEAVY_PAGE_WINDOW_TYPES)
+            addAll(heavyHost.getRegisteredAppTypes())
+        }
+
+        assertTrue("Supported PageWindow set must not be empty", allSupportedTypes.isNotEmpty())
+        assertFalse("widget must never be in supported PageWindow types", allSupportedTypes.contains("widget"))
+        assertFalse("single_widget must never be in supported PageWindow types", allSupportedTypes.contains("single_widget"))
+
+        for (type in allSupportedTypes) {
+            val bareId = "page_window:$type"
+            val bareValidation = FloatingTriggerCompat.validateTarget(context, bareId)
+            assertTrue(
+                "Expected supported PageWindow '$bareId' to be ValidStandalone, got $bareValidation",
+                bareValidation is FloatingTriggerTargetValidation.ValidStandalone
+            )
+
+            val instancedId = "page_window:$type:inst_42"
+            val instancedValidation = FloatingTriggerCompat.validateTarget(context, instancedId)
+            assertTrue(
+                "Expected instanced PageWindow '$instancedId' to be ValidStandalone, got $instancedValidation",
+                instancedValidation is FloatingTriggerTargetValidation.ValidStandalone
+            )
+        }
+    }
+
+    @Test
+    fun testDynamicallyRegisteredMiniAppPageWindowIsAcceptedWhileRegisteredAndRejectedWhenUnregistered() {
+        val dynamicType = "dynamic_custom_plugin"
+        val bareId = "page_window:$dynamicType"
+        val instancedId = "page_window:$dynamicType:session_7"
+
+        // Before registration: must be rejected
+        assertTrue(
+            "Unregistered dynamic type must be rejected",
+            FloatingTriggerCompat.validateTarget(context, bareId) is FloatingTriggerTargetValidation.Unsupported
+        )
+        assertTrue(
+            "Unregistered instanced dynamic type must be rejected",
+            FloatingTriggerCompat.validateTarget(context, instancedId) is FloatingTriggerTargetValidation.Unsupported
+        )
+
+        // Register dynamic factory on HeavyFloatingHost
+        val heavyHost = HeavyFloatingHost.getInstance(context)
+        heavyHost.registerFactory(dynamicType, DefaultMiniAppFactory())
+
+        assertTrue(
+            "Dynamically registered PageWindow type must be accepted",
+            FloatingTriggerCompat.validateTarget(context, bareId) is FloatingTriggerTargetValidation.ValidStandalone
+        )
+        assertTrue(
+            "Dynamically registered PageWindow instance must be accepted",
+            FloatingTriggerCompat.validateTarget(context, instancedId) is FloatingTriggerTargetValidation.ValidStandalone
+        )
+
+        // Unregister dynamic factory -> rejected again
+        heavyHost.unregisterFactory(dynamicType)
+        assertTrue(
+            "Unregistered dynamic PageWindow type must be rejected again",
+            FloatingTriggerCompat.validateTarget(context, bareId) is FloatingTriggerTargetValidation.Unsupported
+        )
+    }
+
+    @Test
+    fun testUnknownAndMalformedPageWindowIdsAreRejectedAndNeverExecuted() {
+        val invalidPageWindowIds = listOf(
+            "page_window:not_a_real_app",
+            "page_window:not_a_real_app:inst_1",
+            "page_window:widget",
+            "page_window:widget:12",
+            "page_window:single_widget",
+            "page_window:",
+            "page_window:   ",
+            "page_window::inst_1",
+            "page_window:calculator:",
+            "page_window:note:   "
+        )
+
+        val manager = FloatingTriggerManager.getInstance(context)
+        manager.canDrawOverlaysCheck = { true }
+        var executedCount = 0
+        manager.actionExecutor = { _, _ ->
+            executedCount++
+            true
+        }
+        val messages = mutableListOf<String>()
+        manager.userMessageNotifier = { _, msg -> messages.add(msg) }
+
+        for (badId in invalidPageWindowIds) {
+            val validation = FloatingTriggerCompat.validateTarget(context, badId)
+            assertTrue(
+                "Expected '$badId' to be Unsupported, got $validation",
+                validation is FloatingTriggerTargetValidation.Unsupported
+            )
+            assertFalse("isStandaloneElementTarget must be false for '$badId'", FloatingTriggerCompat.isStandaloneElementTarget(context, badId))
+            assertFalse("isLegacyContainerTarget must be false for '$badId'", FloatingTriggerCompat.isLegacyContainerTarget(context, badId))
+            assertNull("ensureActiveTrigger must reject '$badId'", manager.ensureActiveTrigger(badId, "Invalid Window"))
+            assertFalse("executeAssociatedElement must refuse '$badId'", manager.executeAssociatedElement(badId))
+        }
+
+        assertEquals("Unsupported PageWindow targets must never execute", 0, executedCount)
+        assertEquals("Unsupported PageWindow targets must not create trigger records", 0, FloatingTriggerStore.getInstance(context).getAllTriggers().size)
+        assertTrue("User-facing feedback must be emitted for rejected PageWindow targets", messages.isNotEmpty())
+    }
+
+    @Test
+    fun testRestoreActiveTriggersDeactivatesUnsupportedPersistedPageWindowAndKeepsValidPageWindow() {
+        val store = FloatingTriggerStore.getInstance(context)
+        store.saveTrigger(FloatingTriggerRecord("ft_pw_valid", "page_window:calculator", "Calculator", 100, 200, active = true))
+        store.saveTrigger(FloatingTriggerRecord("ft_pw_note", "page_window:test_notes:note_1", "Note", 120, 240, active = true))
+        store.saveTrigger(FloatingTriggerRecord("ft_pw_unknown", "page_window:not_a_real_app", "Bogus", 140, 260, active = true))
+        store.saveTrigger(FloatingTriggerRecord("ft_pw_widget", "page_window:widget", "Widget", 160, 280, active = true))
+        store.saveTrigger(FloatingTriggerRecord("ft_pw_malformed", "page_window:calculator:", "Malformed", 180, 300, active = true))
+
+        FloatingTriggerManager.resetForTesting()
+        FloatingTriggerStore.resetForTesting()
+
+        val manager = FloatingTriggerManager.getInstance(context)
+        manager.canDrawOverlaysCheck = { true }
+        val restored = manager.restoreActiveTriggers()
+
+        assertEquals("Exactly the two valid PageWindow triggers must restore", 2, restored)
+        assertNotNull(manager.getActiveWindow("ft_pw_valid"))
+        assertNotNull(manager.getActiveWindow("ft_pw_note"))
+        assertNull(manager.getActiveWindow("ft_pw_unknown"))
+        assertNull(manager.getActiveWindow("ft_pw_widget"))
+        assertNull(manager.getActiveWindow("ft_pw_malformed"))
+
+        val reloadedStore = FloatingTriggerStore.getInstance(context)
+        assertTrue(reloadedStore.getTrigger("ft_pw_valid")!!.active)
+        assertTrue(reloadedStore.getTrigger("ft_pw_note")!!.active)
+        assertFalse(reloadedStore.getTrigger("ft_pw_unknown")!!.active)
+        assertFalse(reloadedStore.getTrigger("ft_pw_widget")!!.active)
+        assertFalse(reloadedStore.getTrigger("ft_pw_malformed")!!.active)
     }
 }
 

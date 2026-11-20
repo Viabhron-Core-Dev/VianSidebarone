@@ -172,6 +172,19 @@ class ElementViewRenderer(
                     context.startActivity(intent)
                 }
             )
+        } else if (parsed is SidebarItem.QuickCall) {
+            menuItems.add(
+                SidebarActionMenuHelper.ActionMenuItem("Edit", android.R.drawable.ic_menu_edit) {
+                    val intent = Intent(context, com.example.feature.quickcall.QuickCallEditActivity::class.java).apply {
+                        putExtra("EDIT_ELEMENT_ID", item.id)
+                        putExtra("CONTAINER_ID", containerId)
+                        putExtra("PAGE_ID", pageId)
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    context.startActivity(intent)
+                    onClose?.invoke() ?: com.example.feature.sidebar.SidebarManager.getInstance(context).closeSidebar()
+                }
+            )
         }
 
         menuItems.add(

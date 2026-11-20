@@ -585,6 +585,9 @@ class HybridGridPageView(
                                     is SidebarItem.Pwa -> {
                                         com.example.feature.element.ElementActionDispatcher.execute(context, parsed)
                                     }
+                                    is SidebarItem.QuickCall -> {
+                                        com.example.feature.element.ElementActionDispatcher.execute(context, parsed)
+                                    }
                                     is SidebarItem.QuickTile -> {
                                         com.example.core.LogKeeper.writeLog("HybridGrid", "QuickTile action: ${parsed.action}")
                                         QuickTileHandler.handleQuickTileAction(context, parsed.action)
@@ -699,6 +702,25 @@ class HybridGridPageView(
                                         ) {
                                             val intent = Intent(context, com.example.feature.settings.LinkPickerActivity::class.java).apply {
                                                 putExtra("EDIT_ELEMENT_ID", linkElementId)
+                                                putExtra("CONTAINER_ID", containerId)
+                                                putExtra("PAGE_ID", pageId)
+                                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                            }
+                                            context.startActivity(intent)
+                                            onClose?.invoke() ?: com.example.feature.sidebar.SidebarManager.getInstance(context).closeSidebar()
+                                        }
+                                    )
+                                }
+                                val isQuickCall = parsed is SidebarItem.QuickCall || item.id.startsWith("quick_call:")
+                                if (isQuickCall) {
+                                    val qcElementId = if (parsed is SidebarItem.QuickCall) parsed.id else item.id
+                                    menuItems.add(
+                                        SidebarActionMenuHelper.ActionMenuItem(
+                                            title = "Edit",
+                                            iconResId = android.R.drawable.ic_menu_edit
+                                        ) {
+                                            val intent = Intent(context, com.example.feature.quickcall.QuickCallEditActivity::class.java).apply {
+                                                putExtra("EDIT_ELEMENT_ID", qcElementId)
                                                 putExtra("CONTAINER_ID", containerId)
                                                 putExtra("PAGE_ID", pageId)
                                                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -860,6 +882,10 @@ class HybridGridPageView(
                             com.example.feature.element.ElementActionDispatcher.execute(context, parsed)
                             popupWindow?.dismiss()
                         }
+                        is SidebarItem.QuickCall -> {
+                            com.example.feature.element.ElementActionDispatcher.execute(context, parsed)
+                            popupWindow?.dismiss()
+                        }
                         is SidebarItem.QuickTile -> {
                             com.example.core.LogKeeper.writeLog("HybridGrid", "Folder QuickTile: ${parsed.action}")
                             QuickTileHandler.handleQuickTileAction(context, parsed.action)
@@ -981,6 +1007,26 @@ class HybridGridPageView(
                             ) {
                                 val intent = Intent(context, com.example.feature.settings.LinkPickerActivity::class.java).apply {
                                     putExtra("EDIT_ELEMENT_ID", linkElementId)
+                                    putExtra("CONTAINER_ID", containerId)
+                                    putExtra("PAGE_ID", pageId)
+                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                }
+                                context.startActivity(intent)
+                                popupWindow?.dismiss()
+                                onClose?.invoke() ?: com.example.feature.sidebar.SidebarManager.getInstance(context).closeSidebar()
+                            }
+                        )
+                    }
+                    val isQuickCall = parsed is SidebarItem.QuickCall || itemId.startsWith("quick_call:")
+                    if (isQuickCall) {
+                        val qcElementId = if (parsed is SidebarItem.QuickCall) parsed.id else itemId
+                        menuItems.add(
+                            SidebarActionMenuHelper.ActionMenuItem(
+                                title = "Edit",
+                                iconResId = android.R.drawable.ic_menu_edit
+                            ) {
+                                val intent = Intent(context, com.example.feature.quickcall.QuickCallEditActivity::class.java).apply {
+                                    putExtra("EDIT_ELEMENT_ID", qcElementId)
                                     putExtra("CONTAINER_ID", containerId)
                                     putExtra("PAGE_ID", pageId)
                                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)

@@ -185,6 +185,13 @@ sealed class SidebarItem {
         override var id: String = "pwa:$pwaId"
     ) : SidebarItem()
 
+    data class QuickCall(
+        val uuid: String,
+        override val label: String,
+        val iconPath: String? = null,
+        override var id: String = "quick_call:$uuid"
+    ) : SidebarItem()
+
     data class IntentAction(
         val uri: String,
         override val label: String,

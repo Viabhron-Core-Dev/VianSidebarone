@@ -463,6 +463,24 @@ class SidebarAppsManager(
             icon.setImageDrawable(BubbleDrawable(innerBmp))
             icon.clearColorFilter()
             icon.setBackgroundColor(android.graphics.Color.TRANSPARENT)
+        } else if (parsed is SidebarItem.QuickCall) {
+            icon.setBackgroundColor(android.graphics.Color.TRANSPARENT)
+            val customFromPath = parsed.iconPath?.takeIf { it.isNotBlank() }?.let { path ->
+                val f = java.io.File(path)
+                if (f.exists() && f.length() > 0) {
+                    try {
+                        val raw = BitmapFactory.decodeFile(f.absolutePath)
+                        if (raw != null) com.example.core.SquircleHelper.toSquircleBitmap(raw) else null
+                    } catch (_: Exception) { null }
+                } else null
+            }
+            if (customFromPath != null) {
+                icon.clearColorFilter()
+                icon.setImageBitmap(customFromPath)
+            } else {
+                icon.setImageResource(android.R.drawable.sym_action_call)
+                icon.setColorFilter(android.graphics.Color.WHITE)
+            }
         }
     }
 
@@ -570,6 +588,7 @@ class SidebarAppsManager(
                 android.R.drawable.ic_menu_gallery
             }
             is SidebarItem.Link -> android.R.drawable.ic_menu_set_as
+            is SidebarItem.QuickCall -> android.R.drawable.sym_action_call
             is SidebarItem.Folder -> android.R.drawable.ic_menu_agenda
             else -> 0
         }

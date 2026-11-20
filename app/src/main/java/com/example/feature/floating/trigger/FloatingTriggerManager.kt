@@ -344,10 +344,19 @@ class FloatingTriggerManager private constructor(private val context: Context) {
     private fun resolveIconBitmap(targetElementId: String): Bitmap? {
         val parsed = ElementIdParser.parse(context, targetElementId) ?: return null
         return try {
+            val customIcon = com.example.core.IconCacheManager.getCustomIcon(context, targetElementId)
+            if (customIcon != null) return customIcon
             when (parsed) {
                 is SidebarItem.App -> {
                     val drawable = context.packageManager.getApplicationIcon(parsed.packageName)
                     drawableToBitmap(drawable)
+                }
+                is SidebarItem.QuickCall -> {
+                    val drawable = androidx.core.content.ContextCompat.getDrawable(
+                        context,
+                        android.R.drawable.sym_action_call
+                    )
+                    if (drawable != null) drawableToBitmap(drawable) else null
                 }
                 else -> null
             }

@@ -63,7 +63,59 @@ object FloatingTriggerCompat {
         "folder:",
         "link:",
         "spacer:",
-        "pwa:"
+        "pwa:",
+        "quick_call:"
+    )
+
+    /**
+     * Mini-app types hosted natively in the Main process via [com.example.feature.floating.FloatingMiniAppBridge].
+     */
+    internal val MAIN_ONLY_MINI_APP_TYPES = setOf(
+        "note",
+        "test_notes",
+        "reader",
+        "ebook_reader",
+        "dictionary",
+        "translation"
+    )
+
+    /**
+     * Built-in mini-app factory types pre-registered in [com.example.feature.floating.HeavyFloatingHost].
+     * Used only as fallback when [validateItem] is called without a [Context]; when a [Context] is
+     * available, [com.example.feature.floating.HeavyFloatingHost.isFactoryRegistered] is queried live
+     * so dynamically registered factories are supported and unregistered ones are rejected.
+     */
+    internal val DEFAULT_REGISTERED_HEAVY_MINI_APP_TYPES = setOf(
+        "generic",
+        "work_notes",
+        "floating_pwa",
+        "dictionary",
+        "translation",
+        "test_notes",
+        "note"
+    )
+
+    /**
+     * Non-widget embedded page types explicitly handled by
+     * [com.example.feature.heavy.page.HeavyPageHostManager.createEmbeddedPage].
+     * Excludes `"widget"` and `"single_widget"` which require a specific widget host/ID.
+     */
+    internal val EMBEDDED_HEAVY_PAGE_WINDOW_TYPES = setOf(
+        "calculator",
+        "compass",
+        "scheduler",
+        "notifications",
+        "notification",
+        "app_tracker",
+        "resources_tracker",
+        "media_player",
+        "hybrid_grid",
+        "default_hybrid",
+        "tools",
+        "apps",
+        "apps_grid",
+        "widgets_grid",
+        "widgets"
     )
 
     fun hasKnownElementPrefix(targetId: String): Boolean {
@@ -72,10 +124,77 @@ object FloatingTriggerCompat {
     }
 
     /**
+     * Returns true when [baseType] corresponds to a genuinely launchable `PageWindow` target:
+     * 1. Main-only mini-apps (`FloatingMiniAppBridge`), OR
+     * 2. Explicitly registered factories in `HeavyFloatingHost` (built-in and dynamic), OR
+     * 3. Non-widget embedded page views explicitly constructed by `HeavyPageHostManager`.
+     */
+    fun isSupportedPageWindowType(context: Context?, baseType: String): Boolean {
+        val clean = baseType.trim()
+        if (clean.isEmpty() || clean == "widget" || clean == "single_widget") {
+            return false
+        }
+        if (clean in MAIN_ONLY_MINI_APP_TYPES) {
+            return true
+        }
+        if (clean in EMBEDDED_HEAVY_PAGE_WINDOW_TYPES) {
+            return true
+        }
+        return if (context != null) {
+            com.example.feature.floating.HeavyFloatingHost
+                .getInstance(context)
+                .isFactoryRegistered(clean)
+        } else {
+            clean in DEFAULT_REGISTERED_HEAVY_MINI_APP_TYPES
+        }
+    }
+
+    private fun validatePageWindow(context: Context?, item: SidebarItem.PageWindow): FloatingTriggerTargetValidation {
+        val rawPageType = item.pageType
+        if (rawPageType.isBlank()) {
+            return FloatingTriggerTargetValidation.Unsupported(
+                "Page window type is missing or malformed."
+            )
+        }
+        val trimmed = rawPageType.trim()
+        val hasColon = trimmed.contains(":")
+        val baseType = if (hasColon) trimmed.substringBefore(":").trim() else trimmed
+        if (baseType.isEmpty()) {
+            return FloatingTriggerTargetValidation.Unsupported(
+                "Page window type is missing or malformed."
+            )
+        }
+        if (hasColon) {
+            val instancePart = trimmed.substringAfter(":").trim()
+            if (instancePart.isEmpty()) {
+                return FloatingTriggerTargetValidation.Unsupported(
+                    "Page window instance identifier is malformed."
+                )
+            }
+        }
+        if (baseType == "widget" || baseType == "single_widget") {
+            return FloatingTriggerTargetValidation.Unsupported(
+                "Widget windows cannot run as standalone Floating Triggers."
+            )
+        }
+        return if (isSupportedPageWindowType(context, baseType)) {
+            FloatingTriggerTargetValidation.ValidStandalone(item)
+        } else {
+            FloatingTriggerTargetValidation.Unsupported(
+                "Page window type '$baseType' is not registered and cannot run as a standalone Floating Trigger."
+            )
+        }
+    }
+
+    /**
      * Authoritative item-level check matching [com.example.feature.element.ElementActionDispatcher.execute]
      * when called standalone (`onShowFolder = null`, `onShowWidget = null`).
      */
     fun validateItem(item: SidebarItem): FloatingTriggerTargetValidation {
+        return validateItem(null, item)
+    }
+
+    fun validateItem(context: Context?, item: SidebarItem): FloatingTriggerTargetValidation {
         return when (item) {
             is SidebarItem.App -> {
                 if (item.packageName.isNotBlank()) {
@@ -98,6 +217,22 @@ object FloatingTriggerCompat {
                     FloatingTriggerTargetValidation.Unsupported("Offline PWA identifier is missing.")
                 }
             }
+            is SidebarItem.QuickCall -> {
+                if (item.uuid.isBlank()) {
+                    FloatingTriggerTargetValidation.Unsupported("Quick Call identifier is missing.")
+                } else if (context != null) {
+                    val record = com.example.feature.quickcall.QuickCallStore
+                        .getInstance(context)
+                        .getRecord(item.uuid)
+                    if (record != null && com.example.feature.quickcall.QuickCallNumberValidator.isValidPhoneNumber(record.phoneNumber)) {
+                        FloatingTriggerTargetValidation.ValidStandalone(item)
+                    } else {
+                        FloatingTriggerTargetValidation.Unsupported("Quick Call contact or phone number is missing or invalid.")
+                    }
+                } else {
+                    FloatingTriggerTargetValidation.ValidStandalone(item)
+                }
+            }
             is SidebarItem.QuickTile,
             is SidebarItem.VolumeAction,
             is SidebarItem.MediaAction,
@@ -113,16 +248,7 @@ object FloatingTriggerCompat {
                     FloatingTriggerTargetValidation.Unsupported("Intent URI is missing.")
                 }
             }
-            is SidebarItem.PageWindow -> {
-                val baseType = item.pageType.substringBefore(":").trim()
-                if (baseType.isNotEmpty() && baseType != "widget") {
-                    FloatingTriggerTargetValidation.ValidStandalone(item)
-                } else {
-                    FloatingTriggerTargetValidation.Unsupported(
-                        "Widget windows cannot run as standalone Floating Triggers."
-                    )
-                }
-            }
+            is SidebarItem.PageWindow -> validatePageWindow(context, item)
             is SidebarItem.Folder -> FloatingTriggerTargetValidation.Unsupported(
                 "Folders require a Sidebar anchor popup and cannot run as standalone Floating Triggers."
             )
@@ -143,6 +269,10 @@ object FloatingTriggerCompat {
 
     fun isExecutableElement(item: SidebarItem): Boolean {
         return validateItem(item) is FloatingTriggerTargetValidation.ValidStandalone
+    }
+
+    fun isExecutableElement(context: Context, item: SidebarItem): Boolean {
+        return validateItem(context, item) is FloatingTriggerTargetValidation.ValidStandalone
     }
 
     fun validateTarget(context: Context, targetId: String): FloatingTriggerTargetValidation {
@@ -178,7 +308,7 @@ object FloatingTriggerCompat {
 
         val parsed = ElementIdParser.parse(context, trimmed)
         if (parsed != null) {
-            return validateItem(parsed)
+            return validateItem(context, parsed)
         }
 
         if (hasKnownElementPrefix(trimmed)) {

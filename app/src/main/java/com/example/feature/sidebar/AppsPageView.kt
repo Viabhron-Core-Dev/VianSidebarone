@@ -595,6 +595,10 @@ class AppsPageView(
                     com.example.feature.element.ElementActionDispatcher.execute(context, item)
                     currentFolderPopup?.dismiss()
                     onCloseSidebar()
+                } else if (item is SidebarItem.QuickCall) {
+                    com.example.feature.element.ElementActionDispatcher.execute(context, item)
+                    currentFolderPopup?.dismiss()
+                    onCloseSidebar()
                 } else if (item is SidebarItem.Widget) {
                     showWidgetPopup(itemView, item.widgetId)
                     // Do not close sidebar, just show popup
@@ -728,6 +732,25 @@ class AppsPageView(
                         ) {
                             val intent = android.content.Intent(context, com.example.feature.settings.LinkPickerActivity::class.java).apply {
                                 putExtra("EDIT_ELEMENT_ID", linkElementId)
+                                putExtra("CONTAINER_ID", containerId)
+                                addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                            }
+                            context.startActivity(intent)
+                            currentFolderPopup?.dismiss()
+                            onCloseSidebar()
+                        }
+                    )
+                }
+                val isQuickCall = item is SidebarItem.QuickCall || item.id.startsWith("quick_call:")
+                if (isQuickCall) {
+                    val qcElementId = if (item is SidebarItem.QuickCall) item.id else item.id
+                    menuItems.add(
+                        SidebarActionMenuHelper.ActionMenuItem(
+                            title = "Edit",
+                            iconResId = android.R.drawable.ic_menu_edit
+                        ) {
+                            val intent = android.content.Intent(context, com.example.feature.quickcall.QuickCallEditActivity::class.java).apply {
+                                putExtra("EDIT_ELEMENT_ID", qcElementId)
                                 putExtra("CONTAINER_ID", containerId)
                                 addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
                             }
@@ -1001,6 +1024,16 @@ class AppsPageView(
                         icon.setImageResource(com.example.R.drawable.ic_language)
                         icon.setColorFilter(android.graphics.Color.WHITE)
                     }
+                }
+            } else if (item is SidebarItem.QuickCall) {
+                icon.setBackgroundColor(android.graphics.Color.TRANSPARENT)
+                val custom = com.example.core.IconCacheManager.getCustomIcon(context, item.id)
+                if (custom != null) {
+                    icon.clearColorFilter()
+                    icon.setImageBitmap(custom)
+                } else {
+                    icon.setImageResource(android.R.drawable.sym_action_call)
+                    icon.setColorFilter(android.graphics.Color.WHITE)
                 }
             }
         }

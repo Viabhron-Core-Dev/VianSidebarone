@@ -31,6 +31,13 @@ class IconPickerActivity : ComponentActivity() {
             lifecycleScope.launch {
                 val bitmap = IconCacheManager.saveCustomIconFromUri(this@IconPickerActivity, itemId, uri)
                 if (bitmap != null) {
+                    com.example.feature.quickcall.QuickCallStore.extractUuid(itemId)?.let { qcUuid ->
+                        val customFile = IconCacheManager.getCustomIconFile(this@IconPickerActivity, itemId)
+                        if (customFile.exists()) {
+                            com.example.feature.quickcall.QuickCallStore.getInstance(this@IconPickerActivity)
+                                .updateCustomIconPath(qcUuid, customFile.absolutePath)
+                        }
+                    }
                     Toast.makeText(this@IconPickerActivity, "Icon updated & compressed successfully", Toast.LENGTH_SHORT).show()
                     val intent = Intent("com.example.UPDATE_SIDEBAR_ICONS").apply {
                         putExtra("item_id", itemId)
@@ -121,6 +128,9 @@ class IconPickerActivity : ComponentActivity() {
         val resetBtn = createOptionButton("Reset to Default Icon", android.R.drawable.ic_menu_revert) {
             targetItemId?.let { id ->
                 IconCacheManager.evictIcon(this, id)
+                com.example.feature.quickcall.QuickCallStore.extractUuid(id)?.let { qcUuid ->
+                    com.example.feature.quickcall.QuickCallStore.getInstance(this).resetCustomIcon(qcUuid)
+                }
                 val intent = Intent("com.example.UPDATE_SIDEBAR_ICONS").apply {
                     putExtra("item_id", id)
                 }

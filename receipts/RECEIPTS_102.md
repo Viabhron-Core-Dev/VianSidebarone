@@ -113,3 +113,50 @@
   - Verified `app/LiteReader_Log.txt` remained unchanged at 1197 lines after running the unit tests. Not tested on a physical Android device or emulator.
 * Any deviation from what was requested, and why: None.
 * Any known issue or follow-up needed: Physical-device testing is required to confirm live overlay alert dialogs, Toast notifications, and end-to-end Floating Trigger selection inside Hybrid Grid edit mode on Android.
+
+### Receipt 128
+* Timestamp: 2026-11-20 12:39 UTC
+* One-line summary of what was requested: Finalize Floating Trigger `PageWindow` eligibility against the real mini-app/embedded-page registry with regression tests (Part A) and implement end-to-end Quick Calls Sidebar elements with on-demand Contacts picker, `READ_CONTACTS`/`CALL_PHONE` runtime flows, emergency `ACTION_DIAL` routing, durable UUID storage, dedicated editing/icon reset, and unit tests (Part B).
+* Exact files touched:
+  - Created:
+    - `app/src/main/java/com/example/feature/quickcall/QuickCallStore.kt`
+    - `app/src/main/java/com/example/feature/quickcall/QuickCallContactsLoader.kt`
+    - `app/src/main/java/com/example/feature/quickcall/QuickCallActionHandler.kt`
+    - `app/src/main/java/com/example/feature/quickcall/QuickCallPermissionActivity.kt`
+    - `app/src/main/java/com/example/feature/quickcall/QuickCallPickerActivity.kt`
+    - `app/src/main/java/com/example/feature/quickcall/QuickCallEditActivity.kt`
+    - `app/src/test/java/com/example/feature/quickcall/QuickCallTest.kt`
+  - Modified:
+    - `app/src/main/java/com/example/feature/floating/HeavyFloatingHost.kt`
+    - `app/src/main/java/com/example/feature/floating/trigger/FloatingTriggerStore.kt`
+    - `app/src/main/java/com/example/feature/floating/trigger/FloatingTriggerManager.kt`
+    - `app/src/main/java/com/example/feature/sidebar/SidebarItem.kt`
+    - `app/src/main/java/com/example/feature/element/ElementIdParser.kt`
+    - `app/src/main/java/com/example/feature/element/ElementActionDispatcher.kt`
+    - `app/src/main/java/com/example/feature/element/ElementViewRenderer.kt`
+    - `app/src/main/java/com/example/feature/settings/AddElementActivity.kt`
+    - `app/src/main/java/com/example/feature/sidebar/SidebarAppsManager.kt`
+    - `app/src/main/java/com/example/feature/sidebar/HybridGridPageView.kt`
+    - `app/src/main/java/com/example/feature/sidebar/AppsPageView.kt`
+    - `app/src/main/java/com/example/feature/sidebar/WidgetsGridPageView.kt`
+    - `app/src/main/java/com/example/IconPickerActivity.kt`
+    - `app/src/main/AndroidManifest.xml`
+    - `app/src/test/java/com/example/feature/floating/trigger/FloatingTriggerTest.kt`
+    - `blueprint/BLUEPRINT.md`
+    - `receipts/RECEIPTS_102.md`
+* What was actually done — factual, not persuasive:
+  1. **Part A — Floating Trigger `PageWindow` Eligibility (`HeavyFloatingHost.kt`, `FloatingTriggerStore.kt`, `FloatingTriggerTest.kt`)**:
+     - Added `HeavyFloatingHost.isFactoryRegistered(appType)` and `getRegisteredAppTypes()` to expose live registered factory types (including dynamic `registerFactory(...)` registrations).
+     - Tightened `FloatingTriggerCompat.validateItem(context, item)` / `validatePageWindow` / `isSupportedPageWindowType` to allow Main-only mini-apps, Heavy embedded non-widget page views (matching `HeavyPageHostManager.createEmbeddedPage`), and live registered `HeavyFloatingHost` factories, while rejecting `page_window:widget`, `page_window:single_widget`, malformed colon IDs, and unregistered types (`page_window:not_a_real_app`). Preserved legacy container target compatibility.
+     - Added 4 regression tests in `FloatingTriggerTest` (bringing suite to 15/15) covering all supported registered types, dynamic factory registration/unregistration, unknown/malformed ID rejection with zero execution, and safe deactivation on `restoreActiveTriggers()`.
+  2. **Part B — Quick Calls (`feature/quickcall/*`, Sidebar/Element/AddElement/Manifest integration, `QuickCallTest.kt`)**:
+     - Added `SidebarItem.QuickCall` with UUID-based element IDs (`quick_call:<uuid>`, never containing phone numbers) and `QuickCallStore` (`SharedPreferences` + `.commit()`) storing durable snapshots (`displayName`, `phoneNumber`, `contactLookupKey`, `customIconPath`, `manuallyEditedNumber`) with zero phone-number PII logged to `LogKeeper`.
+     - Added `QuickCallContactsLoader` (on-demand `ContactsContract.CommonDataKinds.Phone` query, grouping/deduplication, invalid-number filtering, search; zero `READ_CALL_LOG`, ContentObservers, workers, or polling) and Compose M3 `QuickCallPickerActivity` launched from a new **Quick Calls** category in `AddElementActivity` (`requestCode = 303`) with on-demand `READ_CONTACTS` request and multi-number selection dialog.
+     - Added `QuickCallActionHandler` and translucent `QuickCallPermissionActivity`: routes emergency numbers strictly to `ACTION_DIAL`, requests `CALL_PHONE` only on first direct-call attempt with an `ACTION_DIAL` fallback dialog on denial, dispatches `ACTION_CALL` when permitted, and handles missing call/dialer handlers gracefully. Declared `CALL_PHONE`, `tel:` `<queries>`, and optional telephony `<uses-feature>` in `AndroidManifest.xml`; left Call Recorder untouched.
+     - Wired `ElementIdParser`, `ElementActionDispatcher`, `SidebarAppsManager`, `ElementViewRenderer`, `HybridGridPageView`, `AppsPageView`, `WidgetsGridPageView`, `FloatingTriggerCompat`, `FloatingTriggerManager`, `IconPickerActivity`, and Compose M3 `QuickCallEditActivity` (display name edit, validated phone number edit setting `manuallyEditedNumber = true`, zero-permission `PickVisualMedia` custom icon, and Reset Icon to default Android caller icon).
+     - Added `QuickCallTest` with 9 JVM unit tests covering UUID IDs, persistence across restart/contact deletion, multi-number grouping/dedup/search, invalid numbers, emergency `ACTION_DIAL` routing, `CALL_PHONE` request + dialer fallback + no-handler path, authoritative manual edits + icon reset, zero-PII logging, and Floating Trigger compatibility.
+* How it was verified: Local build (`compile_applet` -> `Build succeeded - the applet is compiled`) and targeted local JVM unit tests:
+  - `gradle :app:testDebugUnitTest --tests "com.example.feature.quickcall.QuickCallTest" --tests "com.example.feature.floating.trigger.FloatingTriggerTest" --tests "com.example.feature.element.ElementIdParserTest" --tests "com.example.feature.element.ElementSystemTest" --tests "com.example.feature.floating.FloatingMiniAppFrameworkTest" --tests "com.example.feature.reader.ReaderMiniAppTest" --tests "com.example.feature.settings.SettingsNavigationStructureTest" --tests "com.example.feature.language.DictionaryAndTranslationMiniAppTest" --tests "com.example.feature.selection.SelectionActionsAndReadAloudTest" --rerun-tasks --console=plain` -> `BUILD SUCCESSFUL` (**169/169** tests passed: `QuickCallTest` 9/9, `FloatingTriggerTest` 15/15, `ElementIdParserTest` 12/12, `ElementSystemTest` 4/4, `FloatingMiniAppFrameworkTest` 98/98, `ReaderMiniAppTest` 18/18, `SettingsNavigationStructureTest` 2/2, `DictionaryAndTranslationMiniAppTest` 5/5, `SelectionActionsAndReadAloudTest` 6/6; 0 failures, 0 errors, 0 skipped).
+  - Verified `app/LiteReader_Log.txt` remained unchanged at 1197 lines after running the unit tests. Not tested on a physical Android device or emulator (unavailable in this environment).
+* Any deviation from what was requested, and why: None in product behavior. All tests run on the project's existing pure JVM JUnit 4 + `FakeSharedPreferences` harness without adding new Gradle dependencies; `QuickCallNumberValidator.buildTelUri` returns `Uri?` so JVM `Uri.fromParts` stubs do not throw a platform-null NPE while real Android builds the exact `Uri.fromParts("tel", dialable, null)` intent URI.
+* Any known issue or follow-up needed: Physical-device verification is outstanding for both Part A (Floating Trigger overlay drag/tap/rejection dialogs) and Part B (real `ContactsContract` picker, `READ_CONTACTS`/`CALL_PHONE` system dialogs, `ACTION_CALL`/`ACTION_DIAL` handoff, `PickVisualMedia` custom icon selection, and long-press edit flows).

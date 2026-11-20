@@ -466,6 +466,8 @@ class WidgetsGridPageView(
                                         .handleSidebarTriggerItem(parsed)
                                 } else if (parsed is SidebarItem.Link) {
                                     com.example.feature.element.ElementActionDispatcher.execute(context, parsed)
+                                } else if (parsed is SidebarItem.QuickCall) {
+                                    com.example.feature.element.ElementActionDispatcher.execute(context, parsed)
                                 } else if (parsed is SidebarItem.QuickTile) {
                                     QuickTileHandler.handleQuickTileAction(context, parsed.action)
                                 } else if (parsed is SidebarItem.IntentAction) {

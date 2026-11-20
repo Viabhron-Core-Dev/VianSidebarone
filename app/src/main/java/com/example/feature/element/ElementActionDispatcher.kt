@@ -147,6 +147,11 @@ object ElementActionDispatcher {
                         .handleSidebarTriggerItem(item)
                 }
 
+                is SidebarItem.QuickCall -> {
+                    val outcome = com.example.feature.quickcall.QuickCallActionHandler.execute(context, item)
+                    com.example.feature.quickcall.QuickCallActionHandler.isHandledOutcome(outcome)
+                }
+
                 is SidebarItem.Folder -> {
                     onShowFolder?.invoke(item)
                     true
