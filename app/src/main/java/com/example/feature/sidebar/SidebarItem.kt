@@ -383,7 +383,6 @@ val ALL_FLOATING_WINDOWS = listOf(
     SidebarItem.SystemAction("ebook_reader", "eBook Reader", com.example.R.drawable.ic_library_books),
     SidebarItem.SystemAction("floating_pwa", "Floating PWA", android.R.drawable.ic_menu_view),
     SidebarItem.SystemAction("dictionary_floating", "Dictionary (Floating)", android.R.drawable.ic_menu_sort_alphabetically),
-    SidebarItem.SystemAction("translation_floating", "Translation (Floating)", android.R.drawable.ic_menu_sort_alphabetically),
     SidebarItem.SystemAction("work_notes", "Work Notes", android.R.drawable.ic_menu_edit),
     SidebarItem.SystemAction("hybrid_grid_floating", "Hybrid Grid (Floating)", android.R.drawable.ic_menu_gallery)
 )

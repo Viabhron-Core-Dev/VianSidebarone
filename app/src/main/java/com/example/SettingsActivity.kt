@@ -162,10 +162,17 @@ fun SettingsNavigationApp(initialRoute: String, onFinish: () -> Unit) {
                 onBack = { navigateBack() }
             )
         }
-        currentRoute == com.example.feature.settings.ROUTE_DICTIONARY_TRANSLATION_SETTINGS ||
-            currentRoute == "dictionary_settings" ||
-            currentRoute == "translation_settings" -> {
-            com.example.feature.settings.DictionaryTranslationSettingsScreen(
+        currentRoute == com.example.feature.settings.ROUTE_DICTIONARY_SETTINGS ||
+            currentRoute == com.example.feature.settings.ROUTE_DICTIONARY_TRANSLATION_SETTINGS -> {
+            com.example.feature.settings.DictionarySettingsScreen(
+                onBack = { navigateBack() }
+            )
+        }
+        currentRoute == com.example.feature.settings.ROUTE_LEGACY_TRANSLATION_SETTINGS -> {
+            com.example.feature.settings.DeferredTranslationNoticeScreen(
+                onOpenDictionarySettings = {
+                    navigateTo(com.example.feature.settings.ROUTE_DICTIONARY_SETTINGS)
+                },
                 onBack = { navigateBack() }
             )
         }
@@ -176,8 +183,8 @@ fun SettingsNavigationApp(initialRoute: String, onFinish: () -> Unit) {
                 onNavigateToCallRecorder = { navigateTo("call_recorder") },
                 onNavigateToScreenCap = { navigateTo("screencap") },
                 onNavigateToReaderSettings = { navigateTo("reader_settings") },
-                onNavigateToDictionaryTranslation = {
-                    navigateTo(com.example.feature.settings.ROUTE_DICTIONARY_TRANSLATION_SETTINGS)
+                onNavigateToDictionary = {
+                    navigateTo(com.example.feature.settings.ROUTE_DICTIONARY_SETTINGS)
                 },
                 onNavigateToPermissions = { navigateTo("permissions") },
                 onBack = onFinish
@@ -194,7 +201,7 @@ fun MainSettingsScreen(
     onNavigateToCallRecorder: () -> Unit,
     onNavigateToScreenCap: () -> Unit,
     onNavigateToReaderSettings: () -> Unit = {},
-    onNavigateToDictionaryTranslation: () -> Unit = {},
+    onNavigateToDictionary: () -> Unit = {},
     onNavigateToPermissions: () -> Unit,
     onBack: () -> Unit
 ) {
@@ -239,11 +246,11 @@ fun MainSettingsScreen(
             }
             item {
                 ListItem(
-                    headlineContent = { Text("Dictionary & Translation") },
-                    supportingContent = { Text("Configure offline dictionaries, StarDict status, translation packs, and language settings") },
+                    headlineContent = { Text("Dictionary Settings") },
+                    supportingContent = { Text("Import and manage offline StarDict dictionaries for Dictionary and Meaning lookups") },
                     modifier = Modifier
-                        .clickable { onNavigateToDictionaryTranslation() }
-                        .testTag("settings_item_dictionary_translation")
+                        .clickable { onNavigateToDictionary() }
+                        .testTag("settings_item_dictionary")
                 )
                 HorizontalDivider()
             }

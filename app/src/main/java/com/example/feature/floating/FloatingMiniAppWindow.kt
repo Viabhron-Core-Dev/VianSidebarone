@@ -262,7 +262,6 @@ class FloatingMiniAppWindow(
     private var pwaWindowController: com.example.feature.pwa.floating.FloatingPwaWindowController? = null
     private var readerInstance: com.example.feature.reader.ReaderMiniAppInstance? = null
     private var dictionaryInstance: com.example.feature.language.DictionaryMiniAppInstance? = null
-    private var translationInstance: com.example.feature.language.TranslationMiniAppInstance? = null
     private var isReaderFocusRequested: Boolean = false
     var currentFontSizeSp: Float = 15f
         private set
@@ -360,13 +359,10 @@ class FloatingMiniAppWindow(
 
     fun isDictionaryApp(): Boolean = (appType == com.example.feature.language.DictionaryMiniAppInstance.APP_TYPE)
 
-    fun isTranslationApp(): Boolean = (appType == com.example.feature.language.TranslationMiniAppInstance.APP_TYPE)
-
-    fun isMainOnlyApp(): Boolean = isNoteApp() || isReaderApp() || isDictionaryApp() || isTranslationApp()
+    fun isMainOnlyApp(): Boolean = isNoteApp() || isReaderApp() || isDictionaryApp()
 
     fun getReaderInstanceForTesting(): com.example.feature.reader.ReaderMiniAppInstance? = readerInstance
     fun getDictionaryInstanceForTesting(): com.example.feature.language.DictionaryMiniAppInstance? = dictionaryInstance
-    fun getTranslationInstanceForTesting(): com.example.feature.language.TranslationMiniAppInstance? = translationInstance
 
     fun openReaderBookById(epubBookId: Int) {
         readerInstance?.openBookById(epubBookId)
@@ -532,16 +528,14 @@ class FloatingMiniAppWindow(
         saved?.payload?.get(NotePersistenceCoordinator.KEY_ACCENT_COLOR)?.takeIf { it.isNotBlank() }?.let {
             currentAccentColorHex = normalizeHexColor(it)
         } ?: run {
-            when {
-                isDictionaryApp() -> currentAccentColorHex = com.example.feature.language.LanguageMiniAppUiHelper.ACCENT_DICTIONARY_HEX
-                isTranslationApp() -> currentAccentColorHex = com.example.feature.language.LanguageMiniAppUiHelper.ACCENT_TRANSLATION_HEX
+            if (isDictionaryApp()) {
+                currentAccentColorHex = com.example.feature.language.LanguageMiniAppUiHelper.ACCENT_DICTIONARY_HEX
             }
         }
         if (windowTitle.isEmpty()) {
             windowTitle = when {
                 isReaderApp() -> "Reader"
                 isDictionaryApp() -> "Dictionary"
-                isTranslationApp() -> "Translation"
                 else -> saved?.title?.takeIf { it.isNotEmpty() }
                     ?: when (appType) {
                         "test_notes", "note" -> "Note"
@@ -738,8 +732,6 @@ class FloatingMiniAppWindow(
             setupReaderContentView(context, container)
         } else if (isDictionaryApp()) {
             setupDictionaryContentView(context, container)
-        } else if (isTranslationApp()) {
-            setupTranslationContentView(context, container)
         } else {
             // Embedded Heavy Content Setup
             setupEmbeddedContent(context, container)
@@ -1806,7 +1798,7 @@ class FloatingMiniAppWindow(
             appType = appType,
             onRequestWindowFocusable = { focusable -> updateNativeInputWindowFocusable(focusable) },
             onOpenSettings = {
-                FloatingMiniAppBridge.getInstance(context).launchDictionaryTranslationSettings(instanceId)
+                FloatingMiniAppBridge.getInstance(context).launchDictionarySettings(instanceId)
             }
         )
         dictionaryInstance = instance
@@ -1822,32 +1814,6 @@ class FloatingMiniAppWindow(
             context,
             "FloatingMiniAppWindow",
             "CONTENT_CREATED id=$instanceId mode=main_native_dictionary appType=$appType"
-        )
-    }
-
-    private fun setupTranslationContentView(context: Context, container: FrameLayout) {
-        val savedSnapshot = durableStore.loadSnapshot(instanceId)
-        val instance = com.example.feature.language.TranslationMiniAppInstance(
-            instanceId = instanceId,
-            appType = appType,
-            onRequestWindowFocusable = { focusable -> updateNativeInputWindowFocusable(focusable) },
-            onOpenSettings = {
-                FloatingMiniAppBridge.getInstance(context).launchDictionaryTranslationSettings(instanceId)
-            }
-        )
-        translationInstance = instance
-        instance.onCreate(savedSnapshot)
-        val view = instance.createContentView(context)
-        instance.onStart()
-        instance.onResume()
-
-        container.addView(view)
-        contentPlaceholderView?.visibility = View.GONE
-        isContentRevealed = true
-        LogKeeper.log(
-            context,
-            "FloatingMiniAppWindow",
-            "CONTENT_CREATED id=$instanceId mode=main_native_translation appType=$appType"
         )
     }
 
@@ -2475,7 +2441,7 @@ class FloatingMiniAppWindow(
             }
             topBarEditBtn = editBtn
             bar.addView(editBtn)
-        } else if (isDictionaryApp() || isTranslationApp()) {
+        } else if (isDictionaryApp()) {
             val editBg = GradientDrawable().apply {
                 shape = GradientDrawable.RECTANGLE
                 cornerRadius = 4 * density
@@ -2485,8 +2451,8 @@ class FloatingMiniAppWindow(
             topBarEditBtnBg = editBg
             val editBtn = TextView(context).apply {
                 text = "Edit"
-                contentDescription = "Dictionary and Translation Settings"
-                tag = if (isDictionaryApp()) "dictionary_topbar_edit_button" else "translation_topbar_edit_button"
+                contentDescription = "Dictionary Settings"
+                tag = "dictionary_topbar_edit_button"
                 setTextColor(initialAccentInt)
                 textSize = 12f
                 typeface = Typeface.DEFAULT_BOLD
@@ -2495,7 +2461,7 @@ class FloatingMiniAppWindow(
                 background = editBg
                 setPadding((8 * density).toInt(), (3 * density).toInt(), (8 * density).toInt(), (3 * density).toInt())
                 setOnClickListener {
-                    FloatingMiniAppBridge.getInstance(context).launchDictionaryTranslationSettings(instanceId)
+                    FloatingMiniAppBridge.getInstance(context).launchDictionarySettings(instanceId)
                 }
             }
             topBarEditBtn = editBtn
@@ -3799,9 +3765,6 @@ class FloatingMiniAppWindow(
         if (isDictionaryApp()) {
             return dictionaryInstance?.onSaveState() ?: emptyMap()
         }
-        if (isTranslationApp()) {
-            return translationInstance?.onSaveState() ?: emptyMap()
-        }
         val authoritativeText = when (activeTextAuthority) {
             TextAuthority.IME_BRIDGE -> imeBridgeEditText?.text?.toString() ?: currentNoteText
             TextAuthority.FALLBACK -> noteEditText?.text?.toString() ?: currentNoteText
@@ -3896,7 +3859,7 @@ class FloatingMiniAppWindow(
             isReaderApp() -> {
                 saveReaderSnapshotInternal(targetState)
             }
-            isDictionaryApp() || isTranslationApp() -> {
+            isDictionaryApp() -> {
                 saveLanguageMiniAppSnapshotInternal(targetState)
             }
             else -> false
@@ -3909,10 +3872,10 @@ class FloatingMiniAppWindow(
         } else {
             maximizeRestoreBounds?.copyBounds() ?: normalFloatingBounds.copyBounds()
         }
-        val payload = when {
-            isDictionaryApp() -> dictionaryInstance?.onSaveState() ?: emptyMap()
-            isTranslationApp() -> translationInstance?.onSaveState() ?: emptyMap()
-            else -> emptyMap()
+        val payload = if (isDictionaryApp()) {
+            dictionaryInstance?.onSaveState() ?: emptyMap()
+        } else {
+            emptyMap()
         }
         val snapshot = durableStore.loadSnapshot(instanceId) ?: MiniAppRecoverySnapshot(
             instanceId = instanceId,
@@ -3963,7 +3926,7 @@ class FloatingMiniAppWindow(
                     mainHandler.post { onComplete(ok) }
                 }
             }
-            isDictionaryApp() || isTranslationApp() -> {
+            isDictionaryApp() -> {
                 val ok = saveLanguageMiniAppSnapshotInternal(targetState)
                 if (Looper.myLooper() == Looper.getMainLooper()) {
                     onComplete(ok)
@@ -4064,8 +4027,6 @@ class FloatingMiniAppWindow(
                 readerInstance?.onPause()
             } else if (isDictionaryApp()) {
                 dictionaryInstance?.onPause()
-            } else if (isTranslationApp()) {
-                translationInstance?.onPause()
             }
             LogKeeper.log(context, "FloatingMiniAppWindow", "ON_HIDE_MAIN_ONLY id=$instanceId appType=$appType (skipping Heavy)")
             return
@@ -4118,9 +4079,6 @@ class FloatingMiniAppWindow(
         } else if (isDictionaryApp()) {
             dictionaryInstance?.onDestroy()
             dictionaryInstance = null
-        } else if (isTranslationApp()) {
-            translationInstance?.onDestroy()
-            translationInstance = null
         }
         if (!isMainOnlyApp()) {
             HeavyProcessConnectionManager.getInstance(context).removeListener(connectionListener)

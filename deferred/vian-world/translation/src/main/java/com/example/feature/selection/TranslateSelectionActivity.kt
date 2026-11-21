@@ -26,11 +26,7 @@ import kotlinx.coroutines.launch
 /**
  * Android text-selection (`ACTION_PROCESS_TEXT`) popup activity for "Translate".
  *
- * Connected to the shared on-device [TranslationService] (Google ML Kit Translate + Language ID):
- * - Reads shared source/target language preferences from [TranslationService].
- * - Translates selected text off the main thread on open.
- * - Displays actual translated output with working Copy, plus loading, missing-model download,
- *   undetermined/unsupported language, and failure states.
+ * Preserved outside active Sidebar build for future Vian World integration.
  */
 class TranslateSelectionActivity : Activity() {
 
@@ -86,7 +82,6 @@ class TranslateSelectionActivity : Activity() {
         languagePairHeaderView = pairHeader
         body.addView(pairHeader)
 
-        // Selected text preview card
         val sourceScroll = ScrollView(this).apply {
             background = LanguageMiniAppUiHelper.roundedBg(
                 density,
@@ -114,7 +109,6 @@ class TranslateSelectionActivity : Activity() {
             layoutParams = LinearLayout.LayoutParams(1, (10 * density).toInt())
         })
 
-        // Scrollable translation result container
         val maxOutputHeightPx = (resources.displayMetrics.heightPixels * 0.34f)
             .toInt()
             .coerceIn((130 * density).toInt(), (260 * density).toInt())
@@ -165,7 +159,6 @@ class TranslateSelectionActivity : Activity() {
             layoutParams = LinearLayout.LayoutParams(1, (10 * density).toInt())
         })
 
-        // Bottom actions row: Copy + Settings
         val actionRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -196,10 +189,10 @@ class TranslateSelectionActivity : Activity() {
             text = "Settings",
             accentColor = LanguageMiniAppUiHelper.COLOR_TEXT_PRIMARY,
             filled = false,
-            contentDesc = "Open Dictionary and Translation settings",
+            contentDesc = "Open Translation settings",
             tag = TAG_SETTINGS_BUTTON
         ) {
-            SelectionPopupShell.openDictionaryTranslationSettings(this)
+            // Wire to Vian World Translation settings route
             finish()
         }.apply {
             minimumHeight = (48 * density).toInt()
@@ -466,9 +459,6 @@ class TranslateSelectionActivity : Activity() {
         const val TAG_SETTINGS_BUTTON = "translate_popup_settings_button"
         const val TAG_COPY_FEEDBACK = "translate_popup_copy_feedback"
 
-        /**
-         * Shared translation helper invoked by UI and testable in JVM integration tests.
-         */
         internal suspend fun performSharedTranslation(
             service: TranslationService,
             rawSelectedText: String?

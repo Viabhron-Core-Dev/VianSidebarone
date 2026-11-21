@@ -11,7 +11,7 @@ data class LanguageOption(
 
 /**
  * Shared persisted configuration for the Translation floating mini-app, Translate popup,
- * and Dictionary & Translation Settings.
+ * and Translation Settings.
  */
 data class TranslationConfig(
     val sourceLanguageCode: String = TranslationService.CODE_AUTO_DETECT,

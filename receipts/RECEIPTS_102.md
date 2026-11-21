@@ -210,3 +210,61 @@
 * Any deviation from what was requested, and why: None in product behavior. Left `ReadAloudController.kt` and `ReadAloudSelectionActivity.kt` source files in place (unregistered in `AndroidManifest.xml` and removed from `MeaningSelectionActivity`) so no unrelated references break while ensuring zero custom "Read aloud" selection menu entry appears on Android.
 * Any known issue or follow-up needed: Physical-device QA is required to verify live SAF ZIP import on large StarDict archives, real Google ML Kit model download over Wi-Fi/mobile networks, on-device language identification and translation accuracy, cross-process sync between `:heavy` Settings and Main floating windows/popups, and host-app `ACTION_PROCESS_TEXT` menu entries (`Meaning` and `Translate` only).
 
+### Receipt 130
+* Timestamp: 2026-11-21 13:45 UTC
+* One-line summary of what was requested: Remove Google ML Kit Translation and Language Identification from the active Sidebar app while preserving the complete Translation implementation in `deferred/vian-world/translation/` for future Vian World integration, keeping the offline StarDict Dictionary and all unrelated Sidebar features fully functional.
+* Exact files touched:
+  - Created (preserved archive outside Gradle source sets):
+    - `deferred/vian-world/translation/README.md`
+    - `deferred/vian-world/translation/src/main/java/com/example/feature/language/translation/TranslationModels.kt`
+    - `deferred/vian-world/translation/src/main/java/com/example/feature/language/translation/TranslationEngineBackend.kt`
+    - `deferred/vian-world/translation/src/main/java/com/example/feature/language/translation/TranslationService.kt`
+    - `deferred/vian-world/translation/src/main/java/com/example/feature/language/TranslationMiniAppInstance.kt`
+    - `deferred/vian-world/translation/src/main/java/com/example/feature/language/LanguageMiniAppUiHelperTranslationAdditions.kt`
+    - `deferred/vian-world/translation/src/main/java/com/example/feature/selection/TranslateSelectionActivity.kt`
+    - `deferred/vian-world/translation/src/main/java/com/example/feature/settings/DictionaryTranslationSettingsDialogs.kt`
+    - `deferred/vian-world/translation/src/main/java/com/example/feature/settings/TranslationSettingsSectionReference.kt`
+    - `deferred/vian-world/translation/src/test/java/com/example/feature/language/TranslationServiceTest.kt`
+    - `deferred/vian-world/translation/src/test/java/com/example/feature/language/TranslationUiAndSelectionTest.kt`
+  - Created (active app & tests):
+    - `app/src/main/java/com/example/feature/settings/DictionarySettingsScreen.kt`
+    - `app/src/test/java/com/example/feature/language/DictionaryMiniAppTest.kt`
+  - Removed from active app/test (moved/archived to `deferred/vian-world/translation/` or replaced):
+    - `app/src/main/java/com/example/feature/language/translation/TranslationModels.kt`
+    - `app/src/main/java/com/example/feature/language/translation/TranslationEngineBackend.kt`
+    - `app/src/main/java/com/example/feature/language/translation/TranslationService.kt`
+    - `app/src/main/java/com/example/feature/language/TranslationMiniAppInstance.kt`
+    - `app/src/main/java/com/example/feature/selection/TranslateSelectionActivity.kt`
+    - `app/src/main/java/com/example/feature/settings/DictionaryTranslationSettingsDialogs.kt`
+    - `app/src/main/java/com/example/feature/settings/DictionaryTranslationSettingsScreen.kt`
+    - `app/src/test/java/com/example/feature/language/TranslationServiceTest.kt`
+    - `app/src/test/java/com/example/feature/language/DictionaryAndTranslationMiniAppTest.kt`
+  - Modified:
+    - `app/build.gradle.kts`
+    - `app/src/main/AndroidManifest.xml`
+    - `app/src/main/java/com/example/SettingsActivity.kt`
+    - `app/src/main/java/com/example/feature/floating/FloatingMiniAppBridge.kt`
+    - `app/src/main/java/com/example/feature/floating/FloatingMiniAppWindow.kt`
+    - `app/src/main/java/com/example/feature/floating/FloatingMiniAppLauncherBubble.kt`
+    - `app/src/main/java/com/example/feature/floating/HeavyFloatingHost.kt`
+    - `app/src/main/java/com/example/feature/heavy/page/HeavyPageHostManager.kt`
+    - `app/src/main/java/com/example/feature/floating/trigger/FloatingTriggerStore.kt`
+    - `app/src/main/java/com/example/feature/settings/AddElementActivity.kt`
+    - `app/src/main/java/com/example/feature/sidebar/SidebarItem.kt`
+    - `app/src/main/java/com/example/feature/element/ElementActionDispatcher.kt`
+    - `app/src/main/java/com/example/feature/language/LanguageMiniAppUiHelper.kt`
+    - `app/src/main/java/com/example/feature/language/DictionaryMiniAppInstance.kt`
+    - `app/src/main/java/com/example/feature/language/dictionary/DictionaryService.kt`
+    - `app/src/main/java/com/example/feature/selection/SelectionPopupShell.kt`
+    - `app/src/main/java/com/example/feature/selection/MeaningSelectionActivity.kt`
+    - `app/src/test/java/com/example/feature/selection/SelectionActionsAndReadAloudTest.kt`
+    - `blueprint/BLUEPRINT.md`
+    - `receipts/RECEIPTS_102.md`
+* What was actually done — factual, not persuasive:
+  1. **Deferred Vian World Handoff (`deferred/vian-world/translation/`)**: Archived all ML Kit Translation engine files, `TranslationMiniAppInstance`, `TranslateSelectionActivity`, settings dialog/section references, unit/integration tests, and a complete `README.md` (exact `17.0.3`/`17.0.6` Gradle deps, 64.12 MiB APK size analysis, original Sidebar hooks, cross-process `prefs.json`/inline-picker patterns, `:heavy` `MlKitContext has not been initialized` root cause, and Vian World checklist). Left any existing on-device `filesDir/mlkit_translation/` storage intact.
+  2. **ML Kit & Translation Entry Point Removal**: Removed `com.google.mlkit:translate:17.0.3` and `com.google.mlkit:language-id:17.0.6` from `app/build.gradle.kts`; removed `TranslateSelectionActivity` from `AndroidManifest.xml`; removed `"translation"` / `system:translation_floating` from `AddElementActivity`, `SidebarItem`, `ElementActionDispatcher`, `FloatingTriggerStore` (including `FloatingTriggerCompat.validateItem` rejection of `SystemAction("translation_floating")` and `PageWindow("translation")`), `FloatingMiniAppBridge` (including safe skip guards for stale `"translation"` snapshots), `FloatingMiniAppWindow`, `FloatingMiniAppLauncherBubble`, `HeavyFloatingHost`, `HeavyPageHostManager`, and `LanguageMiniAppUiHelper`.
+  3. **Dictionary-Only Settings & Preserved StarDict**: Created `DictionarySettingsScreen.kt` (keeping all SAF ZIP import, progress/feedback banners, enable switch, priority reorder, and delete confirmation intact under `"Dictionary Settings"` / `ROUTE_DICTIONARY_SETTINGS`, aliasing `dictionary_translation_settings` to `DictionarySettingsScreen`, and routing legacy `translation_settings` to non-ML-Kit `DeferredTranslationNoticeScreen`). Updated `DictionaryMiniAppInstance`, `DictionaryService`, `SelectionPopupShell`, and `MeaningSelectionActivity` references accordingly.
+  4. **Tests**: Replaced `DictionaryAndTranslationMiniAppTest.kt` with `DictionaryMiniAppTest.kt` (4 tests) and updated `SelectionActionsAndReadAloudTest.kt` (6 tests) to assert only `MeaningSelectionActivity` is registered for `ACTION_PROCESS_TEXT`, zero ML Kit deps/imports in active source, safe handling of stale `"translation"` snapshots/triggers, and full StarDict Dictionary & TTS ReadAloud functionality.
+* How it was verified: Local build (`compile_applet` -> `Build succeeded - the applet is compiled`), dependency graph checks (`gradle :app:dependencies --configuration debugRuntimeClasspath --console=plain` and `debugCompileClasspath` -> zero `mlkit`/`translate`/`language-id`/`tflite` hits), clean `gradle :app:assembleDebug` (`app-debug.apk` = **16,267,127 bytes / 15.51 MiB / 16.27 MB** vs **80.87 MiB** baseline; only 4 CameraX `libimage_processing_util_jni.so` native libs totaling 132,208 bytes remain, 0 `.tflite`/ML Kit entries), `wc -l app/LiteReader_Log.txt` = 1197 lines, and targeted local JVM unit tests (`--rerun-tasks`): **263/263** tests passed across 21 suites (`DictionaryMiniAppTest` 4/4, `StarDictDictionaryEngineTest` 6/6, `SelectionActionsAndReadAloudTest` 6/6, `SettingsNavigationStructureTest` 2/2, `FloatingTriggerTest` 15/15, `FloatingMiniAppFrameworkTest` 98/98, `ReaderMiniAppTest` 18/18, `ReaderArchitectureAndBackupTest` 13/13, `EpubParserTest` 14/14, `QuickCallTest` 9/9, `OfflinePwaFoundationTest` 20/20, `FloatingPwaMiniAppTest` 6/6, `ElementIdParserTest` 12/12, `ElementSystemTest` 4/4, `FolderElementLifecycleTest` 7/7, `HybridGridStorageScopeTest` 4/4, `LinkCustomTabIntegrationTest` 6/6, `VectorDrawablePathTest` 1/1, `NotificationHistoryBufferTest` 4/4, `MainProcessRecoveryTest` 8/8, `MainRuntimeRestorationTest` 6/6; 0 failures/errors/skipped). An earlier full `:app:testDebugUnitTest` run (521 tests) had 1 unrelated pre-existing failure in `CallSensorIpcTest.testHeavyUnavailableAndQueueingBehavior` (omits `callManager.testEnabledOverride = true`) plus 1 assertion failure in `DictionaryMiniAppTest` that was subsequently fixed and re-verified. Not tested on a physical Android device or emulator (unavailable in this environment).
+* Any deviation from what was requested, and why: None in product scope. `deferred/vian-world/translation/` is explicitly a preserved reference archive outside Gradle source sets (requires Vian World module integration and `MlKitContext` multi-process fix before compiling).
+* Any known issue or follow-up needed: Physical-device QA is required to confirm live StarDict SAF ZIP import and multi-dictionary priority lookup across `:heavy` Settings and Main floating/popup views, `Meaning` `ACTION_PROCESS_TEXT` popup in host apps, absence of any Translation/Translate entry in Add Element, Settings, and text-selection menus, and clean handling of any pre-existing persisted `"translation"` snapshots or Floating Triggers on upgrade.

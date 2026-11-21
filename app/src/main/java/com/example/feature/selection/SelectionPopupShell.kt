@@ -11,11 +11,10 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import com.example.SettingsActivity
 import com.example.feature.language.LanguageMiniAppUiHelper
-import com.example.feature.settings.ROUTE_DICTIONARY_TRANSLATION_SETTINGS
+import com.example.feature.settings.ROUTE_DICTIONARY_SETTINGS
 
 /**
- * Shared compact dialog shell for the three Android text-selection (`ACTION_PROCESS_TEXT`)
- * popup activities: Read aloud, Meaning, and Translate.
+ * Shared compact dialog shell for Android text-selection (`ACTION_PROCESS_TEXT`) popup activities.
  *
  * Distinct from full floating mini-apps: renders a lightweight, focused popup card over a
  * translucent scrim so the underlying host app stays visible and tapping outside dismisses cleanly.
@@ -136,11 +135,11 @@ object SelectionPopupShell {
         return ShellViews(root = scrim, cardContent = body)
     }
 
-    fun openDictionaryTranslationSettings(activity: Activity) {
+    fun openDictionarySettings(activity: Activity) {
         try {
             val intent = Intent(activity, SettingsActivity::class.java).apply {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                putExtra("start_route", ROUTE_DICTIONARY_TRANSLATION_SETTINGS)
+                putExtra("start_route", ROUTE_DICTIONARY_SETTINGS)
             }
             activity.startActivity(intent)
         } catch (_: Throwable) {}

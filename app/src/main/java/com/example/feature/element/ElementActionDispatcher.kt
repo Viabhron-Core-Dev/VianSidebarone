@@ -215,10 +215,6 @@ object ElementActionDispatcher {
                 MiniAppManager.toggleApp(context, "dictionary")
                 true
             }
-            "translation_floating" -> {
-                MiniAppManager.toggleApp(context, "translation")
-                true
-            }
             "hybrid_grid_floating" -> {
                 MiniAppManager.toggleApp(context, "hybrid_grid")
                 true

@@ -11,10 +11,8 @@ import android.widget.TextView
 import com.example.core.WindowBounds
 
 /**
- * Shared visual tokens, compact bounds calculators, and placeholder-card builders used by the
- * separate Dictionary and Translation floating mini-apps.
- *
- * Keeps visual styling cohesive without merging the two mini-apps into one UI or tab container.
+ * Shared visual tokens, compact bounds calculators, and status-card builders used by the
+ * Dictionary floating mini-app and text-selection popup.
  */
 object LanguageMiniAppUiHelper {
     val COLOR_SURFACE_BG: Int = Color.parseColor("#1E1E2E")
@@ -25,12 +23,10 @@ object LanguageMiniAppUiHelper {
     val COLOR_TEXT_SECONDARY: Int = Color.parseColor("#A6ADC8")
     val COLOR_TEXT_MUTED: Int = Color.parseColor("#7F849C")
     val COLOR_ACCENT_DICTIONARY: Int = Color.parseColor("#89B4FA")
-    val COLOR_ACCENT_TRANSLATION: Int = Color.parseColor("#A6E3A1")
     val COLOR_WARNING_BG: Int = Color.parseColor("#2E2A3B")
     val COLOR_WARNING_ACCENT: Int = Color.parseColor("#F9E2AF")
 
     const val ACCENT_DICTIONARY_HEX = "#89B4FA"
-    const val ACCENT_TRANSLATION_HEX = "#A6E3A1"
 
     /**
      * Computes compact initial floating bounds for the Dictionary mini-app, bounded safely to the
@@ -50,27 +46,6 @@ object LanguageMiniAppUiHelper {
         val height = (330 * density).toInt().coerceAtMost(maxH)
         val x = ((safeW - width) / 2).coerceAtLeast((12 * density).toInt())
         val y = (96 * density).toInt().coerceAtMost(maxOf(0, safeH - height - (48 * density).toInt()))
-        return WindowBounds(x, y, width, height)
-    }
-
-    /**
-     * Computes compact initial floating bounds for the Translation mini-app, slightly staggered
-     * from Dictionary so both can be opened side-by-side cleanly.
-     */
-    fun computeCompactTranslationBounds(
-        context: Context,
-        screenWidth: Int,
-        screenHeight: Int
-    ): WindowBounds {
-        val density = context.resources.displayMetrics.density
-        val safeW = screenWidth.takeIf { it > 0 } ?: context.resources.displayMetrics.widthPixels.coerceAtLeast(720)
-        val safeH = screenHeight.takeIf { it > 0 } ?: context.resources.displayMetrics.heightPixels.coerceAtLeast(1280)
-        val maxW = (safeW * 0.90f).toInt().coerceAtLeast((250 * density).toInt())
-        val maxH = (safeH * 0.65f).toInt().coerceAtLeast((280 * density).toInt())
-        val width = (312 * density).toInt().coerceAtMost(maxW)
-        val height = (380 * density).toInt().coerceAtMost(maxH)
-        val x = ((safeW - width) / 2 + (14 * density).toInt()).coerceIn(0, maxOf(0, safeW - width))
-        val y = (128 * density).toInt().coerceAtMost(maxOf(0, safeH - height - (48 * density).toInt()))
         return WindowBounds(x, y, width, height)
     }
 

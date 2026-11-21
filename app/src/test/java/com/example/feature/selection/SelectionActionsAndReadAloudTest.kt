@@ -104,7 +104,7 @@ class SelectionActionsAndReadAloudTest {
     }
 
     @Test
-    fun testManifestRegistersOnlyMeaningAndTranslateProcessTextActivities() {
+    fun testManifestRegistersOnlyMeaningProcessTextActivity() {
         val manifestFile = listOf(
             File("src/main/AndroidManifest.xml"),
             File("app/src/main/AndroidManifest.xml")
@@ -119,13 +119,19 @@ class SelectionActionsAndReadAloudTest {
             "Custom 'Read aloud' selection label must NOT be registered in manifest",
             xml.contains("android:label=\"Read aloud\"")
         )
+        assertFalse(
+            "TranslateSelectionActivity must NOT be registered after deferral to Vian World",
+            xml.contains(".feature.selection.TranslateSelectionActivity")
+        )
+        assertFalse(
+            "Translate selection label must NOT be registered in manifest after deferral",
+            xml.contains("android:label=\"Translate\"")
+        )
         assertTrue(xml.contains(".feature.selection.MeaningSelectionActivity"))
         assertTrue(xml.contains("android:label=\"Meaning\""))
-        assertTrue(xml.contains(".feature.selection.TranslateSelectionActivity"))
-        assertTrue(xml.contains("android:label=\"Translate\""))
 
         val processTextFilterCount = Regex("android\\.intent\\.action\\.PROCESS_TEXT").findAll(xml).count()
-        assertEquals("Exactly two ACTION_PROCESS_TEXT activities (Meaning & Translate) must be registered", 2, processTextFilterCount)
+        assertEquals("Only Meaning ACTION_PROCESS_TEXT activity must be registered", 1, processTextFilterCount)
     }
 
     @Test
@@ -247,7 +253,7 @@ class SelectionActionsAndReadAloudTest {
     }
 
     @Test
-    fun testMeaningAndTranslatePopupsWireRealSharedServicesWithoutCustomReadAloud() {
+    fun testMeaningPopupWiresSharedDictionaryServiceWithoutCustomReadAloudAndTranslateDeferred() {
         val meaningSrc = listOf(
             File("src/main/java/com/example/feature/selection/MeaningSelectionActivity.kt"),
             File("app/src/main/java/com/example/feature/selection/MeaningSelectionActivity.kt")
@@ -255,14 +261,13 @@ class SelectionActionsAndReadAloudTest {
         assertFalse("MeaningSelectionActivity must NOT use ReadAloudController", meaningSrc.contains("ReadAloudController"))
         assertFalse("MeaningSelectionActivity must NOT contain custom Read Aloud button", meaningSrc.contains("\"Read Aloud\"") || meaningSrc.contains("TAG_READ_ALOUD"))
         assertTrue("MeaningSelectionActivity must use shared DictionaryService", meaningSrc.contains("DictionaryService.getInstance"))
+        assertTrue("MeaningSelectionActivity must route to Dictionary Settings", meaningSrc.contains("openDictionarySettings"))
         assertFalse("MeaningSelectionActivity must not keep old placeholder string", meaningSrc.contains("DICTIONARY NOT CONFIGURED"))
 
-        val translateSrc = listOf(
+        val activeTranslateFiles = listOf(
             File("src/main/java/com/example/feature/selection/TranslateSelectionActivity.kt"),
             File("app/src/main/java/com/example/feature/selection/TranslateSelectionActivity.kt")
-        ).first { it.exists() }.readText()
-        assertTrue("TranslateSelectionActivity must use shared TranslationService", translateSrc.contains("TranslationService.getInstance"))
-        assertTrue(translateSrc.contains("copyTranslation()"))
-        assertFalse("TranslateSelectionActivity must not keep old placeholder string", translateSrc.contains("TRANSLATION NOT CONFIGURED"))
+        ).filter { it.exists() }
+        assertTrue("TranslateSelectionActivity must be removed from active src/main", activeTranslateFiles.isEmpty())
     }
 }

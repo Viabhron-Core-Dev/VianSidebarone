@@ -15,11 +15,10 @@ import java.util.concurrent.ConcurrentHashMap
  * Single shared on-device Translation service used by:
  * - [com.example.feature.language.TranslationMiniAppInstance] (Main process)
  * - [com.example.feature.selection.TranslateSelectionActivity] (Main process)
- * - [com.example.feature.settings.DictionaryTranslationSettingsScreen] (`:heavy` process)
+ * - Settings UI (note: must run in ML Kit-initialized process or via IPC; see deferred README.md)
  *
  * Cross-process consistency:
- * Shared language and download preferences are persisted atomically to `filesDir/translation/prefs.json`
- * so `:heavy` Settings changes are immediately reflected by Main floating windows and selection popups.
+ * Shared language and download preferences are persisted atomically to `filesDir/mlkit_translation/prefs.json`.
  */
 class TranslationService private constructor(
     private val appContext: Context,
@@ -35,9 +34,6 @@ class TranslationService private constructor(
     private val _downloadedLanguages = MutableStateFlow<Set<String>>(emptySet())
     val downloadedLanguages: StateFlow<Set<String>> = _downloadedLanguages.asStateFlow()
 
-    /**
-     * Returns all supported target languages from ML Kit sorted alphabetically by display name.
-     */
     fun getSupportedTargetLanguages(): List<LanguageOption> {
         return backend.getSupportedLanguageCodes()
             .distinct()
@@ -45,9 +41,6 @@ class TranslationService private constructor(
             .sortedBy { it.displayName.lowercase() }
     }
 
-    /**
-     * Returns `Auto-detect` followed by all ML Kit supported languages sorted alphabetically.
-     */
     fun getSupportedSourceLanguages(): List<LanguageOption> {
         val auto = LanguageOption(
             code = CODE_AUTO_DETECT,
@@ -62,10 +55,6 @@ class TranslationService private constructor(
         return backend.getDisplayName(code)
     }
 
-    /**
-     * Resolves a stored value (either a language code like `"es"` or legacy display name like `"Spanish"`
-     * or `"Auto-detect"`) into a valid language code supported by ML Kit.
-     */
     fun resolveLanguageCode(codeOrName: String?, allowAuto: Boolean): String? {
         val raw = codeOrName?.trim().orEmpty()
         if (raw.isEmpty()) return null
@@ -78,9 +67,6 @@ class TranslationService private constructor(
         return backend.normalizeLanguageTag(raw)?.takeIf { it in supported }
     }
 
-    /**
-     * Reads the latest committed shared translation configuration from disk (cross-process safe).
-     */
     fun getConfig(): TranslationConfig = synchronized(prefsLock) {
         val defaultConfig = TranslationConfig()
         if (!prefsFile.isFile) return defaultConfig
@@ -131,9 +117,6 @@ class TranslationService private constructor(
         updated
     }
 
-    /**
-     * Refreshes the list of currently downloaded ML Kit on-device language models.
-     */
     suspend fun refreshDownloadedModels(): Result<Set<String>> {
         val result = backend.getDownloadedLanguageCodes()
         result.onSuccess { downloaded ->
@@ -144,7 +127,6 @@ class TranslationService private constructor(
                     merged[code] = ModelDownloadState.Downloaded
                 }
             }
-            // Clear stale Downloaded states for models that were removed
             for (key in merged.keys.toList()) {
                 if (key !in downloaded && merged[key] is ModelDownloadState.Downloaded) {
                     merged[key] = ModelDownloadState.NotDownloaded
@@ -155,10 +137,6 @@ class TranslationService private constructor(
         return result
     }
 
-    /**
-     * Downloads one on-device ML Kit language model, preventing duplicate concurrent downloads
-     * and honoring the Wi-Fi-only policy unless explicitly overridden.
-     */
     suspend fun downloadModel(
         languageCode: String,
         requireWifiOverride: Boolean? = null
@@ -204,9 +182,6 @@ class TranslationService private constructor(
         }
     }
 
-    /**
-     * Downloads multiple required models cleanly, skipping already-installed ones.
-     */
     suspend fun downloadMissingModels(
         languageCodes: Collection<String>,
         requireWifiOverride: Boolean? = null
@@ -222,9 +197,6 @@ class TranslationService private constructor(
         return Result.success(Unit)
     }
 
-    /**
-     * Deletes a downloaded ML Kit language model from local device storage and refreshes status.
-     */
     suspend fun deleteModel(languageCode: String): Result<Unit> {
         val cleanCode = resolveLanguageCode(languageCode, allowAuto = false)
             ?: return Result.failure(IllegalArgumentException("Unsupported language code: $languageCode"))
@@ -242,12 +214,6 @@ class TranslationService private constructor(
         return res
     }
 
-    /**
-     * Performs real on-device translation using already-installed ML Kit models.
-     * - Handles automatic language detection when source is `"auto"`.
-     * - Detects missing models BEFORE invoking translation and reports them clearly.
-     * - Never downloads models silently behind the user's back and never returns fake text.
-     */
     suspend fun translate(
         rawText: String,
         overrideSourceCode: String? = null,

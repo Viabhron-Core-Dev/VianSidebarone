@@ -15,7 +15,7 @@ import java.nio.charset.StandardCharsets
  * Single shared offline Dictionary service used by:
  * - [com.example.feature.language.DictionaryMiniAppInstance] (Main process)
  * - [com.example.feature.selection.MeaningSelectionActivity] (Main process)
- * - [com.example.feature.settings.DictionaryTranslationSettingsScreen] (`:heavy` process)
+ * - [com.example.feature.settings.DictionarySettingsScreen] (`:heavy` process)
  *
  * Cross-process consistency:
  * Catalog metadata is stored atomically in `filesDir/dictionaries/catalog.json` rather than

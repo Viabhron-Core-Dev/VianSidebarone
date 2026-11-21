@@ -79,13 +79,10 @@ class FloatingMiniAppBridge private constructor(private val context: Context) {
 
     fun isDictionaryMiniApp(appType: String): Boolean = (appType == com.example.feature.language.DictionaryMiniAppInstance.APP_TYPE)
 
-    fun isTranslationMiniApp(appType: String): Boolean = (appType == com.example.feature.language.TranslationMiniAppInstance.APP_TYPE)
-
     fun isMainOnlyMiniApp(appType: String): Boolean =
         isNoteMiniApp(appType) ||
             isReaderMiniApp(appType) ||
-            isDictionaryMiniApp(appType) ||
-            isTranslationMiniApp(appType)
+            isDictionaryMiniApp(appType)
 
     /**
      * Opens or wakes the Main-process floating Reader window and loads the specified [epubBookId]
@@ -215,19 +212,19 @@ class FloatingMiniAppBridge private constructor(private val context: Context) {
         }
     }
 
-    fun launchDictionaryTranslationSettings(sourceInstanceId: String? = null) {
+    fun launchDictionarySettings(sourceInstanceId: String? = null) {
         try {
             val intent = Intent(context, com.example.SettingsActivity::class.java).apply {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                putExtra("start_route", com.example.feature.settings.ROUTE_DICTIONARY_TRANSLATION_SETTINGS)
+                putExtra("start_route", com.example.feature.settings.ROUTE_DICTIONARY_SETTINGS)
                 if (!sourceInstanceId.isNullOrBlank()) {
                     putExtra("source_miniapp_instance_id", sourceInstanceId)
                 }
             }
             context.startActivity(intent)
-            LogKeeper.log(context, TAG, "OPEN_DICTIONARY_TRANSLATION_SETTINGS source=$sourceInstanceId")
+            LogKeeper.log(context, TAG, "OPEN_DICTIONARY_SETTINGS source=$sourceInstanceId")
         } catch (e: Throwable) {
-            LogKeeper.log(context, TAG, "Failed to launch Dictionary & Translation Settings: ${e.message}")
+            LogKeeper.log(context, TAG, "Failed to launch Dictionary Settings: ${e.message}")
         }
     }
 
@@ -310,11 +307,6 @@ class FloatingMiniAppBridge private constructor(private val context: Context) {
             ?: savedSnapshot?.windowBounds?.copyBounds()
             ?: when {
                 isDictionaryMiniApp(appType) -> com.example.feature.language.LanguageMiniAppUiHelper.computeCompactDictionaryBounds(
-                    context = context,
-                    screenWidth = windowManager.screenWidth,
-                    screenHeight = windowManager.screenHeight
-                )
-                isTranslationMiniApp(appType) -> com.example.feature.language.LanguageMiniAppUiHelper.computeCompactTranslationBounds(
                     context = context,
                     screenWidth = windowManager.screenWidth,
                     screenHeight = windowManager.screenHeight
@@ -565,6 +557,10 @@ class FloatingMiniAppBridge private constructor(private val context: Context) {
         }
 
         val appType = snapshot?.appType ?: "generic"
+        if (appType == "translation") {
+            LogKeeper.log(context, TAG, "WAKE_SKIPPED_DEFERRED id=$instanceId type=translation")
+            return
+        }
         if (isReaderMiniApp(appType)) {
             // Waking a sleeping bubble in the same process is a warm unfold; if process restarted, ReaderSessionTracker.isWarmSession is false
             // Note: if ReaderSessionTracker.isWarmSession(instanceId) is already true, openMiniApp will preserve the active book/chapter/scroll!
@@ -745,6 +741,9 @@ class FloatingMiniAppBridge private constructor(private val context: Context) {
         val restored = mutableListOf<FloatingMiniAppWindow>()
 
         for (snapshot in snapshots) {
+            if (snapshot.appType == "translation") {
+                continue
+            }
             when (snapshot.state) {
                 MiniAppState.ACTIVE -> {
                     if (windowManager.getWindow(snapshot.instanceId) == null) {

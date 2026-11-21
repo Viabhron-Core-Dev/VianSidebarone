@@ -27,7 +27,7 @@ import kotlinx.coroutines.launch
  * - Looks up the term off the main thread via [DictionaryService].
  * - Displays actual definitions with dictionary attribution, plus honest loading, no-result,
  *   unconfigured, and error states.
- * - Provides a direct route to Dictionary & Translation Settings.
+ * - Provides a direct route to Dictionary Settings.
  */
 class MeaningSelectionActivity : Activity() {
 
@@ -146,10 +146,10 @@ class MeaningSelectionActivity : Activity() {
             text = "Dictionary Settings",
             accentColor = LanguageMiniAppUiHelper.COLOR_TEXT_PRIMARY,
             filled = false,
-            contentDesc = "Open Dictionary and Translation settings",
+            contentDesc = "Open Dictionary settings",
             tag = TAG_OPEN_SETTINGS_BUTTON
         ) {
-            SelectionPopupShell.openDictionaryTranslationSettings(this)
+            SelectionPopupShell.openDictionarySettings(this)
             finish()
         }.apply {
             minimumHeight = (48 * density).toInt()

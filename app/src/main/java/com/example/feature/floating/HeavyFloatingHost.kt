@@ -32,7 +32,6 @@ class HeavyFloatingHost private constructor(private val context: Context) {
         registerFactory("work_notes", defaultFactory)
         registerFactory(com.example.feature.pwa.floating.FloatingPwaMiniAppInstance.APP_TYPE, floatingPwaFactory)
         registerFactory("dictionary", defaultFactory)
-        registerFactory("translation", defaultFactory)
         registerFactory(TestNotesMiniAppInstance.APP_TYPE, testNotesFactory)
         registerFactory(TestNotesMiniAppInstance.APP_TYPE_NOTE, testNotesFactory)
     }

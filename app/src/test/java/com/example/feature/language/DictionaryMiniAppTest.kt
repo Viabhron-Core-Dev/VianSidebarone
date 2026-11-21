@@ -7,25 +7,27 @@ import android.content.SharedPreferences
 import android.view.WindowManager
 import com.example.core.FakeSharedPreferences
 import com.example.core.FloatingWindowManager
+import com.example.core.WindowBounds
+import com.example.feature.element.ElementActionDispatcher
 import com.example.feature.floating.DurableMiniAppStore
 import com.example.feature.floating.FloatingMiniAppBridge
 import com.example.feature.floating.FloatingMiniAppWindow
+import com.example.feature.floating.MiniAppRecoverySnapshot
 import com.example.feature.floating.MiniAppState
+import com.example.feature.floating.trigger.FloatingTriggerCompat
+import com.example.feature.floating.trigger.FloatingTriggerTargetValidation
 import com.example.feature.language.dictionary.DictionaryImportResult
 import com.example.feature.language.dictionary.DictionaryLookupOutcome
 import com.example.feature.language.dictionary.DictionaryService
-import com.example.feature.language.translation.TranslationOutcome
-import com.example.feature.language.translation.TranslationService
 import com.example.feature.selection.MeaningSelectionActivity
-import com.example.feature.selection.TranslateSelectionActivity
+import com.example.feature.settings.ROUTE_DICTIONARY_SETTINGS
 import com.example.feature.settings.ROUTE_DICTIONARY_TRANSLATION_SETTINGS
-import kotlinx.coroutines.runBlocking
+import com.example.feature.settings.ROUTE_LEGACY_TRANSLATION_SETTINGS
+import com.example.feature.sidebar.SidebarItem
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
@@ -40,7 +42,7 @@ import java.nio.charset.StandardCharsets
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 
-class DictionaryAndTranslationMiniAppTest {
+class DictionaryMiniAppTest {
 
     @get:Rule
     val tempFolder = TemporaryFolder()
@@ -96,26 +98,17 @@ class DictionaryAndTranslationMiniAppTest {
     private lateinit var bridge: FloatingMiniAppBridge
     private lateinit var store: DurableMiniAppStore
     private lateinit var dictionaryService: DictionaryService
-    private lateinit var translationBackend: TranslationServiceTest.FakeTranslationEngineBackend
-    private lateinit var translationService: TranslationService
 
     @Before
     fun setUp() {
         val prefs = FakeSharedPreferences()
-        val filesDir = tempFolder.newFolder("lang_test")
+        val filesDir = tempFolder.newFolder("dict_test")
         context = MockTestContext(prefs, filesDir)
         DurableMiniAppStore.resetForTesting()
         FloatingMiniAppBridge.resetForTesting()
         DictionaryService.resetForTesting()
-        TranslationService.resetForTesting()
 
         dictionaryService = DictionaryService.createForTesting(context, File(filesDir, "stardict_dictionaries"))
-        translationBackend = TranslationServiceTest.FakeTranslationEngineBackend()
-        translationService = TranslationService.createForTesting(
-            context,
-            File(filesDir, "mlkit_translation/prefs.json"),
-            translationBackend
-        )
 
         val wm = FloatingWindowManager.getInstance(context)
         wm.getAllWindows().map { it.windowId }.forEach { wm.unregisterWindow(it) }
@@ -130,7 +123,16 @@ class DictionaryAndTranslationMiniAppTest {
         wm.getAllWindows().map { it.windowId }.forEach { wm.unregisterWindow(it) }
         DurableMiniAppStore.resetForTesting()
         DictionaryService.resetForTesting()
-        TranslationService.resetForTesting()
+    }
+
+    private fun resolveProjectPath(relativeFromRoot: String): File {
+        val fromApp = relativeFromRoot.removePrefix("app/")
+        val candidates = listOf(
+            File(relativeFromRoot),
+            File(fromApp),
+            File("../$relativeFromRoot")
+        )
+        return candidates.first { it.exists() }
     }
 
     private fun createSimpleStarDictZip(name: String, word: String, definition: String): File {
@@ -154,55 +156,35 @@ class DictionaryAndTranslationMiniAppTest {
     }
 
     @Test
-    fun testDictionaryAndTranslationLaunchIndependentlyWithCompactBoundsAndSharedChrome() {
+    fun testDictionaryLaunchesWithCompactBoundsAndSharedChrome() {
         assertTrue(bridge.isMainOnlyMiniApp("dictionary"))
-        assertTrue(bridge.isMainOnlyMiniApp("translation"))
+        assertFalse("Translation must no longer be registered as an active mini-app", bridge.isMainOnlyMiniApp("translation"))
 
         val dictWin = bridge.openMiniApp("miniapp_dictionary", "dictionary")
-        val transWin = bridge.openMiniApp("miniapp_translation", "translation")
-
-        assertNotEquals("Dictionary and Translation must have separate window IDs", dictWin.windowId, transWin.windowId)
         assertTrue(dictWin.isDictionaryApp())
-        assertFalse(dictWin.isTranslationApp())
-        assertTrue(transWin.isTranslationApp())
-        assertFalse(transWin.isDictionaryApp())
 
-        // Both keep the shared bottom-right three-control pill [ x | - | resize ]
         assertNotNull(dictWin.getBottomRightStickerViewForTesting())
-        assertNotNull(transWin.getBottomRightStickerViewForTesting())
         assertTrue(dictWin.isStickerResizeVisibleForTesting())
-        assertTrue(transWin.isStickerResizeVisibleForTesting())
-
         assertTrue("Dictionary initial width must fit screen compactly", dictWin.bounds.width in 200..960)
         assertTrue("Dictionary initial height must be compact", dictWin.bounds.height < 850)
-        assertTrue("Translation initial width must fit screen compactly", transWin.bounds.width in 200..980)
-        assertTrue("Translation initial height must be compact", transWin.bounds.height < 850)
-
         assertNotNull(dictWin.getDictionaryInstanceForTesting())
-        assertNull(dictWin.getTranslationInstanceForTesting())
-        assertNotNull(transWin.getTranslationInstanceForTesting())
-        assertNull(transWin.getDictionaryInstanceForTesting())
     }
 
     @Test
     fun testDictionaryMiniAppAndMeaningPopupShareEngineAndReflectSettingsChanges() {
-        // Before import -> NoDictionariesInstalled
         assertTrue(MeaningSelectionActivity.performSharedLookup(dictionaryService, "ephemeral") is DictionaryLookupOutcome.NoDictionariesInstalled)
 
-        // Import dictionary via shared DictionaryService (same service used by Settings)
         val zip = createSimpleStarDictZip("Oxford Sample", "ephemeral", "Lasting for a very short time.")
         val importRes = dictionaryService.importFromFile(zip)
         assertTrue(importRes is DictionaryImportResult.Success)
         val dictId = (importRes as DictionaryImportResult.Success).installed.single().id
 
-        // Meaning popup gets real attributed definition immediately
         val popupOutcome = MeaningSelectionActivity.performSharedLookup(dictionaryService, "  ephemeral ")
         assertTrue(popupOutcome is DictionaryLookupOutcome.Found)
         val popupEntry = (popupOutcome as DictionaryLookupOutcome.Found).entries.single()
         assertEquals("Oxford Sample", popupEntry.dictionaryName)
         assertTrue(popupEntry.definitionText.contains("short time"))
 
-        // Floating Dictionary mini-app searches and persists across sleep/wake
         val dictWin = bridge.openMiniApp("miniapp_dictionary", "dictionary")
         val instance = dictWin.getDictionaryInstanceForTesting()!!
         assertEquals("", instance.getLastSubmittedQueryForTesting())
@@ -224,7 +206,6 @@ class DictionaryAndTranslationMiniAppTest {
         val woken = FloatingWindowManager.getInstance(context).getWindow("miniapp_dictionary") as FloatingMiniAppWindow
         assertEquals("ephemeral", woken.getDictionaryInstanceForTesting()?.getLastSubmittedQueryForTesting())
 
-        // Settings disable -> both popup and service reflect immediately
         dictionaryService.setDictionaryEnabled(dictId, false)
         assertTrue(MeaningSelectionActivity.performSharedLookup(dictionaryService, "ephemeral") is DictionaryLookupOutcome.AllDictionariesDisabled)
 
@@ -233,105 +214,89 @@ class DictionaryAndTranslationMiniAppTest {
     }
 
     @Test
-    fun testTranslationMiniAppAndTranslatePopupShareServiceAndRespectMissingModels() = runBlocking {
-        val transWin = bridge.openMiniApp("miniapp_translation", "translation")
-        val instance = transWin.getTranslationInstanceForTesting()!!
+    fun testDictionaryMiniAppOpensDictionarySettingsRoute() {
+        bridge.launchDictionarySettings("miniapp_dictionary")
 
-        assertEquals("Auto-detect", instance.getSourceLanguageForTesting())
-        assertEquals("English", instance.getTargetLanguageForTesting())
-        assertFalse("Swap must safely refuse when source is Auto-detect", instance.swapLanguages())
+        assertEquals(1, context.startedIntents.size)
+        val bridgeSrc = resolveProjectPath("app/src/main/java/com/example/feature/floating/FloatingMiniAppBridge.kt").readText()
+        assertTrue(bridgeSrc.contains("putExtra(\"start_route\", com.example.feature.settings.ROUTE_DICTIONARY_SETTINGS)"))
 
-        instance.selectSourceLanguage("Spanish")
-        instance.selectTargetLanguage("Japanese")
-        assertTrue(instance.swapLanguages())
-        assertEquals("Japanese", instance.getSourceLanguageForTesting())
-        assertEquals("Spanish", instance.getTargetLanguageForTesting())
-
-        // Shared config updated in TranslationService so Translate popup inherits it
-        val cfg = translationService.getConfig()
-        assertEquals("ja", cfg.sourceLanguageCode)
-        assertEquals("es", cfg.targetLanguageCode)
-
-        // Without downloaded models, Translate popup reports MissingModels and mini-app refuses fake output/copy
-        val popupMissing = TranslateSelectionActivity.performSharedTranslation(translationService, "Good morning")
-        assertTrue(popupMissing is TranslationOutcome.MissingModels)
-
-        instance.submitTranslation("Good morning")
-        assertNull("Must never fabricate fake translation output", instance.getTranslatedOutputForTesting())
-        assertFalse("Copy must return false when no real translation exists", instance.copyOutputToClipboard(context))
-
-        // Change defaults back via Settings (auto -> en), download Spanish + English models -> popup produces real output
-        translationService.updateConfig(sourceLanguageCode = "auto", targetLanguageCode = "en")
-        translationBackend.downloaded.addAll(listOf("es", "en"))
-        val popupOk = TranslateSelectionActivity.performSharedTranslation(translationService, "Hola mundo")
-        assertTrue(popupOk is TranslationOutcome.Success)
-        assertEquals("Hello world", (popupOk as TranslationOutcome.Success).translatedText)
-
-        // Verify sleep/wake preserves session language & input state
-        instance.selectSourceLanguage("Japanese")
-        instance.selectTargetLanguage("Spanish")
-        instance.submitTranslation("Good morning")
-
-        var sleepDone = false
-        bridge.sleepMiniApp("miniapp_translation") { sleepDone = it }
-        assertTrue(sleepDone)
-
-        bridge.wakeMiniApp("miniapp_translation")
-        val woken = FloatingWindowManager.getInstance(context).getWindow("miniapp_translation") as FloatingMiniAppWindow
-        val restored = woken.getTranslationInstanceForTesting()!!
-        assertEquals("Japanese", restored.getSourceLanguageForTesting())
-        assertEquals("Spanish", restored.getTargetLanguageForTesting())
-        assertEquals("Good morning", restored.getInputTextForTesting())
-    }
-
-    @Test
-    fun testBothMiniAppsOpenSharedDictionaryTranslationSettingsRoute() {
-        bridge.launchDictionaryTranslationSettings("miniapp_dictionary")
-        bridge.launchDictionaryTranslationSettings("miniapp_translation")
-
-        assertEquals(2, context.startedIntents.size)
         val dictWin = bridge.openMiniApp("miniapp_dictionary", "dictionary")
-        val transWin = bridge.openMiniApp("miniapp_translation", "translation")
-        assertNotNull("Dictionary top bar must expose Edit button", dictWin.getTopBarNoteEditButtonForTesting())
-        assertNotNull("Translation top bar must expose Edit button", transWin.getTopBarNoteEditButtonForTesting())
-
-        val bridgeSrc = listOf(
-            File("src/main/java/com/example/feature/floating/FloatingMiniAppBridge.kt"),
-            File("app/src/main/java/com/example/feature/floating/FloatingMiniAppBridge.kt")
-        ).first { it.exists() }.readText()
-        assertTrue(bridgeSrc.contains("ROUTE_DICTIONARY_TRANSLATION_SETTINGS"))
-        assertTrue(bridgeSrc.contains("launchDictionaryTranslationSettings"))
+        val editBtn = dictWin.getTopBarNoteEditButtonForTesting()
+        assertNotNull("Dictionary top bar must expose Edit button", editBtn)
+        val windowSrc = resolveProjectPath("app/src/main/java/com/example/feature/floating/FloatingMiniAppWindow.kt").readText()
+        assertTrue(windowSrc.contains("tag = \"dictionary_topbar_edit_button\""))
+        assertTrue(windowSrc.contains("launchDictionarySettings(instanceId)"))
+        assertFalse("Translation topbar Edit button must be removed from active app", windowSrc.contains("translation_topbar_edit_button"))
     }
 
     @Test
-    fun testSharedSettingsScreenIsFunctionalNotPlaceholderAndAddElementWired() {
-        val settingsScreen = listOf(
-            File("src/main/java/com/example/feature/settings/DictionaryTranslationSettingsScreen.kt"),
-            File("app/src/main/java/com/example/feature/settings/DictionaryTranslationSettingsScreen.kt")
-        ).first { it.exists() }.readText()
-        assertTrue(settingsScreen.contains("settings_section_dictionary"))
-        assertTrue(settingsScreen.contains("settings_section_translation"))
-        assertTrue(settingsScreen.contains("DictionaryService.getInstance"))
-        assertTrue(settingsScreen.contains("TranslationService.getInstance"))
-        assertTrue(settingsScreen.contains("ActivityResultContracts.OpenDocument"))
-        assertTrue(settingsScreen.contains("translation_wifi_only_switch"))
-        assertTrue(settingsScreen.contains("translation_browse_models_button"))
-        assertFalse("Settings screen must not keep old placeholder rows", settingsScreen.contains("PlaceholderSettingRow"))
+    fun testDictionarySettingsAndDeferralCleanupAreConsistentWithoutMlKit() {
+        val dictSettingsSrc = resolveProjectPath("app/src/main/java/com/example/feature/settings/DictionarySettingsScreen.kt").readText()
+        assertTrue(dictSettingsSrc.contains("settings_section_dictionary"))
+        assertTrue(dictSettingsSrc.contains("DictionaryService.getInstance"))
+        assertTrue(dictSettingsSrc.contains("ActivityResultContracts.OpenDocument"))
+        assertTrue(dictSettingsSrc.contains("DeferredTranslationNoticeScreen"))
+        assertFalse(dictSettingsSrc.contains("com.google.mlkit"))
+        assertFalse(dictSettingsSrc.contains("settings_section_translation"))
+        assertFalse(dictSettingsSrc.contains("translation_wifi_only_switch"))
+        assertFalse(dictSettingsSrc.contains("translation_browse_models_button"))
+        assertEquals("dictionary_settings", ROUTE_DICTIONARY_SETTINGS)
         assertEquals("dictionary_translation_settings", ROUTE_DICTIONARY_TRANSLATION_SETTINGS)
+        assertEquals("translation_settings", ROUTE_LEGACY_TRANSLATION_SETTINGS)
 
-        val settingsActivitySrc = listOf(
-            File("src/main/java/com/example/SettingsActivity.kt"),
-            File("app/src/main/java/com/example/SettingsActivity.kt")
-        ).first { it.exists() }.readText()
+        val settingsActivitySrc = resolveProjectPath("app/src/main/java/com/example/SettingsActivity.kt").readText()
+        assertTrue(settingsActivitySrc.contains("ROUTE_DICTIONARY_SETTINGS"))
         assertTrue(settingsActivitySrc.contains("ROUTE_DICTIONARY_TRANSLATION_SETTINGS"))
-        assertTrue(settingsActivitySrc.contains("DictionaryTranslationSettingsScreen"))
+        assertTrue(settingsActivitySrc.contains("ROUTE_LEGACY_TRANSLATION_SETTINGS"))
+        assertTrue(settingsActivitySrc.contains("DictionarySettingsScreen"))
+        assertTrue(settingsActivitySrc.contains("DeferredTranslationNoticeScreen"))
+        assertTrue(settingsActivitySrc.contains("Text(\"Dictionary Settings\")"))
 
-        val addElementSrc = listOf(
-            File("src/main/java/com/example/feature/settings/AddElementActivity.kt"),
-            File("app/src/main/java/com/example/feature/settings/AddElementActivity.kt")
-        ).first { it.exists() }.readText()
+        val addElementSrc = resolveProjectPath("app/src/main/java/com/example/feature/settings/AddElementActivity.kt").readText()
         assertTrue(addElementSrc.contains("\"Floating Trigger\""))
         assertTrue(addElementSrc.contains("system:dictionary_floating"))
-        assertTrue(addElementSrc.contains("system:translation_floating"))
+        assertFalse("AddElementActivity must not expose Translation entry", addElementSrc.contains("system:translation_floating"))
+
+        val sidebarItemSrc = resolveProjectPath("app/src/main/java/com/example/feature/sidebar/SidebarItem.kt").readText()
+        assertTrue(sidebarItemSrc.contains("dictionary_floating"))
+        assertFalse("SidebarItem must not expose translation_floating", sidebarItemSrc.contains("translation_floating"))
+
+        // Action dispatcher rejects legacy translation_floating and FloatingTriggerCompat blocks translation targets
+        assertFalse(
+            ElementActionDispatcher.execute(
+                context,
+                SidebarItem.SystemAction("translation_floating", "Translation (Floating)", 0)
+            )
+        )
+        assertTrue(FloatingTriggerCompat.validateTarget(context, "system:dictionary_floating") is FloatingTriggerTargetValidation.ValidStandalone)
+        assertTrue(FloatingTriggerCompat.validateTarget(context, "page_window:dictionary") is FloatingTriggerTargetValidation.ValidStandalone)
+        assertTrue(FloatingTriggerCompat.validateTarget(context, "system:translation_floating") is FloatingTriggerTargetValidation.Unsupported)
+        assertTrue(FloatingTriggerCompat.validateTarget(context, "page_window:translation") is FloatingTriggerTargetValidation.Unsupported)
+
+        // Legacy persisted "translation" snapshots on disk must be safely skipped without opening Heavy
+        store.saveSnapshot(
+            MiniAppRecoverySnapshot(
+                instanceId = "miniapp_translation",
+                appType = "translation",
+                state = MiniAppState.ACTIVE,
+                windowBounds = WindowBounds(100, 100, 500, 600)
+            )
+        )
+        val restored = bridge.restoreActiveMiniApps()
+        assertTrue("Stale deferred translation snapshot must not be restored", restored.none { it.appType == "translation" })
+
+        // Verify zero ML Kit dependencies or active imports and confirm deferred handoff exists
+        val gradleSrc = resolveProjectPath("app/build.gradle.kts").readText()
+        assertFalse("app/build.gradle.kts must not include ML Kit", gradleSrc.contains("com.google.mlkit"))
+
+        val mainSrcDir = resolveProjectPath("app/src/main/java")
+        val mlkitFiles = mainSrcDir.walkTopDown().filter { it.isFile && it.extension == "kt" }.filter {
+            val txt = it.readText()
+            txt.contains("com.google.mlkit") || txt.contains("TranslationService") || txt.contains("TranslationMiniAppInstance")
+        }.toList()
+        assertTrue("Expected zero active ML Kit or Translation service references in app/src/main/java, found: $mlkitFiles", mlkitFiles.isEmpty())
+
+        assertTrue(resolveProjectPath("deferred/vian-world/translation/README.md").isFile)
     }
 }

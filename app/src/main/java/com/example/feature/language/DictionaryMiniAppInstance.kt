@@ -365,9 +365,9 @@ class DictionaryMiniAppInstance(
                         badgeText = "DICTIONARY STATUS",
                         titleText = if (installed.isEmpty()) "No offline dictionary installed" else "All dictionaries disabled",
                         bodyText = if (installed.isEmpty()) {
-                            "Import a StarDict ZIP archive (.ifo, .idx/.idx.gz, .dict/.dict.dz) in Dictionary & Translation Settings."
+                            "Import a StarDict ZIP archive (.ifo, .idx/.idx.gz, .dict/.dict.dz) in Dictionary Settings."
                         } else {
-                            "Enable at least one installed dictionary in Dictionary & Translation Settings to look up words."
+                            "Enable at least one installed dictionary in Dictionary Settings to look up words."
                         },
                         actionLabel = "Open Settings",
                         actionTag = TAG_OPEN_SETTINGS_BUTTON,

@@ -75,8 +75,7 @@ object FloatingTriggerCompat {
         "test_notes",
         "reader",
         "ebook_reader",
-        "dictionary",
-        "translation"
+        "dictionary"
     )
 
     /**
@@ -90,7 +89,6 @@ object FloatingTriggerCompat {
         "work_notes",
         "floating_pwa",
         "dictionary",
-        "translation",
         "test_notes",
         "note"
     )
@@ -237,9 +235,17 @@ object FloatingTriggerCompat {
             is SidebarItem.VolumeAction,
             is SidebarItem.MediaAction,
             is SidebarItem.DisplayAction,
-            is SidebarItem.SystemAction,
             is SidebarItem.SettingsShortcut -> {
                 FloatingTriggerTargetValidation.ValidStandalone(item)
+            }
+            is SidebarItem.SystemAction -> {
+                if (item.action == "translation_floating") {
+                    FloatingTriggerTargetValidation.Unsupported(
+                        "Translation has been deferred to Vian World and cannot run as a Floating Trigger."
+                    )
+                } else {
+                    FloatingTriggerTargetValidation.ValidStandalone(item)
+                }
             }
             is SidebarItem.IntentAction -> {
                 if (item.uri.isNotBlank()) {
