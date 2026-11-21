@@ -20,6 +20,7 @@ object StarDictFormatParser {
     data class DecodedDefinition(
         val text: String,
         val phonetic: String? = null,
+        val partOfSpeech: String? = null,
         val hasUnsupportedBinaryOnly: Boolean = false
     )
 
@@ -107,29 +108,63 @@ object StarDictFormatParser {
 
         val textParts = mutableListOf<String>()
         var phonetic: String? = null
+        var partOfSpeech: String? = null
         var sawUnsupportedBinary = false
 
         for ((typeChar, payload) in fields) {
             when (typeChar) {
                 'm', 'l' -> {
                     val decoded = decodeUtf8Safe(payload).trim()
-                    if (decoded.isNotEmpty()) textParts.add(decoded)
+                    if (decoded.isNotEmpty()) {
+                        if (partOfSpeech == null) {
+                            partOfSpeech = extractLeadingPlainPartOfSpeech(decoded)
+                        }
+                        textParts.add(decoded)
+                    }
                 }
                 'h' -> {
-                    val formatted = formatHtmlDefinition(decodeUtf8Safe(payload))
-                    if (formatted.isNotEmpty()) textParts.add(formatted)
+                    val rawHtml = decodeUtf8Safe(payload)
+                    if (partOfSpeech == null) {
+                        partOfSpeech = extractHtmlPartOfSpeech(rawHtml)
+                    }
+                    val formatted = formatHtmlDefinition(rawHtml)
+                    if (formatted.isNotEmpty()) {
+                        if (partOfSpeech == null) {
+                            partOfSpeech = extractLeadingPlainPartOfSpeech(formatted)
+                        }
+                        textParts.add(formatted)
+                    }
                 }
                 'x' -> {
-                    val formatted = formatXdxfDefinition(decodeUtf8Safe(payload))
-                    if (formatted.isNotEmpty()) textParts.add(formatted)
+                    val rawXdxf = decodeUtf8Safe(payload)
+                    if (partOfSpeech == null) {
+                        partOfSpeech = extractXdxfPartOfSpeech(rawXdxf)
+                    }
+                    val formatted = formatXdxfDefinition(rawXdxf)
+                    if (formatted.isNotEmpty()) {
+                        if (partOfSpeech == null) {
+                            partOfSpeech = extractLeadingPlainPartOfSpeech(formatted)
+                        }
+                        textParts.add(formatted)
+                    }
                 }
                 'g' -> {
                     val formatted = formatPangoDefinition(decodeUtf8Safe(payload))
-                    if (formatted.isNotEmpty()) textParts.add(formatted)
+                    if (formatted.isNotEmpty()) {
+                        if (partOfSpeech == null) {
+                            partOfSpeech = extractLeadingPlainPartOfSpeech(formatted)
+                        }
+                        textParts.add(formatted)
+                    }
                 }
                 'w' -> {
                     val formatted = formatMediaWikiDefinition(decodeUtf8Safe(payload))
-                    if (formatted.isNotEmpty()) textParts.add(formatted)
+                    if (formatted.isNotEmpty()) {
+                        if (partOfSpeech == null) {
+                            partOfSpeech = extractLeadingPlainPartOfSpeech(formatted)
+                        }
+                        textParts.add(formatted)
+                    }
                 }
                 't' -> {
                     val rawPhonetic = decodeUtf8Safe(payload).trim()
@@ -162,16 +197,109 @@ object StarDictFormatParser {
             DecodedDefinition(
                 text = "This entry only contains an unsupported binary resource.",
                 phonetic = null,
+                partOfSpeech = null,
                 hasUnsupportedBinaryOnly = true
             )
         } else {
             DecodedDefinition(
                 text = combined,
                 phonetic = phonetic,
+                partOfSpeech = partOfSpeech,
                 hasUnsupportedBinaryOnly = false
             )
         }
     }
+
+    /**
+     * Produces a concise primary-meaning excerpt for the compact Quick Meaning popup directly from
+     * the dictionary text, without inventing frequency, ranking, or synthetic labels.
+     */
+    fun extractConciseMeaning(definitionText: String, maxChars: Int = 220): String {
+        val cleaned = definitionText.trim()
+        if (cleaned.isEmpty()) return ""
+        val paragraphs = cleaned.split(Regex("\\n\\s*\\n"))
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+        val primaryBlock = paragraphs.firstOrNull() ?: cleaned
+        val compactLines = primaryBlock.lineSequence()
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .take(3)
+            .joinToString("\n")
+        if (compactLines.length <= maxChars) return compactLines
+        val cut = compactLines.substring(0, maxChars.coerceAtLeast(16))
+        val lastSpace = cut.lastIndexOf(' ')
+        val bounded = if (lastSpace > maxChars / 2) cut.substring(0, lastSpace) else cut
+        return bounded.trimEnd(' ', ',', ';', ':') + "…"
+    }
+
+    internal fun extractXdxfPartOfSpeech(xdxf: String): String? {
+        val match = Regex("(?is)<(?:gr|pos)\\b[^>]*>(.*?)</(?:gr|pos)>").find(xdxf) ?: return null
+        val cleaned = unescapeXmlHtmlEntities(match.groupValues[1].replace(Regex("<[^>]+>"), ""))
+            .replace(Regex("\\s+"), " ")
+            .trim()
+        return normalizeValidPartOfSpeech(cleaned)
+    }
+
+    internal fun extractHtmlPartOfSpeech(html: String): String? {
+        val directTag = Regex("(?is)<pos\\b[^>]*>(.*?)</pos>").find(html)
+        val classedTag = if (directTag == null) {
+            Regex("(?is)<(?:span|i|em|b|abbr)\\b[^>]*class\\s*=\\s*[\"'][^\"']*\\b(?:pos|part[-_ ]?of[-_ ]?speech|gram|grammar)\\b[^\"']*[\"'][^>]*>(.*?)</(?:span|i|em|b|abbr)>")
+                .find(html)
+        } else {
+            null
+        }
+        val raw = (directTag ?: classedTag)?.groupValues?.getOrNull(1) ?: return null
+        val cleaned = unescapeXmlHtmlEntities(raw.replace(Regex("<[^>]+>"), ""))
+            .replace(Regex("\\s+"), " ")
+            .trim()
+        return normalizeValidPartOfSpeech(cleaned)
+    }
+
+    internal fun extractLeadingPlainPartOfSpeech(text: String): String? {
+        val firstLine = text.lineSequence().map { it.trim() }.firstOrNull { it.isNotEmpty() } ?: return null
+        val exactLineMatch = EXPLICIT_POS_LINE_REGEX.matchEntire(firstLine)
+        if (exactLineMatch != null) {
+            return normalizeValidPartOfSpeech(exactLineMatch.groupValues[1])
+        }
+        val prefixMatch = EXPLICIT_POS_PREFIX_REGEX.find(firstLine)
+        if (prefixMatch != null) {
+            val matchedPos = prefixMatch.groupValues[1].ifBlank { prefixMatch.groupValues[2] }
+            return normalizeValidPartOfSpeech(matchedPos)
+        }
+        return null
+    }
+
+    private fun normalizeValidPartOfSpeech(raw: String): String? {
+        val trimmed = raw.trim().trim('(', ')', '[', ']', ':', ';', '-', '–', '—')
+        if (trimmed.isEmpty() || trimmed.length > 32) return null
+        return when (trimmed.lowercase()) {
+            "n", "n." -> "noun"
+            "v", "v." -> "verb"
+            "vt", "vt.", "v.t." -> "transitive verb"
+            "vi", "vi.", "v.i." -> "intransitive verb"
+            "adj", "adj." -> "adjective"
+            "adv", "adv." -> "adverb"
+            "prep", "prep." -> "preposition"
+            "conj", "conj." -> "conjunction"
+            "pron", "pron." -> "pronoun"
+            "interj", "interj." -> "interjection"
+            "art", "art." -> "article"
+            "det", "det." -> "determiner"
+            "num", "num." -> "numeral"
+            else -> trimmed
+        }
+    }
+
+    private val EXPLICIT_POS_LINE_REGEX = Regex(
+        "^(?:[\\[(]\\s*)?(noun|verb|adjective|adverb|preposition|conjunction|pronoun|interjection|transitive verb|intransitive verb|determiner|article|numeral|n\\.|v\\.|vt\\.|vi\\.|v\\.t\\.|v\\.i\\.|adj\\.|adv\\.|prep\\.|conj\\.|pron\\.|interj\\.)(?:\\s*[\\])])?$",
+        RegexOption.IGNORE_CASE
+    )
+
+    private val EXPLICIT_POS_PREFIX_REGEX = Regex(
+        "^(?:[\\[(]\\s*(noun|verb|adjective|adverb|preposition|conjunction|pronoun|interjection|n\\.|v\\.|vt\\.|vi\\.|adj\\.|adv\\.|prep\\.|conj\\.|pron\\.|interj\\.)\\s*[\\])]|(n\\.|v\\.|vt\\.|vi\\.|v\\.t\\.|v\\.i\\.|adj\\.|adv\\.|prep\\.|conj\\.|pron\\.|interj\\.)(?=\\s+\\S))",
+        RegexOption.IGNORE_CASE
+    )
 
     private fun parseSameTypeSequenceFields(
         rawBytes: ByteArray,

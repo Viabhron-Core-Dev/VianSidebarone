@@ -472,4 +472,70 @@ class StarDictDictionaryEngineTest {
         assertEquals(0, restarted.getInstalledDictionaries().size)
         assertTrue(restarted.lookup("anchor") is DictionaryLookupOutcome.NoDictionariesInstalled)
     }
+
+    @Test
+    fun testGenuinePartOfSpeechExtractionAndNoFabricationAndConciseMeaning() {
+        val xdxfEntry = ByteArrayOutputStream().apply {
+            write('x'.code)
+            write(utf8("<k>lantern</k><gr>n.</gr><dtrn>A lamp with a transparent case protecting the flame.</dtrn>"))
+            write(0)
+        }.toByteArray()
+
+        val htmlPosEntry = ByteArrayOutputStream().apply {
+            write('h'.code)
+            write(utf8("<span class=\"pos\">adj.</span><br/>Shining brightly with reflected light."))
+            write(0)
+        }.toByteArray()
+
+        val plainNoPosEntry = ByteArrayOutputStream().apply {
+            write('m'.code)
+            write(utf8("A small portable device used for navigation at sea.\n\nSecondary extended nautical usage with historical details that go on for quite some length."))
+            write(0)
+        }.toByteArray()
+
+        val plainPrefixPosEntry = ByteArrayOutputStream().apply {
+            write('m'.code)
+            write(utf8("v. Move swiftly on foot."))
+            write(0)
+        }.toByteArray()
+
+        val zip = buildStarDictZip(
+            tempFolder.newFile("pos_test.zip"),
+            listOf(
+                TestDictSpec(
+                    baseName = "posdict",
+                    bookName = "POS Test Lexicon",
+                    sameTypeSequence = "",
+                    entries = listOf(
+                        "lantern" to xdxfEntry,
+                        "luminous" to htmlPosEntry,
+                        "sextant" to plainNoPosEntry,
+                        "sprint" to plainPrefixPosEntry
+                    )
+                )
+            )
+        )
+
+        val res = service.importFromFile(zip)
+        assertTrue(res is DictionaryImportResult.Success)
+
+        val lantern = (service.lookup("lantern") as DictionaryLookupOutcome.Found).entries.single()
+        assertEquals("noun", lantern.partOfSpeech)
+
+        val luminous = (service.lookup("luminous") as DictionaryLookupOutcome.Found).entries.single()
+        assertEquals("adjective", luminous.partOfSpeech)
+
+        val sprint = (service.lookup("sprint") as DictionaryLookupOutcome.Found).entries.single()
+        assertEquals("verb", sprint.partOfSpeech)
+
+        // When no POS metadata exists, it MUST remain null (never invented)
+        val sextant = (service.lookup("sextant") as DictionaryLookupOutcome.Found).entries.single()
+        assertEquals(null, sextant.partOfSpeech)
+
+        // Concise excerpt extracts only the primary paragraph without fabricating ranking labels
+        val concise = com.example.feature.language.dictionary.StarDictFormatParser.extractConciseMeaning(sextant.definitionText)
+        assertTrue(concise.contains("navigation at sea"))
+        assertFalse("Concise popup excerpt must omit secondary paragraphs", concise.contains("Secondary extended"))
+        assertFalse(concise.contains("Most Common", ignoreCase = true))
+    }
 }

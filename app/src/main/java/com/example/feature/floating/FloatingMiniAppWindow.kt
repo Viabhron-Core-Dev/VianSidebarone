@@ -223,6 +223,10 @@ class FloatingMiniAppWindow(
     var topBarReaderEditContentDescription: String? = null
         private set
     private var bottomRightStickerView: View? = null
+    private var bottomRightStickerBg: GradientDrawable? = null
+    private var stickerCloseButtonView: TextView? = null
+    private var stickerSleepButtonView: TextView? = null
+    private var stickerPrimaryDividerView: View? = null
     private var stickerResizeDividerView: View? = null
     private var stickerResizeButtonView: TextView? = null
     var isStickerResizeVisible: Boolean = true
@@ -235,6 +239,7 @@ class FloatingMiniAppWindow(
         private set
     private var titleView: TextView? = null
     private var noteEditText: EditText? = null
+    private var isMarkedForPermanentDelete: Boolean = false
     private var imeBridgeEditText: EditText? = null
     private var isSyncingImeBridge: Boolean = false
     enum class TextAuthority {
@@ -361,8 +366,29 @@ class FloatingMiniAppWindow(
 
     fun isMainOnlyApp(): Boolean = isNoteApp() || isReaderApp() || isDictionaryApp()
 
+    private fun usesSystemLightDarkTheme(): Boolean = isDictionaryApp() || isNoteApp()
+
+    fun openDictionaryQuery(query: String) {
+        if (!isDictionaryApp()) return
+        dictionaryInstance?.openQuery(query)
+    }
+
+    /**
+     * Marks this window as permanently closing/deleting before teardown so queued note debounces
+     * or background dictionary jobs cannot write stale state or resurrect deleted records.
+     */
+    fun prepareForPermanentDelete() {
+        isMarkedForPermanentDelete = true
+        if (isNoteApp()) {
+            notePersistence.markDeletedPermanently()
+        } else if (isDictionaryApp()) {
+            dictionaryInstance?.releaseRuntime()
+        }
+    }
+
     fun getReaderInstanceForTesting(): com.example.feature.reader.ReaderMiniAppInstance? = readerInstance
     fun getDictionaryInstanceForTesting(): com.example.feature.language.DictionaryMiniAppInstance? = dictionaryInstance
+    internal fun getWindowTitleForTesting(): String = windowTitle
 
     fun openReaderBookById(epubBookId: Int) {
         readerInstance?.openBookById(epubBookId)
@@ -589,10 +615,15 @@ class FloatingMiniAppWindow(
         }.apply {
             val initialRadius = if (isMaximized) 0f else cardCornerRadius
             appliedCornerRadiusPx = initialRadius
+            val rootSurfaceColor = if (usesSystemLightDarkTheme()) {
+                com.example.feature.language.LanguageMiniAppUiHelper.resolvePalette(context).surfaceBg
+            } else {
+                Color.parseColor("#181825")
+            }
             val bg = GradientDrawable().apply {
                 shape = GradientDrawable.RECTANGLE
                 cornerRadius = initialRadius
-                setColor(Color.parseColor("#181825"))
+                setColor(rootSurfaceColor)
             }
             rootCardBackground = bg
             background = bg
@@ -744,11 +775,16 @@ class FloatingMiniAppWindow(
         root.addView(mainLayout)
 
         // Foreground non-interactive border stroke so children/surface never clip or cover the rounded border
+        val borderColor = if (usesSystemLightDarkTheme()) {
+            com.example.feature.language.LanguageMiniAppUiHelper.resolvePalette(context).border
+        } else {
+            Color.parseColor("#45475A")
+        }
         val borderDrawable = GradientDrawable().apply {
             shape = GradientDrawable.RECTANGLE
             cornerRadius = initialCornerRadius
             setColor(Color.TRANSPARENT)
-            setStroke((1.5f * density).toInt().coerceAtLeast(1), Color.parseColor("#45475A"))
+            setStroke((1.5f * density).toInt().coerceAtLeast(1), borderColor)
         }
         rootBorderDrawable = borderDrawable
         val borderOverlay = View(context).apply {
@@ -1621,10 +1657,11 @@ class FloatingMiniAppWindow(
                 return ic
             }
         }.apply {
+            val palette = com.example.feature.language.LanguageMiniAppUiHelper.resolvePalette(context)
             hint = "Write a note..."
-            setHintTextColor(Color.parseColor("#6C7086"))
-            setTextColor(Color.WHITE)
-            highlightColor = Color.parseColor("#585B70")
+            setHintTextColor(palette.textMuted)
+            setTextColor(palette.textPrimary)
+            highlightColor = palette.selectionHighlight
             textSize = currentFontSizeSp
             gravity = Gravity.TOP or Gravity.START
             isEnabled = true
@@ -1655,7 +1692,7 @@ class FloatingMiniAppWindow(
             val editBg = GradientDrawable().apply {
                 shape = GradientDrawable.RECTANGLE
                 cornerRadii = floatArrayOf(0f, 0f, 0f, 0f, editRadius, editRadius, editRadius, editRadius)
-                setColor(Color.parseColor("#181825"))
+                setColor(palette.surfaceBg)
             }
             noteEditorBg = editBg
             background = editBg
@@ -2344,13 +2381,15 @@ class FloatingMiniAppWindow(
     private fun createTopBar(context: Context): LinearLayout {
         val density = context.resources.displayMetrics.density
         val readerMode = isReaderApp()
+        val themedMode = usesSystemLightDarkTheme()
+        val palette = com.example.feature.language.LanguageMiniAppUiHelper.resolvePalette(context)
         val topBarHeight = getTopBarHeightPx()
         val horizontalPad = if (readerMode) (10 * density).toInt() else (12 * density).toInt()
 
         val bar = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setBackgroundColor(Color.parseColor("#2B2D42"))
+            setBackgroundColor(if (themedMode) palette.topBarBg else Color.parseColor("#2B2D42"))
             setPadding(horizontalPad, 0, horizontalPad, 0)
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
@@ -2359,8 +2398,17 @@ class FloatingMiniAppWindow(
         }
         topBarView = bar
 
-        // Mini-App Icon Indicator (omit blue dot for Reader; preserve accent indicator for Note & others)
-        val initialAccentInt = parseColorSafe(currentAccentColorHex)
+        // Mini-App Icon Indicator (omit blue dot for Reader; preserve accent indicator for Note & Dictionary)
+        val initialAccentInt = if (isDictionaryApp()) {
+            palette.accentDictionary
+        } else {
+            parseColorSafe(currentAccentColorHex)
+        }
+        val initialDisplayAccent = if (themedMode) {
+            com.example.feature.language.LanguageMiniAppUiHelper.adaptAccentForSurface(initialAccentInt, palette.isDark)
+        } else {
+            initialAccentInt
+        }
         if (!readerMode) {
             val iconDrawable = GradientDrawable().apply {
                 shape = GradientDrawable.OVAL
@@ -2383,7 +2431,7 @@ class FloatingMiniAppWindow(
         // Title
         titleView = TextView(context).apply {
             text = if (readerMode) windowTitle.ifBlank { "Reader" } else windowTitle
-            setTextColor(Color.WHITE)
+            setTextColor(if (themedMode) palette.textPrimary else Color.WHITE)
             textSize = if (readerMode) 12.5f else 14f
             typeface = Typeface.DEFAULT_BOLD
             maxLines = 1
@@ -2422,13 +2470,13 @@ class FloatingMiniAppWindow(
             val editBg = GradientDrawable().apply {
                 shape = GradientDrawable.RECTANGLE
                 cornerRadius = 4 * density
-                setColor(Color.parseColor("#313244"))
-                setStroke((1 * density).toInt(), initialAccentInt)
+                setColor(palette.buttonBg)
+                setStroke((1 * density).toInt().coerceAtLeast(1), initialDisplayAccent)
             }
             topBarEditBtnBg = editBg
             val editBtn = TextView(context).apply {
                 text = "Edit"
-                setTextColor(initialAccentInt)
+                setTextColor(initialDisplayAccent)
                 textSize = 12f
                 typeface = Typeface.DEFAULT_BOLD
                 isClickable = true
@@ -2445,15 +2493,15 @@ class FloatingMiniAppWindow(
             val editBg = GradientDrawable().apply {
                 shape = GradientDrawable.RECTANGLE
                 cornerRadius = 4 * density
-                setColor(Color.parseColor("#313244"))
-                setStroke((1 * density).toInt(), initialAccentInt)
+                setColor(palette.buttonBg)
+                setStroke((1 * density).toInt().coerceAtLeast(1), initialDisplayAccent)
             }
             topBarEditBtnBg = editBg
             val editBtn = TextView(context).apply {
                 text = "Edit"
                 contentDescription = "Dictionary Settings"
                 tag = "dictionary_topbar_edit_button"
-                setTextColor(initialAccentInt)
+                setTextColor(initialDisplayAccent)
                 textSize = 12f
                 typeface = Typeface.DEFAULT_BOLD
                 isClickable = true
@@ -2476,13 +2524,14 @@ class FloatingMiniAppWindow(
 
     private fun createEditPopover(context: Context): View {
         val density = context.resources.displayMetrics.density
+        val palette = com.example.feature.language.LanguageMiniAppUiHelper.resolvePalette(context)
         val popover = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             val bg = GradientDrawable().apply {
                 shape = GradientDrawable.RECTANGLE
                 cornerRadius = 10 * density
-                setColor(Color.parseColor("#252639"))
-                setStroke((1 * density).toInt(), Color.parseColor("#45475A"))
+                setColor(palette.cardBg)
+                setStroke((1 * density).toInt().coerceAtLeast(1), palette.border)
             }
             background = bg
             elevation = 20 * density
@@ -2507,7 +2556,7 @@ class FloatingMiniAppWindow(
         }
         val title = TextView(context).apply {
             text = "Editor Options"
-            setTextColor(Color.WHITE)
+            setTextColor(palette.textPrimary)
             textSize = 13f
             typeface = Typeface.DEFAULT_BOLD
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
@@ -2515,7 +2564,7 @@ class FloatingMiniAppWindow(
         headerRow.addView(title)
         val closeBtn = TextView(context).apply {
             text = "✕"
-            setTextColor(Color.parseColor("#F38BA8"))
+            setTextColor(palette.dangerText)
             textSize = 14f
             isClickable = true
             setPadding((6 * density).toInt(), 0, (6 * density).toInt(), 0)
@@ -2526,8 +2575,8 @@ class FloatingMiniAppWindow(
 
         // Divider
         popover.addView(View(context).apply {
-            setBackgroundColor(Color.parseColor("#45475A"))
-            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, (1 * density).toInt()).apply {
+            setBackgroundColor(palette.divider)
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, (1 * density).toInt().coerceAtLeast(1)).apply {
                 topMargin = (6 * density).toInt()
                 bottomMargin = (8 * density).toInt()
             }
@@ -2541,7 +2590,7 @@ class FloatingMiniAppWindow(
         }
         val sizeLabel = TextView(context).apply {
             text = "Size: "
-            setTextColor(Color.parseColor("#CDD6F4"))
+            setTextColor(palette.textSecondary)
             textSize = 12f
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         }
@@ -2549,7 +2598,7 @@ class FloatingMiniAppWindow(
 
         val sizeDisplay = TextView(context).apply {
             text = "${currentFontSizeSp.toInt()}sp"
-            setTextColor(Color.WHITE)
+            setTextColor(palette.textPrimary)
             textSize = 12f
             typeface = Typeface.DEFAULT_BOLD
             setPadding((8 * density).toInt(), 0, (8 * density).toInt(), 0)
@@ -2581,7 +2630,7 @@ class FloatingMiniAppWindow(
         }
         val styleLabel = TextView(context).apply {
             text = "Style: "
-            setTextColor(Color.parseColor("#CDD6F4"))
+            setTextColor(palette.textSecondary)
             textSize = 12f
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         }
@@ -2649,10 +2698,10 @@ class FloatingMiniAppWindow(
         val redoBtn = createPopoverButton(context, "↷ Redo") {
             performNoteRedo()
         }
-        val copyBtn = createPopoverButton(context, "Copy", textColor = Color.parseColor("#A6E3A1")) {
+        val copyBtn = createPopoverButton(context, "Copy", textColor = palette.successText) {
             copyNoteContent()
         }
-        val clearBtn = createPopoverButton(context, "Clear", textColor = Color.parseColor("#F38BA8")) {
+        val clearBtn = createPopoverButton(context, "Clear", textColor = palette.dangerText) {
             clearNoteContent()
         }
         actionRow.addView(undoBtn)
@@ -2669,7 +2718,7 @@ class FloatingMiniAppWindow(
         }
         val accentLabel = TextView(context).apply {
             text = "Accent:"
-            setTextColor(Color.parseColor("#CDD6F4"))
+            setTextColor(palette.textSecondary)
             textSize = 11f
             setPadding(0, 0, (6 * density).toInt(), 0)
         }
@@ -2688,7 +2737,7 @@ class FloatingMiniAppWindow(
                 val bg = GradientDrawable().apply {
                     shape = GradientDrawable.OVAL
                     setColor(parseColorSafe(hex))
-                    setStroke((1 * density).toInt().coerceAtLeast(1), Color.parseColor("#CDD6F4"))
+                    setStroke((1 * density).toInt().coerceAtLeast(1), palette.border)
                 }
                 background = bg
                 isClickable = true
@@ -2719,7 +2768,7 @@ class FloatingMiniAppWindow(
             val bg = GradientDrawable().apply {
                 shape = GradientDrawable.OVAL
                 setColor(parseColorSafe(currentAccentColorHex))
-                setStroke((1 * density).toInt().coerceAtLeast(1), Color.WHITE)
+                setStroke((1 * density).toInt().coerceAtLeast(1), palette.border)
             }
             background = bg
             layoutParams = LinearLayout.LayoutParams((18 * density).toInt(), (18 * density).toInt()).apply {
@@ -2748,16 +2797,16 @@ class FloatingMiniAppWindow(
         }.apply {
             setText(currentAccentColorHex)
             hint = "#RRGGBB"
-            setTextColor(Color.WHITE)
-            setHintTextColor(Color.parseColor("#6C7086"))
+            setTextColor(palette.textPrimary)
+            setHintTextColor(palette.textMuted)
             textSize = 11f
             isSingleLine = true
             setPadding((6 * density).toInt(), (4 * density).toInt(), (6 * density).toInt(), (4 * density).toInt())
             background = GradientDrawable().apply {
                 shape = GradientDrawable.RECTANGLE
                 cornerRadius = 4 * density
-                setColor(Color.parseColor("#181825"))
-                setStroke((1 * density).toInt().coerceAtLeast(1), Color.parseColor("#45475A"))
+                setColor(palette.inputBg)
+                setStroke((1 * density).toInt().coerceAtLeast(1), palette.border)
             }
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
                 marginEnd = (6 * density).toInt()
@@ -2779,7 +2828,7 @@ class FloatingMiniAppWindow(
             applyNoteAccentColor(hex, persist = true)
         }
 
-        val applyHexBtn = createPopoverButton(context, "Apply", textColor = Color.parseColor("#89B4FA")) {
+        val applyHexBtn = createPopoverButton(context, "Apply", textColor = palette.accentDictionary) {
             val raw = hexInput.text?.toString()?.trim().orEmpty()
             val normalized = normalizeHexColorOrNull(raw)
             if (normalized != null) {
@@ -2805,7 +2854,7 @@ class FloatingMiniAppWindow(
             }
             val lbl = TextView(context).apply {
                 text = channel
-                setTextColor(Color.parseColor("#A6ADC8"))
+                setTextColor(palette.textSecondary)
                 textSize = 10f
                 layoutParams = LinearLayout.LayoutParams((14 * density).toInt(), LinearLayout.LayoutParams.WRAP_CONTENT)
             }
@@ -2839,13 +2888,14 @@ class FloatingMiniAppWindow(
     private fun createPopoverButton(
         context: Context,
         label: String,
-        textColor: Int = Color.parseColor("#CDD6F4"),
+        textColor: Int? = null,
         onClick: (View) -> Unit
     ): TextView {
         val density = context.resources.displayMetrics.density
+        val palette = com.example.feature.language.LanguageMiniAppUiHelper.resolvePalette(context)
         return TextView(context).apply {
             text = label
-            setTextColor(textColor)
+            setTextColor(textColor ?: palette.textPrimary)
             textSize = 11f
             typeface = Typeface.DEFAULT_BOLD
             isClickable = true
@@ -2853,8 +2903,8 @@ class FloatingMiniAppWindow(
             val btnBg = GradientDrawable().apply {
                 shape = GradientDrawable.RECTANGLE
                 cornerRadius = 4 * density
-                setColor(Color.parseColor("#313244"))
-                setStroke((1 * density).toInt(), Color.parseColor("#45475A"))
+                setColor(palette.buttonBg)
+                setStroke((1 * density).toInt().coerceAtLeast(1), palette.border)
             }
             background = btnBg
             setPadding((6 * density).toInt(), (4 * density).toInt(), (6 * density).toInt(), (4 * density).toInt())
@@ -2904,10 +2954,16 @@ class FloatingMiniAppWindow(
         val normalized = normalizeHexColor(hexColor)
         currentAccentColorHex = normalized
         val parsed = parseColorSafe(normalized)
+        val palette = com.example.feature.language.LanguageMiniAppUiHelper.resolvePalette(context)
+        val displayAccent = if (usesSystemLightDarkTheme()) {
+            com.example.feature.language.LanguageMiniAppUiHelper.adaptAccentForSurface(parsed, palette.isDark)
+        } else {
+            parsed
+        }
         topBarIconDrawable?.setColor(parsed)
-        topBarEditBtn?.setTextColor(parsed)
-        topBarEditBtnBg?.setStroke((1 * context.resources.displayMetrics.density).toInt().coerceAtLeast(1), parsed)
-        if (persist && isMainOnlyApp()) {
+        topBarEditBtn?.setTextColor(displayAccent)
+        topBarEditBtnBg?.setStroke((1 * context.resources.displayMetrics.density).toInt().coerceAtLeast(1), displayAccent)
+        if (persist && isNoteApp()) {
             notePersistence.updateStateSnapshot(
                 text = currentNoteText,
                 fontSize = currentFontSizeSp,
@@ -3155,15 +3211,18 @@ class FloatingMiniAppWindow(
      */
     private fun createBottomRightSticker(context: Context): View {
         val density = context.resources.displayMetrics.density
+        val themedMode = usesSystemLightDarkTheme()
+        val palette = com.example.feature.language.LanguageMiniAppUiHelper.resolvePalette(context)
         val sticker = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             val bg = GradientDrawable().apply {
                 shape = GradientDrawable.RECTANGLE
                 cornerRadius = 10 * density // Rounded box / pill
-                setColor(Color.parseColor("#252639"))
-                setStroke((1 * density).toInt(), Color.parseColor("#45475A"))
+                setColor(if (themedMode) palette.cardBg else Color.parseColor("#252639"))
+                setStroke((1 * density).toInt().coerceAtLeast(1), if (themedMode) palette.border else Color.parseColor("#45475A"))
             }
+            bottomRightStickerBg = bg
             background = bg
             elevation = 8 * density
             setPadding((4 * density).toInt(), (2 * density).toInt(), (4 * density).toInt(), (2 * density).toInt())
@@ -3178,29 +3237,37 @@ class FloatingMiniAppWindow(
         }
 
         // 1. Close Button (×)
-        val closeBtn = createStickerButton(context, "×", Color.parseColor("#F38BA8")) {
+        val closeBtn = createStickerButton(context, "×", if (themedMode) palette.dangerText else Color.parseColor("#F38BA8")) {
             LogKeeper.log(context, "FloatingMiniAppWindow", "CONTROL_CLOSE id=$instanceId")
             FloatingMiniAppBridge.getInstance(context).closeMiniApp(instanceId, deleteDurable = true)
         }
+        stickerCloseButtonView = closeBtn
         sticker.addView(closeBtn)
 
         // Divider
-        sticker.addView(createStickerDivider(context))
+        val primaryDivider = createStickerDivider(context).apply {
+            if (themedMode) setBackgroundColor(palette.divider)
+        }
+        stickerPrimaryDividerView = primaryDivider
+        sticker.addView(primaryDivider)
 
         // 2. Fold / Sleep Button (—)
-        val sleepBtn = createStickerButton(context, "—", Color.parseColor("#CDD6F4")) {
+        val sleepBtn = createStickerButton(context, "—", if (themedMode) palette.textPrimary else Color.parseColor("#CDD6F4")) {
             LogKeeper.log(context, "FloatingMiniAppWindow", "CONTROL_SLEEP id=$instanceId")
             FloatingMiniAppBridge.getInstance(context).sleepMiniApp(instanceId)
         }
+        stickerSleepButtonView = sleepBtn
         sticker.addView(sleepBtn)
 
         // Divider before Resize Handle
-        val resizeDivider = createStickerDivider(context)
+        val resizeDivider = createStickerDivider(context).apply {
+            if (themedMode) setBackgroundColor(palette.divider)
+        }
         stickerResizeDividerView = resizeDivider
         sticker.addView(resizeDivider)
 
         // 3. Resize Handle (↘) - The ↘ region itself is the touch/drag target for resizing
-        val resizeBtn = createStickerButton(context, "↘", Color.parseColor("#89B4FA")) {
+        val resizeBtn = createStickerButton(context, "↘", if (themedMode) palette.accentDictionary else Color.parseColor("#89B4FA")) {
             // Touch handled via setupStickerResizeTouch below
         }.apply {
             contentDescription = "Resize window"
@@ -3546,6 +3613,7 @@ class FloatingMiniAppWindow(
     private fun handleConfigurationChangedOnRoot() {
         cachedSafeDisplayBounds = null
         lastSafeBoundsQueryTime = 0L
+        refreshSystemThemeIfApplicable()
         if (isMaximized) {
             val refreshed = getSafeDisplayBounds(context, forceRefresh = true)
             bounds.x = refreshed.x
@@ -3558,6 +3626,57 @@ class FloatingMiniAppWindow(
             layoutParams.height = bounds.height
             (manager ?: FloatingWindowManager.getInstance(context)).updateBounds(windowId, bounds)
             relayoutEmbeddedSurface(bounds.width, getContentViewportHeight(bounds.height))
+        }
+    }
+
+    /**
+     * Refreshes system light/dark colors for Dictionary and Note windows when Android's system
+     * night mode toggles while the floating window is open. Reader chrome is untouched.
+     */
+    fun refreshSystemThemeIfApplicable() {
+        if (!usesSystemLightDarkTheme()) return
+        val density = context.resources.displayMetrics.density
+        val palette = com.example.feature.language.LanguageMiniAppUiHelper.resolvePalette(context)
+        val accentRaw = if (isDictionaryApp()) palette.accentDictionary else parseColorSafe(currentAccentColorHex)
+        val displayAccent = com.example.feature.language.LanguageMiniAppUiHelper.adaptAccentForSurface(accentRaw, palette.isDark)
+
+        rootCardBackground?.setColor(palette.surfaceBg)
+        rootBorderDrawable?.setStroke((1.5f * density).toInt().coerceAtLeast(1), palette.border)
+        topBarView?.setBackgroundColor(palette.topBarBg)
+        titleView?.setTextColor(palette.textPrimary)
+        topBarIconDrawable?.setColor(accentRaw)
+        topBarEditBtn?.setTextColor(displayAccent)
+        topBarEditBtnBg?.setColor(palette.buttonBg)
+        topBarEditBtnBg?.setStroke((1 * density).toInt().coerceAtLeast(1), displayAccent)
+
+        bottomRightStickerBg?.setColor(palette.cardBg)
+        bottomRightStickerBg?.setStroke((1 * density).toInt().coerceAtLeast(1), palette.border)
+        stickerCloseButtonView?.setTextColor(palette.dangerText)
+        stickerSleepButtonView?.setTextColor(palette.textPrimary)
+        stickerResizeButtonView?.setTextColor(palette.accentDictionary)
+        stickerPrimaryDividerView?.setBackgroundColor(palette.divider)
+        stickerResizeDividerView?.setBackgroundColor(palette.divider)
+
+        if (isNoteApp()) {
+            noteEditorBg?.setColor(palette.surfaceBg)
+            noteEditText?.apply {
+                setTextColor(palette.textPrimary)
+                setHintTextColor(palette.textMuted)
+                highlightColor = palette.selectionHighlight
+            }
+            val parentRoot = getView() as? FrameLayout
+            val oldPopover = editPopoverView
+            if (parentRoot != null && oldPopover != null) {
+                val wasVisible = oldPopover.visibility == View.VISIBLE
+                parentRoot.removeView(oldPopover)
+                val refreshedPopover = createEditPopover(context)
+                if (wasVisible) refreshedPopover.visibility = View.VISIBLE
+                editPopoverView = refreshedPopover
+                parentRoot.addView(refreshedPopover)
+                bottomRightStickerView?.bringToFront()
+            }
+        } else if (isDictionaryApp()) {
+            dictionaryInstance?.applyThemeRefresh(context)
         }
     }
 
@@ -3873,7 +3992,11 @@ class FloatingMiniAppWindow(
             maximizeRestoreBounds?.copyBounds() ?: normalFloatingBounds.copyBounds()
         }
         val payload = if (isDictionaryApp()) {
-            dictionaryInstance?.onSaveState() ?: emptyMap()
+            if (targetState == MiniAppState.SLEEPING) {
+                dictionaryInstance?.prepareForSleep() ?: emptyMap()
+            } else {
+                dictionaryInstance?.onSaveState() ?: emptyMap()
+            }
         } else {
             emptyMap()
         }
@@ -3972,6 +4095,8 @@ class FloatingMiniAppWindow(
                     instance?.getCurrentScreenModeForTesting() == com.example.feature.reader.ReaderScreenMode.READING &&
                         instance.getReadingViewForTesting()?.isBottomToolbarVisibleForTesting() == true
                 setReaderBottomRightStickerHidden(toolbarVisibleInReading)
+            } else if (isDictionaryApp()) {
+                dictionaryInstance?.onResume()
             }
             LogKeeper.log(context, "FloatingMiniAppWindow", "ON_SHOW_MAIN_ONLY id=$instanceId appType=$appType (skipping Heavy)")
             return
@@ -4021,7 +4146,7 @@ class FloatingMiniAppWindow(
         pwaWindowController?.clearUrlBarFocus()
         deactivateEmbeddedEditorIme()
         if (isMainOnlyApp()) {
-            if (isNoteApp() && notePersistence.hasPendingEdits()) {
+            if (isNoteApp() && !isMarkedForPermanentDelete && notePersistence.hasPendingEdits()) {
                 notePersistence.scheduleDebouncedSave(0L)
             } else if (isReaderApp()) {
                 readerInstance?.onPause()
@@ -4069,9 +4194,23 @@ class FloatingMiniAppWindow(
         pwaWindowController = null
         deactivateEmbeddedEditorIme()
         if (isNoteApp()) {
-            // Teardown is idempotent: only schedule write if there are uncommitted pending edits
-            if (notePersistence.hasPendingEdits()) {
-                notePersistence.scheduleDebouncedSave(0L)
+            if (isMarkedForPermanentDelete) {
+                notePersistence.markDeletedPermanently()
+            } else {
+                // Flush uncommitted edits safely if teardown happened without a prior sleep/close flush
+                if (notePersistence.hasPendingEdits()) {
+                    notePersistence.updateStateSnapshot(
+                        text = currentNoteText,
+                        fontSize = currentFontSizeSp,
+                        fontStyle = currentFontStyle,
+                        wordWrap = currentWordWrap,
+                        lineSpacing = currentLineSpacingMult,
+                        bounds = if (!isMaximized) normalFloatingBounds.copyBounds() else (maximizeRestoreBounds?.copyBounds() ?: normalFloatingBounds.copyBounds()),
+                        accentColor = currentAccentColorHex
+                    )
+                    notePersistence.flushPendingSave()
+                }
+                notePersistence.release()
             }
         } else if (isReaderApp()) {
             readerInstance?.onDestroy()
@@ -4100,6 +4239,11 @@ class FloatingMiniAppWindow(
         }
         noteEditText = null
         imeBridgeEditText = null
+        editPopoverView = null
+        bottomRightStickerBg = null
+        stickerCloseButtonView = null
+        stickerSleepButtonView = null
+        stickerPrimaryDividerView = null
 
         if (!isMainOnlyApp()) {
             try {

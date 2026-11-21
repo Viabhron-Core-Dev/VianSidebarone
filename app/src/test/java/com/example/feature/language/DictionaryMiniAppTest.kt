@@ -299,4 +299,93 @@ class DictionaryMiniAppTest {
 
         assertTrue(resolveProjectPath("deferred/vian-world/translation/README.md").isFile)
     }
+
+    @Test
+    fun testDictionaryOpenWithQueryReusesSingleInstanceAndSleepReleasesRuntime() {
+        val zip = createSimpleStarDictZip("Oxford Sample", "ephemeral", "Lasting for a very short time.")
+        assertTrue(dictionaryService.importFromFile(zip) is DictionaryImportResult.Success)
+
+        val firstWin = bridge.openDictionaryWithQuery("ephemeral")
+        val firstInstance = firstWin.getDictionaryInstanceForTesting()!!
+        assertEquals("miniapp_dictionary", firstWin.instanceId)
+        assertEquals("ephemeral", firstInstance.getLastSubmittedQueryForTesting())
+        assertTrue(firstInstance.hasAttachedViewsForTesting())
+
+        // Opening Full Dictionary again with another word MUST reuse the existing window (no duplicates)
+        val secondWin = bridge.openDictionaryWithQuery("serendipity")
+        assertTrue("Expected exact same FloatingMiniAppWindow instance to be reused", firstWin === secondWin)
+        assertEquals(
+            1,
+            FloatingWindowManager.getInstance(context).getAllWindows()
+                .count { (it as? FloatingMiniAppWindow)?.isDictionaryApp() == true }
+        )
+        assertEquals("serendipity", firstInstance.getLastSubmittedQueryForTesting())
+
+        // Direct prepareForSleep() must enter SLEEPING and release runtime views/jobs/outcome buffer
+        val directSaved = firstInstance.prepareForSleep()
+        assertEquals(com.example.feature.floating.MiniAppLifecycleState.SLEEPING, firstInstance.lifecycleState)
+        assertEquals("serendipity", directSaved[DictionaryMiniAppInstance.KEY_SUBMITTED_QUERY])
+        assertFalse("Lookup job must not stay active after prepareForSleep", firstInstance.hasActiveLookupJobForTesting())
+        assertFalse("Dictionary views must be released on prepareForSleep", firstInstance.hasAttachedViewsForTesting())
+        assertEquals(DictionaryLookupOutcome.EmptyQuery, firstInstance.getLastOutcomeForTesting())
+
+        // Folding/sleeping via bridge saves durable SLEEPING snapshot and tears down the live window instance cleanly
+        var sleepOk = false
+        bridge.sleepMiniApp("miniapp_dictionary") { sleepOk = it }
+        assertTrue(sleepOk)
+        assertEquals(com.example.feature.floating.MiniAppLifecycleState.DESTROYED, firstInstance.lifecycleState)
+        assertFalse("Lookup job must not stay active after sleep", firstInstance.hasActiveLookupJobForTesting())
+        assertFalse("Dictionary views must be released on sleep", firstInstance.hasAttachedViewsForTesting())
+
+        val snap = store.loadSnapshot("miniapp_dictionary")
+        assertNotNull(snap)
+        assertEquals(MiniAppState.SLEEPING, snap!!.state)
+        assertEquals("serendipity", snap.payload[DictionaryMiniAppInstance.KEY_SUBMITTED_QUERY])
+
+        // Waking via Open Full Dictionary handoff with a new word restores a single window cleanly
+        val wokenWin = bridge.openDictionaryWithQuery("ephemeral")
+        assertEquals(
+            1,
+            FloatingWindowManager.getInstance(context).getAllWindows()
+                .count { (it as? FloatingMiniAppWindow)?.isDictionaryApp() == true }
+        )
+        assertEquals("ephemeral", wokenWin.getDictionaryInstanceForTesting()?.getLastSubmittedQueryForTesting())
+    }
+
+    @Test
+    fun testSharedLightDarkThemePaletteAndQuickMeaningPopupContract() {
+        val light = LanguageMiniAppUiHelper.resolvePalette(isDark = false)
+        val dark = LanguageMiniAppUiHelper.resolvePalette(isDark = true)
+
+        assertFalse(light.isDark)
+        assertTrue(dark.isDark)
+        assertTrue("Light and dark surface colors must differ", light.surfaceBg != dark.surfaceBg)
+        assertTrue("Light and dark text colors must differ", light.textPrimary != dark.textPrimary)
+        assertTrue("Light and dark top bar colors must differ", light.topBarBg != dark.topBarBg)
+        assertTrue("Light and dark Dictionary accents must differ", light.accentDictionary != dark.accentDictionary)
+
+        // Light mode contrast adaptation must darken bright pastel Note accents while dark mode preserves them
+        val pastel = 0xFFF9E2AF.toInt()
+        assertEquals(pastel, LanguageMiniAppUiHelper.adaptAccentForSurface(pastel, isDark = true))
+        val adaptedLight = LanguageMiniAppUiHelper.adaptAccentForSurface(pastel, isDark = false)
+        assertTrue("Pastel accent must be darkened for legibility on light surfaces", adaptedLight != pastel)
+
+        // Verify Quick Meaning popup wires Open Full Dictionary reuse and never invents ranking labels
+        val popupSrc = resolveProjectPath("app/src/main/java/com/example/feature/selection/MeaningSelectionActivity.kt").readText()
+        val popupCodeOnly = popupSrc.lineSequence()
+            .filterNot { line ->
+                val trimmed = line.trimStart()
+                trimmed.startsWith("*") || trimmed.startsWith("/*") || trimmed.startsWith("//")
+            }
+            .joinToString("\n")
+        assertTrue(popupCodeOnly.contains("TAG_OPEN_FULL_DICTIONARY_BUTTON"))
+        assertTrue(popupCodeOnly.contains("openDictionaryWithQuery"))
+        assertTrue(popupCodeOnly.contains("buildConcisePopupMeaning"))
+        assertFalse("Quick Meaning popup must never invent 'Most Common' UI labels", popupCodeOnly.contains("Most Common", ignoreCase = true))
+
+        val dictSrc = resolveProjectPath("app/src/main/java/com/example/feature/language/DictionaryMiniAppInstance.kt").readText()
+        assertFalse("Dictionary copy must not say Dictionary & Translation Settings", dictSrc.contains("Dictionary & Translation Settings"))
+        assertTrue(dictSrc.contains("override fun releaseRuntime()"))
+        assertTrue(dictSrc.contains("resolvePalette"))
+    }
 }

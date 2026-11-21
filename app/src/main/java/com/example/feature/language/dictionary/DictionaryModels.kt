@@ -47,6 +47,7 @@ data class DictionaryDefinitionEntry(
     val matchedSynonym: String? = null,
     val definitionText: String,
     val phonetic: String? = null,
+    val partOfSpeech: String? = null,
     val hasUnsupportedBinaryOnly: Boolean = false
 )
 

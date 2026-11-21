@@ -356,6 +356,51 @@ class FloatingMiniAppBridge private constructor(private val context: Context) {
     }
 
     /**
+     * Opens, wakes, or focuses the single floating Dictionary window with [query].
+     * Reuses the existing `"miniapp_dictionary"` floating instance rather than creating duplicate
+     * windows, and updates its active search query immediately.
+     */
+    fun openDictionaryWithQuery(
+        query: String,
+        instanceId: String = DEFAULT_DICTIONARY_INSTANCE_ID
+    ): FloatingMiniAppWindow {
+        val trimmed = query.trim()
+        val existing = windowManager.getWindow(instanceId)
+        if (existing is FloatingMiniAppWindow && existing.isDictionaryApp()) {
+            val window = openMiniApp(instanceId, com.example.feature.language.DictionaryMiniAppInstance.APP_TYPE)
+            if (trimmed.isNotEmpty()) {
+                window.openDictionaryQuery(trimmed)
+            }
+            return window
+        }
+
+        if (trimmed.isNotEmpty()) {
+            val existingSnapshot = durableStore.loadSnapshot(instanceId)
+            val bounds = existingSnapshot?.windowBounds?.copyBounds()
+                ?: com.example.feature.language.LanguageMiniAppUiHelper.computeCompactDictionaryBounds(
+                    context = context,
+                    screenWidth = windowManager.screenWidth,
+                    screenHeight = windowManager.screenHeight
+                )
+            val snapshot = existingSnapshot ?: MiniAppRecoverySnapshot(
+                instanceId = instanceId,
+                appType = com.example.feature.language.DictionaryMiniAppInstance.APP_TYPE,
+                state = MiniAppState.ACTIVE,
+                windowBounds = bounds
+            )
+            snapshot.payload[com.example.feature.language.DictionaryMiniAppInstance.KEY_QUERY] = trimmed
+            snapshot.payload[com.example.feature.language.DictionaryMiniAppInstance.KEY_SUBMITTED_QUERY] = trimmed
+            durableStore.saveSnapshot(snapshot)
+        }
+
+        val window = openMiniApp(instanceId, com.example.feature.language.DictionaryMiniAppInstance.APP_TYPE)
+        if (trimmed.isNotEmpty()) {
+            window.openDictionaryQuery(trimmed)
+        }
+        return window
+    }
+
+    /**
      * Puts an active mini-app to sleep via safe transactional ordering:
      * 1. FOLD_TRANSACTION_BEGIN.
      * 2. Keep Heavy consumer acquired during snapshot gathering.
@@ -590,6 +635,7 @@ class FloatingMiniAppBridge private constructor(private val context: Context) {
             LogKeeper.log(context, TAG, "CLOSE_MAIN_ONLY id=$instanceId type=$appType (skipping Heavy)")
 
             if (deleteDurable) {
+                window?.prepareForPermanentDelete()
                 dismissLauncherBubble(instanceId)
                 windowManager.unregisterWindow(instanceId)
                 durableStore.deleteSnapshot(instanceId)
@@ -780,6 +826,7 @@ class FloatingMiniAppBridge private constructor(private val context: Context) {
 
     companion object {
         private const val TAG = "FloatingMiniAppBridge"
+        const val DEFAULT_DICTIONARY_INSTANCE_ID = "miniapp_dictionary"
 
         @Volatile
         private var instance: FloatingMiniAppBridge? = null

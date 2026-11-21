@@ -295,6 +295,7 @@ object StarDictDiskIndex {
                         },
                         definitionText = decoded.text,
                         phonetic = decoded.phonetic,
+                        partOfSpeech = decoded.partOfSpeech,
                         hasUnsupportedBinaryOnly = decoded.hasUnsupportedBinaryOnly
                     )
                 )

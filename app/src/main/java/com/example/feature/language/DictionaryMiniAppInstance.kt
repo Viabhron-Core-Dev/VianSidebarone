@@ -13,6 +13,7 @@ import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import com.example.feature.floating.EmbeddedImeBridge
 import com.example.feature.floating.EmbeddedInputEditText
 import com.example.feature.floating.MiniAppInstance
 import com.example.feature.floating.MiniAppLifecycleState
@@ -32,11 +33,12 @@ import kotlinx.coroutines.launch
  * Standalone floating Dictionary mini-app (hosted in Main process).
  *
  * Connected to the shared offline [DictionaryService] (StarDict disk-backed engine):
- * - Preserves search input, Search/Clear controls, scrollable results area, Settings shortcut,
- *   and sleep/restore lifecycle.
- * - Executes all dictionary lookups off the main thread.
- * - Displays actual definitions with dictionary attribution, plus honest loading, empty,
- *   no-result, unconfigured, and error states.
+ * - Preserves search input, Search/Clear controls, scrollable multi-definition results,
+ *   Settings shortcut, and Reader-grade sleep/release/restore/resume lifecycle.
+ * - Executes all dictionary lookups off the main thread and cancels obsolete lookups.
+ * - Displays actual definitions with dictionary attribution, plus pronunciation and part of
+ *   speech ONLY when genuinely present in dictionary data.
+ * - Follows Android system light/dark theme automatically via [LanguageMiniAppUiHelper.resolvePalette].
  */
 class DictionaryMiniAppInstance(
     override val instanceId: String,
@@ -55,29 +57,46 @@ class DictionaryMiniAppInstance(
     private var isLoading: Boolean = false
     private var lastOutcome: DictionaryLookupOutcome = DictionaryLookupOutcome.EmptyQuery
 
-    private var rootView: View? = null
+    private var rootView: ScrollView? = null
     private var searchInput: EditText? = null
+    private var searchButtonView: TextView? = null
+    private var clearButtonView: TextView? = null
     private var resultContainer: LinearLayout? = null
     private var hostContext: Context? = null
 
     private var scope: CoroutineScope = CoroutineScope(SupervisorJob() + ioDispatcher)
     private var lookupJob: Job? = null
+    private var activeLookupQuery: String? = null
 
     override fun onCreate(savedSnapshot: MiniAppRecoverySnapshot?) {
         lifecycleState = MiniAppLifecycleState.CREATED
         currentQuery = savedSnapshot?.payload?.get(KEY_QUERY) ?: ""
         lastSubmittedQuery = savedSnapshot?.payload?.get(KEY_SUBMITTED_QUERY) ?: ""
+        lastOutcome = DictionaryLookupOutcome.EmptyQuery
+        isLoading = false
+        activeLookupQuery = null
     }
 
     override fun restoreFromSnapshot(snapshot: MiniAppRecoverySnapshot) {
         currentQuery = snapshot.payload[KEY_QUERY] ?: ""
         lastSubmittedQuery = snapshot.payload[KEY_SUBMITTED_QUERY] ?: ""
-        searchInput?.setText(currentQuery)
+        searchInput?.let { input ->
+            if (input.text?.toString() != currentQuery) {
+                input.setText(currentQuery)
+                try {
+                    input.setSelection(currentQuery.length)
+                } catch (_: Throwable) {}
+            }
+        }
         val ctx = hostContext ?: rootView?.context
         if (ctx != null) {
             if (lastSubmittedQuery.isNotBlank()) {
                 executeLookupAsync(ctx, lastSubmittedQuery)
             } else {
+                lookupJob?.cancel()
+                lookupJob = null
+                activeLookupQuery = null
+                isLoading = false
                 lastOutcome = DictionaryLookupOutcome.EmptyQuery
                 renderResultArea(ctx)
             }
@@ -87,10 +106,11 @@ class DictionaryMiniAppInstance(
     override fun createContentView(context: Context): View {
         hostContext = context
         val density = context.resources.displayMetrics.density
+        val palette = LanguageMiniAppUiHelper.resolvePalette(context)
 
         val scrollView = ScrollView(context).apply {
             isFillViewport = true
-            setBackgroundColor(LanguageMiniAppUiHelper.COLOR_SURFACE_BG)
+            setBackgroundColor(palette.windowSurfaceBg)
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.MATCH_PARENT
@@ -122,20 +142,23 @@ class DictionaryMiniAppInstance(
         val input = EmbeddedInputEditText(context) { instanceId }.apply {
             tag = TAG_SEARCH_INPUT
             hint = "Enter word to look up"
-            setHintTextColor(LanguageMiniAppUiHelper.COLOR_TEXT_MUTED)
-            setTextColor(LanguageMiniAppUiHelper.COLOR_TEXT_PRIMARY)
+            setHintTextColor(palette.textMuted)
+            setTextColor(palette.textPrimary)
+            highlightColor = palette.selectionHighlight
             textSize = 13.5f
             isSingleLine = true
             imeOptions = EditorInfo.IME_ACTION_SEARCH
             background = LanguageMiniAppUiHelper.roundedBg(
                 density,
-                LanguageMiniAppUiHelper.COLOR_INPUT_BG,
-                LanguageMiniAppUiHelper.COLOR_BORDER,
+                palette.inputBg,
+                palette.border,
                 8f
             )
             setPadding((10 * density).toInt(), (9 * density).toInt(), (10 * density).toInt(), (9 * density).toInt())
             setText(currentQuery)
-            setSelection(currentQuery.length)
+            try {
+                setSelection(currentQuery.length)
+            } catch (_: Throwable) {}
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
                 marginEnd = (6 * density).toInt()
             }
@@ -164,22 +187,25 @@ class DictionaryMiniAppInstance(
         val searchBtn = LanguageMiniAppUiHelper.createPillButton(
             context = context,
             text = "Search",
-            accentColor = LanguageMiniAppUiHelper.COLOR_ACCENT_DICTIONARY,
+            accentColor = palette.accentDictionary,
             filled = true,
             contentDesc = "Search dictionary",
-            tag = TAG_SEARCH_BUTTON
+            tag = TAG_SEARCH_BUTTON,
+            palette = palette
         ) {
             submitSearch(searchInput?.text?.toString() ?: currentQuery)
         }
+        searchButtonView = searchBtn
         searchRow.addView(searchBtn)
 
         val clearBtn = LanguageMiniAppUiHelper.createPillButton(
             context = context,
             text = "×",
-            accentColor = LanguageMiniAppUiHelper.COLOR_TEXT_SECONDARY,
+            accentColor = palette.textSecondary,
             filled = false,
             contentDesc = "Clear dictionary query",
-            tag = TAG_CLEAR_BUTTON
+            tag = TAG_CLEAR_BUTTON,
+            palette = palette
         ) {
             clearSearch()
         }.apply {
@@ -190,6 +216,7 @@ class DictionaryMiniAppInstance(
                 marginStart = (6 * density).toInt()
             }
         }
+        clearButtonView = clearBtn
         searchRow.addView(clearBtn)
         content.addView(searchRow)
 
@@ -221,6 +248,44 @@ class DictionaryMiniAppInstance(
         return scrollView
     }
 
+    /**
+     * Re-applies the active Android system light/dark palette cleanly if the device theme changes
+     * while the Dictionary floating window is open.
+     */
+    fun applyThemeRefresh(context: Context? = hostContext ?: rootView?.context) {
+        val ctx = context ?: return
+        val density = ctx.resources.displayMetrics.density
+        val palette = LanguageMiniAppUiHelper.resolvePalette(ctx)
+
+        rootView?.setBackgroundColor(palette.windowSurfaceBg)
+        searchInput?.apply {
+            setHintTextColor(palette.textMuted)
+            setTextColor(palette.textPrimary)
+            highlightColor = palette.selectionHighlight
+            background = LanguageMiniAppUiHelper.roundedBg(density, palette.inputBg, palette.border, 8f)
+        }
+        searchButtonView?.apply {
+            setTextColor(palette.onAccent)
+            background = LanguageMiniAppUiHelper.roundedBg(density, palette.accentDictionary, null, 8f)
+        }
+        clearButtonView?.apply {
+            val clearAccent = LanguageMiniAppUiHelper.adaptAccentForSurface(palette.textSecondary, palette.isDark)
+            setTextColor(clearAccent)
+            background = LanguageMiniAppUiHelper.roundedBg(density, palette.buttonBg, clearAccent, 8f)
+        }
+        renderResultArea(ctx)
+    }
+
+    /**
+     * Opens or updates the Dictionary floating window to look up [query] immediately
+     * (used when handing off from the Quick Meaning popup or external entry points).
+     */
+    fun openQuery(query: String) {
+        val trimmed = query.trim()
+        if (trimmed.isEmpty()) return
+        submitSearch(trimmed)
+    }
+
     fun submitSearch(rawQuery: String) {
         val trimmed = rawQuery.trim()
         currentQuery = rawQuery
@@ -228,12 +293,16 @@ class DictionaryMiniAppInstance(
         searchInput?.let { input ->
             if (input.text?.toString() != rawQuery) {
                 input.setText(rawQuery)
-                input.setSelection(rawQuery.length)
+                try {
+                    input.setSelection(rawQuery.length)
+                } catch (_: Throwable) {}
             }
         }
         val ctx = hostContext ?: rootView?.context ?: return
         if (trimmed.isEmpty()) {
             lookupJob?.cancel()
+            lookupJob = null
+            activeLookupQuery = null
             isLoading = false
             lastOutcome = DictionaryLookupOutcome.EmptyQuery
             renderResultArea(ctx)
@@ -244,6 +313,8 @@ class DictionaryMiniAppInstance(
 
     fun clearSearch() {
         lookupJob?.cancel()
+        lookupJob = null
+        activeLookupQuery = null
         isLoading = false
         currentQuery = ""
         lastSubmittedQuery = ""
@@ -258,6 +329,10 @@ class DictionaryMiniAppInstance(
     fun refreshFromService() {
         val ctx = hostContext ?: rootView?.context ?: return
         if (lastSubmittedQuery.isNotBlank()) {
+            // Avoid spawning a redundant duplicate job if the exact same lookup is already running
+            if (isLoading && activeLookupQuery == lastSubmittedQuery && lookupJob?.isActive == true) {
+                return
+            }
             executeLookupAsync(ctx, lastSubmittedQuery)
         } else {
             renderResultArea(ctx)
@@ -266,6 +341,8 @@ class DictionaryMiniAppInstance(
 
     private fun executeLookupAsync(context: Context, query: String) {
         lookupJob?.cancel()
+        lookupJob = null
+        activeLookupQuery = query
         isLoading = true
         renderResultArea(context)
 
@@ -273,9 +350,14 @@ class DictionaryMiniAppInstance(
         lookupJob = scope.launch {
             val outcome = service.lookup(query)
             dispatchUi {
-                if (lifecycleState == MiniAppLifecycleState.DESTROYED) return@dispatchUi
+                if (lifecycleState == MiniAppLifecycleState.DESTROYED ||
+                    lifecycleState == MiniAppLifecycleState.SLEEPING
+                ) {
+                    return@dispatchUi
+                }
                 if (lastSubmittedQuery != query) return@dispatchUi
                 isLoading = false
+                activeLookupQuery = null
                 lastOutcome = outcome
                 (hostContext ?: rootView?.context)?.let { renderResultArea(it) }
             }
@@ -303,6 +385,7 @@ class DictionaryMiniAppInstance(
     private fun renderResultArea(context: Context) {
         val container = resultContainer ?: return
         val density = context.resources.displayMetrics.density
+        val palette = LanguageMiniAppUiHelper.resolvePalette(context)
         container.removeAllViews()
 
         if (isLoading) {
@@ -311,7 +394,8 @@ class DictionaryMiniAppInstance(
                     context = context,
                     badgeText = "SEARCHING OFFLINE DICTIONARIES",
                     titleText = "Looking up \"$lastSubmittedQuery\"...",
-                    bodyText = "Reading disk-backed StarDict indexes..."
+                    bodyText = "Reading disk-backed StarDict indexes...",
+                    palette = palette
                 ).apply { tag = TAG_LOADING_STATE }
             )
             return
@@ -327,8 +411,8 @@ class DictionaryMiniAppInstance(
                 tag = TAG_EMPTY_STATE
                 background = LanguageMiniAppUiHelper.roundedBg(
                     density,
-                    LanguageMiniAppUiHelper.COLOR_CARD_BG,
-                    LanguageMiniAppUiHelper.COLOR_BORDER,
+                    palette.cardBg,
+                    palette.border,
                     10f
                 )
                 setPadding((14 * density).toInt(), (14 * density).toInt(), (14 * density).toInt(), (14 * density).toInt())
@@ -337,7 +421,7 @@ class DictionaryMiniAppInstance(
                     text = "Ready to look up a word"
                     textSize = 13.5f
                     typeface = Typeface.DEFAULT_BOLD
-                    setTextColor(LanguageMiniAppUiHelper.COLOR_TEXT_PRIMARY)
+                    setTextColor(palette.textPrimary)
                 })
                 addView(TextView(context).apply {
                     text = if (enabledCount > 0) {
@@ -348,7 +432,7 @@ class DictionaryMiniAppInstance(
                         "Import a StarDict (.zip) dictionary in Settings to look up definitions offline."
                     }
                     textSize = 12f
-                    setTextColor(LanguageMiniAppUiHelper.COLOR_TEXT_SECONDARY)
+                    setTextColor(palette.textSecondary)
                     setLineSpacing(0f, 1.25f)
                     setPadding(0, (6 * density).toInt(), 0, 0)
                 })
@@ -371,6 +455,7 @@ class DictionaryMiniAppInstance(
                         },
                         actionLabel = "Open Settings",
                         actionTag = TAG_OPEN_SETTINGS_BUTTON,
+                        palette = palette,
                         onActionClick = onOpenSettings
                     )
                 )
@@ -384,8 +469,8 @@ class DictionaryMiniAppInstance(
             tag = TAG_SUBMITTED_WORD_CARD
             background = LanguageMiniAppUiHelper.roundedBg(
                 density,
-                LanguageMiniAppUiHelper.COLOR_CARD_BG,
-                LanguageMiniAppUiHelper.COLOR_ACCENT_DICTIONARY,
+                palette.cardBg,
+                palette.accentDictionary,
                 10f
             )
             setPadding((14 * density).toInt(), (10 * density).toInt(), (14 * density).toInt(), (10 * density).toInt())
@@ -394,7 +479,7 @@ class DictionaryMiniAppInstance(
                 text = "SEARCHED TERM"
                 textSize = 10f
                 typeface = Typeface.DEFAULT_BOLD
-                setTextColor(LanguageMiniAppUiHelper.COLOR_ACCENT_DICTIONARY)
+                setTextColor(palette.accentDictionary)
                 letterSpacing = 0.06f
             })
             addView(TextView(context).apply {
@@ -402,7 +487,7 @@ class DictionaryMiniAppInstance(
                 text = lastSubmittedQuery
                 textSize = 17.5f
                 typeface = Typeface.DEFAULT_BOLD
-                setTextColor(LanguageMiniAppUiHelper.COLOR_TEXT_PRIMARY)
+                setTextColor(palette.textPrimary)
                 setPadding(0, (3 * density).toInt(), 0, 0)
             })
         }
@@ -419,7 +504,7 @@ class DictionaryMiniAppInstance(
                             layoutParams = LinearLayout.LayoutParams(1, (8 * density).toInt())
                         })
                     }
-                    container.addView(buildDefinitionCard(context, density, entry))
+                    container.addView(buildDefinitionCard(context, density, palette, entry))
                 }
             }
             is DictionaryLookupOutcome.NotFound -> {
@@ -431,6 +516,7 @@ class DictionaryMiniAppInstance(
                         bodyText = "Searched ${outcome.searchedDictionaries} active offline ${if (outcome.searchedDictionaries == 1) "dictionary" else "dictionaries"}. Check spelling or import additional StarDict dictionaries in Settings.",
                         actionLabel = "Open Settings",
                         actionTag = TAG_OPEN_SETTINGS_BUTTON,
+                        palette = palette,
                         onActionClick = onOpenSettings
                     ).apply { tag = TAG_NO_RESULT_STATE }
                 )
@@ -441,9 +527,10 @@ class DictionaryMiniAppInstance(
                         context = context,
                         badgeText = "NO DICTIONARY INSTALLED",
                         titleText = "Import an offline dictionary",
-                        bodyText = "No StarDict dictionary is installed yet, so no definition can be shown for \"$lastSubmittedQuery\". Import a StarDict ZIP package in Dictionary & Translation Settings.",
+                        bodyText = "No StarDict dictionary is installed yet, so no definition can be shown for \"$lastSubmittedQuery\". Import a StarDict ZIP package in Dictionary Settings.",
                         actionLabel = "Open Settings",
                         actionTag = TAG_OPEN_SETTINGS_BUTTON,
+                        palette = palette,
                         onActionClick = onOpenSettings
                     )
                 )
@@ -454,9 +541,10 @@ class DictionaryMiniAppInstance(
                         context = context,
                         badgeText = "DICTIONARIES DISABLED",
                         titleText = "All installed dictionaries are turned off",
-                        bodyText = "Enable one or more installed dictionaries in Dictionary & Translation Settings to search for \"$lastSubmittedQuery\".",
+                        bodyText = "Enable one or more installed dictionaries in Dictionary Settings to search for \"$lastSubmittedQuery\".",
                         actionLabel = "Open Settings",
                         actionTag = TAG_OPEN_SETTINGS_BUTTON,
+                        palette = palette,
                         onActionClick = onOpenSettings
                     )
                 )
@@ -470,6 +558,7 @@ class DictionaryMiniAppInstance(
                         bodyText = outcome.message,
                         actionLabel = "Open Settings",
                         actionTag = TAG_OPEN_SETTINGS_BUTTON,
+                        palette = palette,
                         onActionClick = onOpenSettings
                     )
                 )
@@ -481,6 +570,7 @@ class DictionaryMiniAppInstance(
     private fun buildDefinitionCard(
         context: Context,
         density: Float,
+        palette: LanguageMiniAppUiHelper.FloatingUiPalette,
         entry: DictionaryDefinitionEntry
     ): LinearLayout {
         return LinearLayout(context).apply {
@@ -488,8 +578,8 @@ class DictionaryMiniAppInstance(
             tag = TAG_DEFINITION_CARD
             background = LanguageMiniAppUiHelper.roundedBg(
                 density,
-                LanguageMiniAppUiHelper.COLOR_CARD_BG,
-                LanguageMiniAppUiHelper.COLOR_BORDER,
+                palette.cardBg,
+                palette.border,
                 10f
             )
             setPadding((12 * density).toInt(), (10 * density).toInt(), (12 * density).toInt(), (10 * density).toInt())
@@ -499,11 +589,11 @@ class DictionaryMiniAppInstance(
                 text = entry.dictionaryName.uppercase()
                 textSize = 10f
                 typeface = Typeface.DEFAULT_BOLD
-                setTextColor(LanguageMiniAppUiHelper.COLOR_ACCENT_DICTIONARY)
+                setTextColor(palette.accentDictionary)
                 letterSpacing = 0.05f
             })
 
-            // Headword + phonetic
+            // Headword + genuine pronunciation when present
             val titleLine = buildString {
                 append(entry.headword)
                 if (!entry.phonetic.isNullOrBlank()) {
@@ -515,16 +605,35 @@ class DictionaryMiniAppInstance(
                 text = titleLine
                 textSize = 14.5f
                 typeface = Typeface.DEFAULT_BOLD
-                setTextColor(LanguageMiniAppUiHelper.COLOR_TEXT_PRIMARY)
+                setTextColor(palette.textPrimary)
                 setPadding(0, (4 * density).toInt(), 0, 0)
             })
+
+            // Genuine part-of-speech chip only when actually present in dictionary metadata
+            if (!entry.partOfSpeech.isNullOrBlank()) {
+                addView(TextView(context).apply {
+                    tag = TAG_PART_OF_SPEECH
+                    text = entry.partOfSpeech
+                    textSize = 11f
+                    typeface = Typeface.DEFAULT_BOLD
+                    setTextColor(palette.accentDictionary)
+                    background = LanguageMiniAppUiHelper.roundedBg(density, palette.chipBg, null, 6f)
+                    setPadding((8 * density).toInt(), (2 * density).toInt(), (8 * density).toInt(), (2 * density).toInt())
+                    layoutParams = LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT
+                    ).apply {
+                        topMargin = (4 * density).toInt()
+                    }
+                })
+            }
 
             if (!entry.matchedSynonym.isNullOrBlank()) {
                 addView(TextView(context).apply {
                     text = "Matched synonym: ${entry.matchedSynonym}"
                     textSize = 11f
-                    setTextColor(LanguageMiniAppUiHelper.COLOR_WARNING_ACCENT)
-                    setPadding(0, (2 * density).toInt(), 0, 0)
+                    setTextColor(palette.warningAccent)
+                    setPadding(0, (3 * density).toInt(), 0, 0)
                 })
             }
 
@@ -532,7 +641,7 @@ class DictionaryMiniAppInstance(
                 addView(TextView(context).apply {
                     text = entry.definitionText
                     textSize = 12.5f
-                    setTextColor(LanguageMiniAppUiHelper.COLOR_TEXT_SECONDARY)
+                    setTextColor(palette.textSecondary)
                     setLineSpacing(0f, 1.3f)
                     setTextIsSelectable(true)
                     setPadding(0, (6 * density).toInt(), 0, 0)
@@ -552,6 +661,7 @@ class DictionaryMiniAppInstance(
 
     override fun onPause() {
         lifecycleState = MiniAppLifecycleState.PAUSED
+        EmbeddedImeBridge.clearFocusRecursive(rootView)
         onRequestWindowFocusable(false)
     }
 
@@ -560,8 +670,27 @@ class DictionaryMiniAppInstance(
     }
 
     override fun prepareForSleep(): Map<String, String> {
+        val saved = onSaveState()
         lifecycleState = MiniAppLifecycleState.SLEEPING
-        return onSaveState()
+        releaseRuntime()
+        return saved
+    }
+
+    override fun releaseRuntime() {
+        lookupJob?.cancel()
+        lookupJob = null
+        activeLookupQuery = null
+        isLoading = false
+        lastOutcome = DictionaryLookupOutcome.EmptyQuery
+        EmbeddedImeBridge.clearFocusRecursive(rootView)
+        onRequestWindowFocusable(false)
+        resultContainer?.removeAllViews()
+        searchInput = null
+        searchButtonView = null
+        clearButtonView = null
+        resultContainer = null
+        rootView = null
+        hostContext = null
     }
 
     override fun onSaveState(): Map<String, String> {
@@ -575,18 +704,15 @@ class DictionaryMiniAppInstance(
 
     override fun onDestroy() {
         lifecycleState = MiniAppLifecycleState.DESTROYED
-        lookupJob?.cancel()
+        releaseRuntime()
         scope.cancel()
-        onRequestWindowFocusable(false)
-        searchInput = null
-        resultContainer = null
-        rootView = null
-        hostContext = null
     }
 
     internal fun getCurrentQueryForTesting(): String = searchInput?.text?.toString() ?: currentQuery
     internal fun getLastSubmittedQueryForTesting(): String = lastSubmittedQuery
     internal fun getLastOutcomeForTesting(): DictionaryLookupOutcome = lastOutcome
+    internal fun hasActiveLookupJobForTesting(): Boolean = lookupJob?.isActive == true
+    internal fun hasAttachedViewsForTesting(): Boolean = rootView != null || searchInput != null || resultContainer != null
 
     companion object {
         const val APP_TYPE = "dictionary"
@@ -602,6 +728,7 @@ class DictionaryMiniAppInstance(
         const val TAG_LOADING_STATE = "dictionary_loading_state"
         const val TAG_NO_RESULT_STATE = "dictionary_no_result_state"
         const val TAG_DEFINITION_CARD = "dictionary_definition_card"
+        const val TAG_PART_OF_SPEECH = "dictionary_part_of_speech"
         const val TAG_SUBMITTED_WORD_CARD = "dictionary_submitted_word_card"
         const val TAG_SUBMITTED_WORD_TEXT = "dictionary_submitted_word_text"
         const val TAG_OPEN_SETTINGS_BUTTON = "dictionary_open_settings_button"

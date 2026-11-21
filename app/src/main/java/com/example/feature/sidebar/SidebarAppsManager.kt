@@ -715,7 +715,7 @@ class SidebarAppsManager(
                     "resources_tracker" -> "Resources Tracker"
                     "media_player" -> "Media Player"
                     "widget" -> "Android Widget"
-                    "test_notes" -> "Test Notes"
+                    "test_notes" -> "Note"
                     else -> "Page Window"
                 }
                 result.add(SidebarItem.PageWindow(pageType, "Window: $title", android.R.drawable.ic_menu_gallery))

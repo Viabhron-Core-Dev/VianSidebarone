@@ -2,7 +2,6 @@ package com.example.feature.selection
 
 import android.app.Activity
 import android.content.Intent
-import android.graphics.Color
 import android.graphics.Typeface
 import android.view.Gravity
 import android.view.View
@@ -18,6 +17,7 @@ import com.example.feature.settings.ROUTE_DICTIONARY_SETTINGS
  *
  * Distinct from full floating mini-apps: renders a lightweight, focused popup card over a
  * translucent scrim so the underlying host app stays visible and tapping outside dismisses cleanly.
+ * Follows Android system light/dark theme automatically.
  */
 object SelectionPopupShell {
 
@@ -33,13 +33,14 @@ object SelectionPopupShell {
         onDismiss: () -> Unit
     ): ShellViews {
         val density = activity.resources.displayMetrics.density
+        val palette = LanguageMiniAppUiHelper.resolvePalette(activity)
         val maxCardWidthPx = minOf(
             (340 * density).toInt(),
             (activity.resources.displayMetrics.widthPixels - (32 * density).toInt()).coerceAtLeast((240 * density).toInt())
         )
 
         val scrim = FrameLayout(activity).apply {
-            setBackgroundColor(Color.parseColor("#66000000"))
+            setBackgroundColor(palette.scrim)
             layoutParams = FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.MATCH_PARENT
@@ -53,10 +54,11 @@ object SelectionPopupShell {
             orientation = LinearLayout.VERTICAL
             background = LanguageMiniAppUiHelper.roundedBg(
                 density = density,
-                fillColor = LanguageMiniAppUiHelper.COLOR_SURFACE_BG,
-                strokeColor = LanguageMiniAppUiHelper.COLOR_BORDER,
+                fillColor = palette.windowSurfaceBg,
+                strokeColor = palette.border,
                 cornerDp = 18f
             )
+            elevation = (10 * density)
             setPadding((16 * density).toInt(), (14 * density).toInt(), (16 * density).toInt(), (16 * density).toInt())
             isClickable = true
             layoutParams = FrameLayout.LayoutParams(
@@ -88,7 +90,7 @@ object SelectionPopupShell {
             text = title
             textSize = 15f
             typeface = Typeface.DEFAULT_BOLD
-            setTextColor(LanguageMiniAppUiHelper.COLOR_TEXT_PRIMARY)
+            setTextColor(palette.textPrimary)
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         }
         header.addView(titleView)
@@ -98,7 +100,7 @@ object SelectionPopupShell {
             textSize = 18f
             typeface = Typeface.DEFAULT_BOLD
             gravity = Gravity.CENTER
-            setTextColor(LanguageMiniAppUiHelper.COLOR_TEXT_SECONDARY)
+            setTextColor(palette.textSecondary)
             contentDescription = "Close $title popup"
             tag = "selection_popup_close_button"
             val touchPx = (48 * density).toInt()
@@ -112,7 +114,7 @@ object SelectionPopupShell {
 
         card.addView(header)
         card.addView(View(activity).apply {
-            setBackgroundColor(LanguageMiniAppUiHelper.COLOR_BORDER)
+            setBackgroundColor(palette.divider)
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 (1 * density).toInt().coerceAtLeast(1)

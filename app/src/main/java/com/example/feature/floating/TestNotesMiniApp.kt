@@ -518,7 +518,7 @@ class EmbeddedNoteEditText(
  * TestNotesMiniAppInstance: Concrete Heavy-owned MiniAppInstance for appType = "test_notes".
  *
  * Designed to exercise and validate the real floating mini-app framework end-to-end:
- * 1. Title: "Test Notes"
+ * 1. Title: "Note"
  * 2. Genuinely editable multiline EditText with initial instructional text.
  * 3. Supports touch, focus, cursor placement, text selection, and soft-keyboard input.
  * 4. Saves and restores edited text across Sleep (Fold) / Wake cycles and discards on Close.
@@ -886,10 +886,11 @@ class TestNotesMiniAppInstance(
                 return super.onTouchEvent(ev)
             }
         }.apply {
+            val palette = com.example.feature.language.LanguageMiniAppUiHelper.resolvePalette(context)
             orientation = LinearLayout.VERTICAL
             isFocusable = false
             descendantFocusability = LinearLayout.FOCUS_AFTER_DESCENDANTS
-            setBackgroundColor(Color.parseColor("#181825"))
+            setBackgroundColor(palette.surfaceBg)
             setPadding(
                 (16 * density).toInt(),
                 (14 * density).toInt(),
@@ -898,10 +899,12 @@ class TestNotesMiniAppInstance(
             )
         }
 
+        val palette = com.example.feature.language.LanguageMiniAppUiHelper.resolvePalette(context)
+
         // Title Header: Clean production "Note" title
         val titleView = TextView(context).apply {
             text = "Note"
-            setTextColor(Color.WHITE)
+            setTextColor(palette.textPrimary)
             textSize = 15f
             typeface = Typeface.DEFAULT_BOLD
         }
@@ -910,7 +913,7 @@ class TestNotesMiniAppInstance(
         // Subtitle / Instructions label
         val subtitleView = TextView(context).apply {
             text = "Multiline editor • Floating runtime"
-            setTextColor(Color.parseColor("#89B4FA"))
+            setTextColor(palette.accentDictionary)
             textSize = 11f
             setPadding(0, (2 * density).toInt(), 0, (8 * density).toInt())
         }
@@ -919,7 +922,7 @@ class TestNotesMiniAppInstance(
         // Status view
         statusView = TextView(context).apply {
             text = "State: ${lifecycleState.name}"
-            setTextColor(Color.parseColor("#A6ADC8"))
+            setTextColor(palette.textSecondary)
             textSize = 11f
             setPadding(0, 0, 0, (10 * density).toInt())
         }
@@ -935,16 +938,16 @@ class TestNotesMiniAppInstance(
                 reportSelectionChangedToMain(selStart, selEnd)
             }
         ).apply {
-            hint = "Type here... Text is persisted durably on Sleep."
-            setHintTextColor(Color.parseColor("#6C7086"))
-            setTextColor(Color.WHITE)
-            highlightColor = Color.parseColor("#585B70")
+            hint = "Write a note..."
+            setHintTextColor(palette.textMuted)
+            setTextColor(palette.textPrimary)
+            highlightColor = palette.selectionHighlight
             textSize = fontSizeSp
             val bg = GradientDrawable().apply {
                 shape = GradientDrawable.RECTANGLE
                 cornerRadius = 8 * density
-                setColor(Color.parseColor("#313244"))
-                setStroke((1 * density).toInt(), Color.parseColor("#45475A"))
+                setColor(palette.inputBg)
+                setStroke((1 * density).toInt(), palette.border)
             }
             background = bg
             setPadding(

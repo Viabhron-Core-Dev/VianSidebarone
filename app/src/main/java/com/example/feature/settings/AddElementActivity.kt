@@ -292,13 +292,13 @@ class AddElementActivity : ComponentActivity() {
         addItem(android.R.drawable.ic_menu_view, "Floating PWA") {
             handleElementSelected("system:floating_pwa", "Floating PWA")
         }
-        addItem(android.R.drawable.ic_menu_edit, "Test Notes") {
+        addItem(android.R.drawable.ic_menu_edit, "Note") {
             com.example.core.LogKeeper.log(
                 this,
                 "MiniAppLaunchRouting",
                 "ROUTING_DIAG: ELEMENT_PICKER_ITEM_CLICKED elementId=system:test_notes isHybrid=$isHybridGrid pageId=$pageId containerId=$containerId"
             )
-            handleElementSelected("system:test_notes", "Test Notes")
+            handleElementSelected("system:test_notes", "Note")
         }
 
         scrollView.addView(contentLayout)
