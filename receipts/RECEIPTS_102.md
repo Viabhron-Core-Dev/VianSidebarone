@@ -160,3 +160,53 @@
   - Verified `app/LiteReader_Log.txt` remained unchanged at 1197 lines after running the unit tests. Not tested on a physical Android device or emulator (unavailable in this environment).
 * Any deviation from what was requested, and why: None in product behavior. All tests run on the project's existing pure JVM JUnit 4 + `FakeSharedPreferences` harness without adding new Gradle dependencies; `QuickCallNumberValidator.buildTelUri` returns `Uri?` so JVM `Uri.fromParts` stubs do not throw a platform-null NPE while real Android builds the exact `Uri.fromParts("tel", dialable, null)` intent URI.
 * Any known issue or follow-up needed: Physical-device verification is outstanding for both Part A (Floating Trigger overlay drag/tap/rejection dialogs) and Part B (real `ContactsContract` picker, `READ_CONTACTS`/`CALL_PHONE` system dialogs, `ACTION_CALL`/`ACTION_DIAL` handoff, `PickVisualMedia` custom icon selection, and long-press edit flows).
+
+### Receipt 129
+* Timestamp: 2026-11-20 22:15 UTC
+* One-line summary of what was requested: Phase 14.25 — Implement a real shared offline StarDict Dictionary engine, real shared Google ML Kit on-device Translation engine, functional Dictionary & Translation Settings, connect both floating windows and selection popups (`Meaning` / `Translate`), remove `ReadAloudSelectionActivity` from `ACTION_PROCESS_TEXT` and custom Read Aloud from `MeaningSelectionActivity`, and verify with unit/integration tests and APK size reporting.
+* Exact files touched:
+  - Created:
+    - `app/src/main/java/com/example/feature/language/dictionary/DictionaryModels.kt`
+    - `app/src/main/java/com/example/feature/language/dictionary/StarDictFormatParser.kt`
+    - `app/src/main/java/com/example/feature/language/dictionary/StarDictDiskIndex.kt`
+    - `app/src/main/java/com/example/feature/language/dictionary/StarDictImporter.kt`
+    - `app/src/main/java/com/example/feature/language/dictionary/DictionaryService.kt`
+    - `app/src/main/java/com/example/feature/language/translation/TranslationModels.kt`
+    - `app/src/main/java/com/example/feature/language/translation/TranslationEngineBackend.kt`
+    - `app/src/main/java/com/example/feature/language/translation/TranslationService.kt`
+    - `app/src/main/java/com/example/feature/settings/DictionaryTranslationSettingsDialogs.kt`
+    - `app/src/test/java/com/example/feature/language/StarDictDictionaryEngineTest.kt`
+    - `app/src/test/java/com/example/feature/language/TranslationServiceTest.kt`
+  - Modified:
+    - `app/build.gradle.kts`
+    - `app/src/main/AndroidManifest.xml`
+    - `app/src/main/java/com/example/feature/language/DictionaryMiniAppInstance.kt`
+    - `app/src/main/java/com/example/feature/language/TranslationMiniAppInstance.kt`
+    - `app/src/main/java/com/example/feature/selection/MeaningSelectionActivity.kt`
+    - `app/src/main/java/com/example/feature/selection/TranslateSelectionActivity.kt`
+    - `app/src/main/java/com/example/feature/settings/DictionaryTranslationSettingsScreen.kt`
+    - `app/src/test/java/com/example/feature/language/DictionaryAndTranslationMiniAppTest.kt`
+    - `app/src/test/java/com/example/feature/selection/SelectionActionsAndReadAloudTest.kt`
+    - `blueprint/BLUEPRINT.md`
+    - `receipts/RECEIPTS_102.md`
+* What was actually done — factual, not persuasive:
+  1. **Part A — Offline StarDict Dictionary Engine (`feature/language/dictionary/*`)**:
+     - Implemented `StarDictFormatParser` (`.ifo` v2.4.2/3.0.0 32/64-bit, `sametypesequence` + self-tagged `.dict` decoding for `m`, `h`, `x`, `g`, `t`, `w`, graceful binary fallback), `StarDictDiskIndex` (bounded-RAM external merge-sort disk index `sorted_keys.bin` + `key_offsets.bin` with `O(log N)` `RandomAccessFile` exact/case-insensitive/`.syn` lookup), `StarDictImporter` (multi-dict ZIP import, path traversal rejection, streaming `.dict.dz`/`.idx.gz` via `GZIPInputStream`, disk-space guard, `.staging_<uuid>` cleanup, duplicate fingerprint check), and shared `DictionaryService` persisted atomically in `filesDir/stardict_dictionaries/catalog.json` for cross-process consistency (`:heavy` Settings <-> Main).
+  2. **Part D — Google ML Kit On-Device Translation Engine (`app/build.gradle.kts`, `feature/language/translation/*`)**:
+     - Added `com.google.mlkit:translate:17.0.3` and `com.google.mlkit:language-id:17.0.6`.
+     - Implemented `TranslationEngineBackend`, `MlKitTranslationBackend` (`TranslateLanguage.getAllLanguages()`, `RemoteModelManager`, `DownloadConditions`, `LanguageIdentification`, `Translation`, guaranteed `close()` in `finally`), and shared `TranslationService` persisted atomically in `filesDir/mlkit_translation/prefs.json` (defaults: `auto` -> `en`, `wifiOnlyDownloads = true`) with missing-model detection before translation, Wi-Fi-only enforcement + mobile opt-in, and duplicate concurrent download prevention.
+  3. **Parts B, C, E, F — UI Wiring, Functional Settings & Manifest Correction**:
+     - Connected `DictionaryMiniAppInstance` and `MeaningSelectionActivity` to `DictionaryService` (off-main-thread lookup, dictionary attribution, loading/empty/no-result/disabled/error states) and removed custom Read Aloud action & `ReadAloudController` from `MeaningSelectionActivity` (Reader TTS untouched).
+     - Connected `TranslationMiniAppInstance` (inline overlay-safe searchable picker across all ML Kit languages with offline badges) and `TranslateSelectionActivity` to `TranslationService` (real output, working Copy on real output only, in-place missing-model download + Settings shortcut).
+     - Replaced all placeholder rows in `DictionaryTranslationSettingsScreen` (with companion `DictionaryTranslationSettingsDialogs.kt`) with real SAF `.zip` import (`ActivityResultContracts.OpenDocument`), live progress/feedback banners, installed dictionary list with metadata/storage/enable/priority/delete confirmation, default source/target pickers, Wi-Fi-only switch, downloaded models list + delete confirmation, and searchable ML Kit model browser dialog.
+     - Removed `ReadAloudSelectionActivity` `ACTION_PROCESS_TEXT` registration from `AndroidManifest.xml`, keeping ONLY `MeaningSelectionActivity` (`Meaning`) and `TranslateSelectionActivity` (`Translate`).
+  4. **Tests**:
+     - Added `StarDictDictionaryEngineTest` (6 tests), `TranslationServiceTest` (5 tests), and updated `DictionaryAndTranslationMiniAppTest` (5 tests) and `SelectionActionsAndReadAloudTest` (6 tests).
+* How it was verified: Local build (`compile_applet` -> `Build succeeded - the applet is compiled`) and targeted local JVM unit tests:
+  - `gradle :app:testDebugUnitTest --tests "com.example.feature.language.*" --tests "com.example.feature.selection.*" --tests "com.example.feature.settings.SettingsNavigationStructureTest" --tests "com.example.feature.quickcall.*" --tests "com.example.feature.floating.trigger.*" --tests "com.example.feature.floating.FloatingMiniAppFrameworkTest" --tests "com.example.feature.reader.ReaderMiniAppTest" --tests "com.example.feature.reader.ReaderArchitectureAndBackupTest" --tests "com.example.feature.element.*" --rerun-tasks --console=plain` -> `BUILD SUCCESSFUL` (**211/211** tests passed across 16 suites: `StarDictDictionaryEngineTest` 6/6, `TranslationServiceTest` 5/5, `DictionaryAndTranslationMiniAppTest` 5/5, `SelectionActionsAndReadAloudTest` 6/6, `SettingsNavigationStructureTest` 2/2, `QuickCallTest` 9/9, `FloatingTriggerTest` 15/15, `FloatingMiniAppFrameworkTest` 98/98, `ReaderMiniAppTest` 18/18, `ReaderArchitectureAndBackupTest` 13/13, `ElementIdParserTest` 12/12, `ElementSystemTest` 4/4, `FolderElementLifecycleTest` 7/7, `HybridGridStorageScopeTest` 4/4, `LinkCustomTabIntegrationTest` 6/6, `VectorDrawablePathTest` 1/1; 0 failures, 0 errors, 0 skipped).
+  - Verified `app/LiteReader_Log.txt` remained unchanged at 1197 lines.
+  - Measured `app/build/outputs/apk/debug/app-debug.apk`: **80.87 MB** total universal debug APK, with **64.12 MB** from ML Kit native `.so` libraries + TFLite language-ID assets across 4 ABIs (~16.9 MB for `arm64-v8a` alone; translation models are downloaded on-demand at runtime).
+  - Not tested on a physical Android device or emulator (unavailable in this environment).
+* Any deviation from what was requested, and why: None in product behavior. Left `ReadAloudController.kt` and `ReadAloudSelectionActivity.kt` source files in place (unregistered in `AndroidManifest.xml` and removed from `MeaningSelectionActivity`) so no unrelated references break while ensuring zero custom "Read aloud" selection menu entry appears on Android.
+* Any known issue or follow-up needed: Physical-device QA is required to verify live SAF ZIP import on large StarDict archives, real Google ML Kit model download over Wi-Fi/mobile networks, on-device language identification and translation accuracy, cross-process sync between `:heavy` Settings and Main floating windows/popups, and host-app `ACTION_PROCESS_TEXT` menu entries (`Meaning` and `Translate` only).
+

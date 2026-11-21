@@ -104,22 +104,28 @@ class SelectionActionsAndReadAloudTest {
     }
 
     @Test
-    fun testManifestRegistersThreeDistinctProcessTextActivitiesWithRecognizableLabels() {
+    fun testManifestRegistersOnlyMeaningAndTranslateProcessTextActivities() {
         val manifestFile = listOf(
             File("src/main/AndroidManifest.xml"),
             File("app/src/main/AndroidManifest.xml")
         ).first { it.exists() }
         val xml = manifestFile.readText()
 
-        assertTrue(xml.contains(".feature.selection.ReadAloudSelectionActivity"))
-        assertTrue(xml.contains("android:label=\"Read aloud\""))
+        assertFalse(
+            "ReadAloudSelectionActivity must NOT be registered for ACTION_PROCESS_TEXT",
+            xml.contains(".feature.selection.ReadAloudSelectionActivity")
+        )
+        assertFalse(
+            "Custom 'Read aloud' selection label must NOT be registered in manifest",
+            xml.contains("android:label=\"Read aloud\"")
+        )
         assertTrue(xml.contains(".feature.selection.MeaningSelectionActivity"))
         assertTrue(xml.contains("android:label=\"Meaning\""))
         assertTrue(xml.contains(".feature.selection.TranslateSelectionActivity"))
         assertTrue(xml.contains("android:label=\"Translate\""))
 
         val processTextFilterCount = Regex("android\\.intent\\.action\\.PROCESS_TEXT").findAll(xml).count()
-        assertEquals("Exactly three distinct ACTION_PROCESS_TEXT activities must be registered", 3, processTextFilterCount)
+        assertEquals("Exactly two ACTION_PROCESS_TEXT activities (Meaning & Translate) must be registered", 2, processTextFilterCount)
     }
 
     @Test
@@ -164,7 +170,6 @@ class SelectionActionsAndReadAloudTest {
         repeat(20) { controller.faster() }
         assertEquals(ReadAloudController.MAX_SPEECH_RATE, controller.getSpeechRate(), 0.001f)
 
-        // Blank text does not speak or crash
         assertFalse(controller.speak("   "))
 
         controller.release()
@@ -242,26 +247,22 @@ class SelectionActionsAndReadAloudTest {
     }
 
     @Test
-    fun testSelectionActivitiesCleanUpTtsOnDestroyAndKeepHonestPlaceholders() {
-        val raSrc = listOf(
-            File("src/main/java/com/example/feature/selection/ReadAloudSelectionActivity.kt"),
-            File("app/src/main/java/com/example/feature/selection/ReadAloudSelectionActivity.kt")
-        ).first { it.exists() }.readText()
-        assertTrue(raSrc.contains("readAloudController?.release()"))
-        assertTrue(raSrc.contains("SelectionTextHelper.extractSelectedText"))
-
+    fun testMeaningAndTranslatePopupsWireRealSharedServicesWithoutCustomReadAloud() {
         val meaningSrc = listOf(
             File("src/main/java/com/example/feature/selection/MeaningSelectionActivity.kt"),
             File("app/src/main/java/com/example/feature/selection/MeaningSelectionActivity.kt")
         ).first { it.exists() }.readText()
-        assertTrue(meaningSrc.contains("readAloudController?.release()"))
-        assertTrue(meaningSrc.contains("DICTIONARY NOT CONFIGURED"))
+        assertFalse("MeaningSelectionActivity must NOT use ReadAloudController", meaningSrc.contains("ReadAloudController"))
+        assertFalse("MeaningSelectionActivity must NOT contain custom Read Aloud button", meaningSrc.contains("\"Read Aloud\"") || meaningSrc.contains("TAG_READ_ALOUD"))
+        assertTrue("MeaningSelectionActivity must use shared DictionaryService", meaningSrc.contains("DictionaryService.getInstance"))
+        assertFalse("MeaningSelectionActivity must not keep old placeholder string", meaningSrc.contains("DICTIONARY NOT CONFIGURED"))
 
         val translateSrc = listOf(
             File("src/main/java/com/example/feature/selection/TranslateSelectionActivity.kt"),
             File("app/src/main/java/com/example/feature/selection/TranslateSelectionActivity.kt")
         ).first { it.exists() }.readText()
-        assertTrue(translateSrc.contains("TRANSLATION NOT CONFIGURED"))
+        assertTrue("TranslateSelectionActivity must use shared TranslationService", translateSrc.contains("TranslationService.getInstance"))
         assertTrue(translateSrc.contains("copyTranslation()"))
+        assertFalse("TranslateSelectionActivity must not keep old placeholder string", translateSrc.contains("TRANSLATION NOT CONFIGURED"))
     }
 }
