@@ -355,6 +355,99 @@ class FloatingMiniAppBridge private constructor(private val context: Context) {
         return window
     }
 
+    sealed class DictionaryHandoffResult {
+        data class Success(val window: FloatingMiniAppWindow) : DictionaryHandoffResult()
+        data class Failure(
+            val reasonCode: String,
+            val userMessage: String,
+            val cause: Throwable? = null
+        ) : DictionaryHandoffResult()
+    }
+
+    /**
+     * Opens, wakes, or focuses the single floating Dictionary window with [query] and verifies
+     * that the floating window is actually attached, visible, and hosting a live Dictionary
+     * runtime before reporting [DictionaryHandoffResult.Success].
+     *
+     * Never silently reports success when overlay attachment fails (for example due to missing
+     * overlay permission or a WindowManager failure), and cleans up any newly-created unattached
+     * window so a subsequent retry starts cleanly without creating duplicates.
+     */
+    fun openDictionaryWithQueryResult(
+        query: String,
+        instanceId: String = DEFAULT_DICTIONARY_INSTANCE_ID
+    ): DictionaryHandoffResult {
+        val trimmed = query.trim()
+        val existedBefore = windowManager.getWindow(instanceId) != null
+        return try {
+            val window = openDictionaryWindowInternal(trimmed, instanceId)
+            val attachedAndVisible = window.isAttached && window.state == WindowState.VISIBLE
+            val ready = window.isDictionaryReady()
+            if (!attachedAndVisible || !ready) {
+                if (!existedBefore && !window.isAttached) {
+                    windowManager.unregisterWindow(instanceId)
+                }
+                val overlayDenied = isOverlayPermissionDenied()
+                val reasonCode = when {
+                    overlayDenied -> "OVERLAY_PERMISSION_DENIED"
+                    !attachedAndVisible -> "WINDOW_SHOW_FAILED"
+                    else -> "DICTIONARY_NOT_READY"
+                }
+                val userMessage = if (overlayDenied) {
+                    "Could not open Full Dictionary. Grant overlay permission for Sidebar and tap to retry."
+                } else {
+                    "Could not open Full Dictionary right now. Tap Open Full Dictionary to retry."
+                }
+                LogKeeper.logError(
+                    context,
+                    TAG,
+                    "DICTIONARY_HANDOFF_FAILED id=$instanceId reason=$reasonCode attached=${window.isAttached} state=${window.state} ready=$ready"
+                )
+                return DictionaryHandoffResult.Failure(
+                    reasonCode = reasonCode,
+                    userMessage = userMessage
+                )
+            }
+
+            if (trimmed.isNotEmpty() && !window.openDictionaryQuery(trimmed)) {
+                LogKeeper.logError(
+                    context,
+                    TAG,
+                    "DICTIONARY_HANDOFF_FAILED id=$instanceId reason=DICTIONARY_QUERY_APPLY_FAILED"
+                )
+                return DictionaryHandoffResult.Failure(
+                    reasonCode = "DICTIONARY_QUERY_APPLY_FAILED",
+                    userMessage = "Could not pass the selected word to Full Dictionary. Tap to retry."
+                )
+            }
+
+            LogKeeper.log(
+                context,
+                TAG,
+                "DICTIONARY_HANDOFF_SUCCESS id=$instanceId reused=$existedBefore queryPresent=${trimmed.isNotEmpty()}"
+            )
+            DictionaryHandoffResult.Success(window)
+        } catch (t: Throwable) {
+            val current = windowManager.getWindow(instanceId)
+            if (!existedBefore && current != null && !current.isAttached) {
+                try {
+                    windowManager.unregisterWindow(instanceId)
+                } catch (_: Throwable) {}
+            }
+            LogKeeper.logError(
+                context,
+                TAG,
+                "DICTIONARY_HANDOFF_EXCEPTION id=$instanceId type=${t.javaClass.simpleName}",
+                t
+            )
+            DictionaryHandoffResult.Failure(
+                reasonCode = "HANDOFF_EXCEPTION",
+                userMessage = "Could not open Full Dictionary right now. Tap Open Full Dictionary to retry.",
+                cause = t
+            )
+        }
+    }
+
     /**
      * Opens, wakes, or focuses the single floating Dictionary window with [query].
      * Reuses the existing `"miniapp_dictionary"` floating instance rather than creating duplicate
@@ -365,16 +458,23 @@ class FloatingMiniAppBridge private constructor(private val context: Context) {
         instanceId: String = DEFAULT_DICTIONARY_INSTANCE_ID
     ): FloatingMiniAppWindow {
         val trimmed = query.trim()
+        val window = openDictionaryWindowInternal(trimmed, instanceId)
+        if (trimmed.isNotEmpty()) {
+            window.openDictionaryQuery(trimmed)
+        }
+        return window
+    }
+
+    private fun openDictionaryWindowInternal(
+        trimmedQuery: String,
+        instanceId: String
+    ): FloatingMiniAppWindow {
         val existing = windowManager.getWindow(instanceId)
         if (existing is FloatingMiniAppWindow && existing.isDictionaryApp()) {
-            val window = openMiniApp(instanceId, com.example.feature.language.DictionaryMiniAppInstance.APP_TYPE)
-            if (trimmed.isNotEmpty()) {
-                window.openDictionaryQuery(trimmed)
-            }
-            return window
+            return openMiniApp(instanceId, com.example.feature.language.DictionaryMiniAppInstance.APP_TYPE)
         }
 
-        if (trimmed.isNotEmpty()) {
+        if (trimmedQuery.isNotEmpty()) {
             val existingSnapshot = durableStore.loadSnapshot(instanceId)
             val bounds = existingSnapshot?.windowBounds?.copyBounds()
                 ?: com.example.feature.language.LanguageMiniAppUiHelper.computeCompactDictionaryBounds(
@@ -388,16 +488,24 @@ class FloatingMiniAppBridge private constructor(private val context: Context) {
                 state = MiniAppState.ACTIVE,
                 windowBounds = bounds
             )
-            snapshot.payload[com.example.feature.language.DictionaryMiniAppInstance.KEY_QUERY] = trimmed
-            snapshot.payload[com.example.feature.language.DictionaryMiniAppInstance.KEY_SUBMITTED_QUERY] = trimmed
+            snapshot.payload[com.example.feature.language.DictionaryMiniAppInstance.KEY_QUERY] = trimmedQuery
+            snapshot.payload[com.example.feature.language.DictionaryMiniAppInstance.KEY_SUBMITTED_QUERY] = trimmedQuery
             durableStore.saveSnapshot(snapshot)
         }
 
-        val window = openMiniApp(instanceId, com.example.feature.language.DictionaryMiniAppInstance.APP_TYPE)
-        if (trimmed.isNotEmpty()) {
-            window.openDictionaryQuery(trimmed)
+        return openMiniApp(instanceId, com.example.feature.language.DictionaryMiniAppInstance.APP_TYPE)
+    }
+
+    private fun isOverlayPermissionDenied(): Boolean {
+        return try {
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+                !android.provider.Settings.canDrawOverlays(context)
+            } else {
+                false
+            }
+        } catch (_: Throwable) {
+            false
         }
-        return window
     }
 
     /**

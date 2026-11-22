@@ -316,3 +316,39 @@
 * Any deviation from what was requested, and why: None in product scope. Replaced `Color.parseColor(...)` with compile-time ARGB integer constants in `LanguageMiniAppUiHelper` so palette colors have zero runtime parse overhead and resolve accurately in pure JVM unit tests.
 * Any known issue or follow-up needed: Physical-device QA is required to verify real Android system Light/Dark mode switching (including live toggle while Dictionary/Note windows are open), `ACTION_PROCESS_TEXT` Quick Meaning popup -> single-instance Full Dictionary handoff, Dictionary IME/sleep/wake behavior, Note editing/accent contrast/permanent deletion, and untouched Reader visual appearance.
 
+### Receipt 132
+* Timestamp: 2026-11-22 07:08 UTC
+* One-line summary of what was requested: Phase 14.28 — Make Quick Meaning → Full Dictionary handoff failure-aware (dismiss only on verified window attachment/visibility/readiness, preserve popup/result with inline retry error on failure, clean up zombie windows, no duplicate instances, non-content `LogKeeper` diagnostics) and add deterministic real Note fold/wake/delete/save-failure integration tests without modifying Reader, StarDict, Translation, PWA Loader, or unrelated modules.
+* Exact files touched:
+  - Modified:
+    - `app/src/main/java/com/example/feature/floating/FloatingMiniAppWindow.kt`
+    - `app/src/main/java/com/example/feature/floating/FloatingMiniAppBridge.kt`
+    - `app/src/main/java/com/example/feature/selection/MeaningSelectionActivity.kt`
+    - `app/src/main/java/com/example/feature/floating/DurableMiniAppStore.kt`
+    - `app/src/main/java/com/example/core/FloatingWindowManager.kt`
+    - `app/src/test/java/com/example/feature/language/DictionaryMiniAppTest.kt`
+    - `app/src/test/java/com/example/feature/floating/NoteRefinementAndLifecycleTest.kt`
+    - `blueprint/BLUEPRINT.md`
+    - `receipts/RECEIPTS_102.md`
+  - Deleted stray test artifact:
+    - `app/floating_miniapps/` (`legacy_note_1.json` left over from a prior test run before `TemporaryFolder` isolation was added)
+* What was actually done — factual, not persuasive:
+  1. **Preflight Repository Verification**: Confirmed GitHub `Viabhron-Core-Dev/VianSidebarone` `main` HEAD == `24b37d7aac836841aaa8f9b8cc77893f203c65cf` and SHA-256 matched local workspace files with zero divergence before editing.
+  2. **Failure-Aware Quick Meaning → Full Dictionary Handoff (`FloatingMiniAppWindow.kt`, `FloatingMiniAppBridge.kt`, `MeaningSelectionActivity.kt`)**:
+     - Added `FloatingMiniAppWindow.isDictionaryReady()` and changed `openDictionaryQuery(query)` to return `Boolean` (`true` only when `isDictionaryApp() && dictionaryInstance != null`).
+     - Added `FloatingMiniAppBridge.DictionaryHandoffResult` (`Success` / `Failure(reasonCode, userMessage, cause)`) and `openDictionaryWithQueryResult(query, instanceId = DEFAULT_DICTIONARY_INSTANCE_ID)` reusing the single `"miniapp_dictionary"` instance, verifying `window.isAttached && window.state == WindowState.VISIBLE && window.isDictionaryReady()` and `window.openDictionaryQuery(trimmed)`, cleaning up newly-created unattached zombie windows on failure, distinguishing `OVERLAY_PERMISSION_DENIED`, `WINDOW_SHOW_FAILED`, `DICTIONARY_NOT_READY`, and `HANDOFF_EXCEPTION`, and logging diagnostics via `LogKeeper` without logging user query text. Preserved `openDictionaryWithQuery(...)` for compatibility.
+     - Updated `MeaningSelectionActivity` with a non-destructive inline `handoffErrorBanner` (`TAG_HANDOFF_ERROR_BANNER`) and `attemptOpenFullDictionary(...)`: dismisses (`finish()`) ONLY on verified `Success`; on failure/exception keeps the popup open with `selectedText`, `activeQueryTerm`, `lastOutcome`, and displayed definition intact, reveals the error message, updates the button label to `"Retry Full Dictionary"`, and logs `QUICK_MEANING_HANDOFF_FAILED` via `LogKeeper` without user text.
+  3. **Deterministic Real Note Fold/Wake Integration Tests (`NoteRefinementAndLifecycleTest.kt`, `FloatingMiniAppWindow.kt`, `DurableMiniAppStore.kt`, `FloatingWindowManager.kt`)**:
+     - Audited the real `FloatingMiniAppBridge.openMiniApp` -> edit/format/accent/undo-redo -> `sleepMiniApp` -> `flushPendingSaveAsync` -> `unregisterWindow` + launcher bubble -> `wakeMiniApp` -> `closeMiniApp(deleteDurable = true)` flow and fold-failure abort path; found no production lifecycle bug.
+     - Added minimal internal test seams (`DurableMiniAppStore.setInstanceForTesting`, `FloatingWindowManager.resetForTesting`, `FloatingMiniAppWindow.applyNoteFormatting`) and `TemporaryFolder` file isolation.
+     - Added 4 Quick Meaning handoff tests in `DictionaryMiniAppTest` and 2 real Note lifecycle integration tests in `NoteRefinementAndLifecycleTest` using `TEST_DISPATCH_IMMEDIATELY = false` and `CountDownLatch` (zero `Thread.sleep()`).
+* How it was verified: Local build + local JVM unit/integration tests only — NOT tested on a physical Android device or emulator (unavailable in this environment):
+  - `compile_applet`: `Build succeeded - the applet is compiled`.
+  - `gradle :app:assembleDebug --console=plain`: `BUILD SUCCESSFUL` (`app-debug.apk` = `16,420,024` bytes / ~15.66 MiB).
+  - Focused Phase 14.28 JVM suites (`--rerun-tasks`): **126/126** passed across 5 suites (`DictionaryMiniAppTest` 10/10, `StarDictDictionaryEngineTest` 7/7, `SelectionActionsAndReadAloudTest` 6/6, `NoteRefinementAndLifecycleTest` 5/5, `FloatingMiniAppFrameworkTest` 98/98; 0 failures, 0 errors, 0 skipped).
+  - Full `:app:testDebugUnitTest` run: **532/533** passed across 58 suites, **1 failed** (`com.example.core.ipc.CallSensorIpcTest.testHeavyUnavailableAndQueueingBehavior` at `CallSensorIpcTest.kt:279`, a pre-existing unrelated failure already documented in Receipt 130 and intentionally left untouched).
+  - Invariants checked: `app/LiteReader_Log.txt` untouched at **1197 lines**, zero ML Kit references in `app/build.gradle.kts` / `app/src/main`, `deferred/vian-world/translation/README.md` intact, and zero stray `app/floating_miniapps/` directory after full test execution.
+* Any deviation from what was requested, and why: None in product scope. Added minimal internal test hooks (`DurableMiniAppStore.setInstanceForTesting`, `FloatingWindowManager.resetForTesting`, `FloatingMiniAppWindow.applyNoteFormatting`) strictly to exercise the real production `FloatingMiniAppBridge` / `FloatingMiniAppWindow` / `NotePersistenceCoordinator` pipeline deterministically under JVM tests without rewriting architecture.
+* Any known issue or follow-up needed: (1) Pre-existing unrelated test failure in `CallSensorIpcTest.testHeavyUnavailableAndQueueingBehavior` (`CallSensorIpcTest.kt:279`) remains outside Phase 14.28 scope. (2) Physical-device QA is required to verify live Quick Meaning → Full Dictionary handoff with overlay permission denied vs. granted, retry recovery, single-instance reuse, and real Note fold/wake/format/accent/undo-redo/delete behavior.
+
+

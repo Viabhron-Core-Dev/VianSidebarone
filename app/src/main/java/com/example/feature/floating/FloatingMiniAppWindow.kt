@@ -368,9 +368,13 @@ class FloatingMiniAppWindow(
 
     private fun usesSystemLightDarkTheme(): Boolean = isDictionaryApp() || isNoteApp()
 
-    fun openDictionaryQuery(query: String) {
-        if (!isDictionaryApp()) return
-        dictionaryInstance?.openQuery(query)
+    fun isDictionaryReady(): Boolean = isDictionaryApp() && dictionaryInstance != null
+
+    fun openDictionaryQuery(query: String): Boolean {
+        if (!isDictionaryApp()) return false
+        val instance = dictionaryInstance ?: return false
+        instance.openQuery(query)
+        return true
     }
 
     /**
@@ -2997,6 +3001,19 @@ class FloatingMiniAppWindow(
     private fun parseColorSafe(hex: String): Int {
         val normalized = normalizeHexColor(hex).removePrefix("#")
         return (0xFF000000L or normalized.toLong(16)).toInt()
+    }
+
+    internal fun applyNoteFormatting(
+        fontSizeSp: Float = currentFontSizeSp,
+        fontStyle: String = currentFontStyle,
+        wordWrap: Boolean = currentWordWrap,
+        lineSpacingMult: Float = currentLineSpacingMult
+    ) {
+        currentFontSizeSp = fontSizeSp
+        currentFontStyle = fontStyle
+        currentWordWrap = wordWrap
+        currentLineSpacingMult = lineSpacingMult
+        dispatchFormatCommand()
     }
 
     private fun dispatchFormatCommand() {

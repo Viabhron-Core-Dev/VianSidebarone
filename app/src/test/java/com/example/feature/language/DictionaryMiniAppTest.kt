@@ -52,6 +52,8 @@ class DictionaryMiniAppTest {
         private val baseFilesDir: File
     ) : ContextWrapper(null) {
         val startedIntents = mutableListOf<Intent>()
+        @Volatile
+        var failWindowAddView: Boolean = false
 
         override fun getApplicationContext(): Context = this
         override fun getPackageName(): String = "com.example"
@@ -86,7 +88,12 @@ class DictionaryMiniAppTest {
             Proxy.newProxyInstance(
                 WindowManager::class.java.classLoader,
                 arrayOf(WindowManager::class.java)
-            ) { _, _, _ -> null } as WindowManager
+            ) { _, method, _ ->
+                if (method.name == "addView" && failWindowAddView) {
+                    throw RuntimeException("Simulated WindowManager.addView overlay failure")
+                }
+                null
+            } as WindowManager
         }
 
         override fun getSystemService(name: String): Any? {
@@ -106,6 +113,7 @@ class DictionaryMiniAppTest {
         context = MockTestContext(prefs, filesDir)
         DurableMiniAppStore.resetForTesting()
         FloatingMiniAppBridge.resetForTesting()
+        FloatingWindowManager.resetForTesting()
         DictionaryService.resetForTesting()
 
         dictionaryService = DictionaryService.createForTesting(context, File(filesDir, "stardict_dictionaries"))
@@ -119,8 +127,7 @@ class DictionaryMiniAppTest {
     @After
     fun tearDown() {
         FloatingMiniAppBridge.resetForTesting()
-        val wm = FloatingWindowManager.getInstance(context)
-        wm.getAllWindows().map { it.windowId }.forEach { wm.unregisterWindow(it) }
+        FloatingWindowManager.resetForTesting()
         DurableMiniAppStore.resetForTesting()
         DictionaryService.resetForTesting()
     }
@@ -387,5 +394,148 @@ class DictionaryMiniAppTest {
         assertFalse("Dictionary copy must not say Dictionary & Translation Settings", dictSrc.contains("Dictionary & Translation Settings"))
         assertTrue(dictSrc.contains("override fun releaseRuntime()"))
         assertTrue(dictSrc.contains("resolvePalette"))
+    }
+
+    @Test
+    fun testQuickMeaningHandoffSuccessOpensDictionaryAndDismissesPopup() {
+        val zip = createSimpleStarDictZip("Oxford Sample", "ephemeral", "Lasting for a very short time.")
+        assertTrue(dictionaryService.importFromFile(zip) is DictionaryImportResult.Success)
+        val lookupOutcome = MeaningSelectionActivity.performSharedLookup(dictionaryService, "ephemeral")
+        assertTrue(lookupOutcome is DictionaryLookupOutcome.Found)
+
+        val popup = MeaningSelectionActivity()
+        popup.setStateForTesting(selected = "ephemeral", activeTerm = "ephemeral", outcome = lookupOutcome)
+
+        var dismissed = false
+        val ok = popup.attemptOpenFullDictionary(
+            handoffExecutor = { term -> bridge.openDictionaryWithQueryResult(term) },
+            onDismiss = { dismissed = true }
+        )
+
+        assertTrue("Successful handoff must return true", ok)
+        assertTrue("Quick Meaning popup must dismiss on successful handoff", dismissed)
+        assertEquals(null, popup.getLastHandoffErrorForTesting())
+
+        val wm = FloatingWindowManager.getInstance(context)
+        val dictWindow = wm.getWindow(FloatingMiniAppBridge.DEFAULT_DICTIONARY_INSTANCE_ID) as? FloatingMiniAppWindow
+        assertNotNull("Full Dictionary window must be open", dictWindow)
+        assertTrue(dictWindow!!.isAttached)
+        assertTrue(dictWindow.isDictionaryReady())
+        assertEquals("ephemeral", dictWindow.getDictionaryInstanceForTesting()?.getLastSubmittedQueryForTesting())
+    }
+
+    @Test
+    fun testQuickMeaningHandoffFailureKeepsPopupOpenAndPreservesResult() {
+        val zip = createSimpleStarDictZip("Oxford Sample", "ephemeral", "Lasting for a very short time.")
+        assertTrue(dictionaryService.importFromFile(zip) is DictionaryImportResult.Success)
+        val lookupOutcome = MeaningSelectionActivity.performSharedLookup(dictionaryService, "ephemeral")
+        assertTrue(lookupOutcome is DictionaryLookupOutcome.Found)
+
+        val popup = MeaningSelectionActivity()
+        popup.setStateForTesting(selected = "ephemeral", activeTerm = "ephemeral", outcome = lookupOutcome)
+
+        // Simulate real WindowManager.addView failure during overlay attachment
+        context.failWindowAddView = true
+        var dismissed = false
+        val ok = popup.attemptOpenFullDictionary(
+            handoffExecutor = { term -> bridge.openDictionaryWithQueryResult(term) },
+            onDismiss = { dismissed = true }
+        )
+
+        assertFalse("Failed handoff must return false", ok)
+        assertFalse("Quick Meaning popup MUST remain open on handoff failure", dismissed)
+        assertNotNull("Clear non-destructive error message must be recorded", popup.getLastHandoffErrorForTesting())
+        assertTrue(popup.getLastHandoffErrorForTesting()!!.contains("Full Dictionary"))
+        assertEquals("Selected term must remain preserved", "ephemeral", popup.getActiveQueryTermForTesting())
+        assertEquals("Displayed lookup result must remain preserved", lookupOutcome, popup.getLastOutcomeForTesting())
+
+        // No broken unattached Dictionary window may linger in FloatingWindowManager
+        val wm = FloatingWindowManager.getInstance(context)
+        assertEquals(
+            "Failed brand-new handoff must not leave a broken zombie Dictionary window",
+            0,
+            wm.getAllWindows().count { (it as? FloatingMiniAppWindow)?.isDictionaryApp() == true }
+        )
+    }
+
+    @Test
+    fun testQuickMeaningHandoffRetryAfterFailureSucceedsCleanly() {
+        val zip = createSimpleStarDictZip("Oxford Sample", "ephemeral", "Lasting for a very short time.")
+        assertTrue(dictionaryService.importFromFile(zip) is DictionaryImportResult.Success)
+        val lookupOutcome = MeaningSelectionActivity.performSharedLookup(dictionaryService, "ephemeral")
+        assertTrue(lookupOutcome is DictionaryLookupOutcome.Found)
+
+        val popup = MeaningSelectionActivity()
+        popup.setStateForTesting(selected = "ephemeral", activeTerm = "ephemeral", outcome = lookupOutcome)
+
+        // First attempt fails (WindowManager overlay error)
+        context.failWindowAddView = true
+        var dismissCount = 0
+        val firstOk = popup.attemptOpenFullDictionary(
+            handoffExecutor = { term -> bridge.openDictionaryWithQueryResult(term) },
+            onDismiss = { dismissCount++ }
+        )
+        assertFalse(firstOk)
+        assertEquals(0, dismissCount)
+        assertNotNull(popup.getLastHandoffErrorForTesting())
+        assertEquals(lookupOutcome, popup.getLastOutcomeForTesting())
+
+        // Retry after condition resolves succeeds with preserved selected term and dismisses popup
+        context.failWindowAddView = false
+        val retryOk = popup.attemptOpenFullDictionary(
+            handoffExecutor = { term -> bridge.openDictionaryWithQueryResult(term) },
+            onDismiss = { dismissCount++ }
+        )
+        assertTrue("Retry handoff must succeed once overlay attachment recovers", retryOk)
+        assertEquals("Popup must dismiss on successful retry", 1, dismissCount)
+        assertEquals("Previous handoff error must clear on successful retry", null, popup.getLastHandoffErrorForTesting())
+
+        val wm = FloatingWindowManager.getInstance(context)
+        val dictWindows = wm.getAllWindows().filterIsInstance<FloatingMiniAppWindow>().filter { it.isDictionaryApp() }
+        assertEquals("Retry must result in exactly one Dictionary window", 1, dictWindows.size)
+        assertEquals("ephemeral", dictWindows.first().getDictionaryInstanceForTesting()?.getLastSubmittedQueryForTesting())
+    }
+
+    @Test
+    fun testRepeatedQuickMeaningHandoffsReuseSingleDictionaryWithoutDuplicates() {
+        val zip = createSimpleStarDictZip("Oxford Sample", "ephemeral", "Lasting for a very short time.")
+        assertTrue(dictionaryService.importFromFile(zip) is DictionaryImportResult.Success)
+
+        val terms = listOf("ephemeral", "serendipity", "ubiquitous")
+        var firstWindow: FloatingMiniAppWindow? = null
+
+        for (term in terms) {
+            val popup = MeaningSelectionActivity()
+            popup.setStateForTesting(
+                selected = term,
+                activeTerm = term,
+                outcome = MeaningSelectionActivity.performSharedLookup(dictionaryService, term)
+            )
+            var dismissed = false
+            var openedWindow: FloatingMiniAppWindow? = null
+            val ok = popup.attemptOpenFullDictionary(
+                handoffExecutor = { q ->
+                    val res = bridge.openDictionaryWithQueryResult(q)
+                    if (res is FloatingMiniAppBridge.DictionaryHandoffResult.Success) {
+                        openedWindow = res.window
+                    }
+                    res
+                },
+                onDismiss = { dismissed = true }
+            )
+            assertTrue("Handoff for '$term' must succeed", ok)
+            assertTrue("Popup must dismiss for '$term'", dismissed)
+            assertNotNull(openedWindow)
+            if (firstWindow == null) {
+                firstWindow = openedWindow
+            } else {
+                assertTrue("Repeated handoffs must reuse the exact same single Dictionary window", firstWindow === openedWindow)
+            }
+        }
+
+        val wm = FloatingWindowManager.getInstance(context)
+        val dictWindows = wm.getAllWindows().filterIsInstance<FloatingMiniAppWindow>().filter { it.isDictionaryApp() }
+        assertEquals("Repeated handoffs must never create duplicate Dictionary windows", 1, dictWindows.size)
+        assertEquals("ubiquitous", dictWindows.first().getDictionaryInstanceForTesting()?.getLastSubmittedQueryForTesting())
     }
 }

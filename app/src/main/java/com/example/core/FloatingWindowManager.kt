@@ -703,5 +703,12 @@ class FloatingWindowManager private constructor(context: Context) {
                 instance ?: FloatingWindowManager(context).also { instance = it }
             }
         }
+
+        internal fun resetForTesting() {
+            synchronized(this) {
+                instance?.unregisterAll()
+                instance = null
+            }
+        }
     }
 }

@@ -9,6 +9,7 @@ import android.view.View
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import com.example.core.LogKeeper
 import com.example.feature.floating.FloatingMiniAppBridge
 import com.example.feature.language.LanguageMiniAppUiHelper
 import com.example.feature.language.dictionary.DictionaryDefinitionEntry
@@ -42,7 +43,9 @@ class MeaningSelectionActivity : Activity() {
     private var wordHeaderView: TextView? = null
     private var wordMetaRow: LinearLayout? = null
     private var meaningBodyContainer: LinearLayout? = null
+    private var handoffErrorBanner: TextView? = null
     private var openFullDictionaryBtn: TextView? = null
+    private var lastHandoffErrorMessage: String? = null
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var lookupJob: Job? = null
@@ -159,6 +162,30 @@ class MeaningSelectionActivity : Activity() {
             layoutParams = LinearLayout.LayoutParams(1, (10 * density).toInt())
         })
 
+        // Non-destructive inline handoff error banner (shown only if Open Full Dictionary fails)
+        val errorBanner = TextView(this).apply {
+            tag = TAG_HANDOFF_ERROR_BANNER
+            visibility = View.GONE
+            textSize = 12f
+            setTextColor(palette.dangerText)
+            background = LanguageMiniAppUiHelper.roundedBg(
+                density,
+                palette.warningBg,
+                palette.dangerText,
+                8f
+            )
+            setPadding((11 * density).toInt(), (8 * density).toInt(), (11 * density).toInt(), (8 * density).toInt())
+            setLineSpacing(0f, 1.2f)
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                bottomMargin = (8 * density).toInt()
+            }
+        }
+        handoffErrorBanner = errorBanner
+        body.addView(errorBanner)
+
         // Primary action: Open Full Dictionary (reuses/focuses existing floating Dictionary window)
         val openFullBtn = LanguageMiniAppUiHelper.createPillButton(
             context = this,
@@ -209,17 +236,108 @@ class MeaningSelectionActivity : Activity() {
     }
 
     private fun openFullDictionaryAndDismiss() {
+        attemptOpenFullDictionary()
+    }
+
+    /**
+     * Attempts to hand off the current selected term to the single floating Dictionary window.
+     * Dismisses Quick Meaning ONLY when the handoff succeeds; on failure, preserves the selected
+     * word and lookup result, surfaces a clear non-destructive error message, and keeps retry ready.
+     */
+    internal fun attemptOpenFullDictionary(
+        handoffExecutor: (String) -> FloatingMiniAppBridge.DictionaryHandoffResult = { term ->
+            FloatingMiniAppBridge.getInstance(applicationContext).openDictionaryWithQueryResult(term)
+        },
+        onDismiss: () -> Unit = { finish() }
+    ): Boolean {
         val term = activeQueryTerm.ifBlank {
             SelectionTextHelper.normalize(selectedText).orEmpty()
         }
-        try {
-            FloatingMiniAppBridge.getInstance(applicationContext).openDictionaryWithQuery(term)
-        } catch (_: Throwable) {}
-        finish()
+        val result = try {
+            handoffExecutor(term)
+        } catch (t: Throwable) {
+            logHandoffDiagnosticError("QUICK_MEANING_HANDOFF_EXCEPTION type=${t.javaClass.simpleName}", t)
+            FloatingMiniAppBridge.DictionaryHandoffResult.Failure(
+                reasonCode = "HANDOFF_EXCEPTION",
+                userMessage = DEFAULT_HANDOFF_ERROR_MESSAGE,
+                cause = t
+            )
+        }
+
+        return when (result) {
+            is FloatingMiniAppBridge.DictionaryHandoffResult.Success -> {
+                clearHandoffError()
+                logHandoffDiagnostic("QUICK_MEANING_HANDOFF_SUCCESS queryPresent=${term.isNotEmpty()}")
+                onDismiss()
+                true
+            }
+            is FloatingMiniAppBridge.DictionaryHandoffResult.Failure -> {
+                val message = result.userMessage.ifBlank { DEFAULT_HANDOFF_ERROR_MESSAGE }
+                showHandoffError(message)
+                logHandoffDiagnosticError(
+                    "QUICK_MEANING_HANDOFF_FAILED reason=${result.reasonCode} queryPresent=${term.isNotEmpty()}",
+                    result.cause
+                )
+                false
+            }
+        }
     }
+
+    private fun showHandoffError(message: String) {
+        lastHandoffErrorMessage = message
+        handoffErrorBanner?.apply {
+            text = message
+            visibility = View.VISIBLE
+        }
+        openFullDictionaryBtn?.apply {
+            text = "Retry Full Dictionary"
+            contentDescription = "Retry opening Full Dictionary for selected word"
+        }
+    }
+
+    private fun clearHandoffError() {
+        lastHandoffErrorMessage = null
+        handoffErrorBanner?.apply {
+            text = ""
+            visibility = View.GONE
+        }
+        openFullDictionaryBtn?.apply {
+            text = "Open Full Dictionary"
+            contentDescription = "Open Full Dictionary for selected word"
+        }
+    }
+
+    private fun logHandoffDiagnostic(message: String) {
+        val ctx = try { applicationContext ?: this } catch (_: Throwable) { null } ?: return
+        try {
+            LogKeeper.log(ctx, TAG, message)
+        } catch (_: Throwable) {}
+    }
+
+    private fun logHandoffDiagnosticError(message: String, throwable: Throwable? = null) {
+        val ctx = try { applicationContext ?: this } catch (_: Throwable) { null } ?: return
+        try {
+            LogKeeper.logError(ctx, TAG, message, throwable)
+        } catch (_: Throwable) {}
+    }
+
+    internal fun setStateForTesting(
+        selected: String?,
+        activeTerm: String,
+        outcome: DictionaryLookupOutcome
+    ) {
+        selectedText = selected
+        activeQueryTerm = activeTerm
+        lastOutcome = outcome
+    }
+
+    internal fun getActiveQueryTermForTesting(): String = activeQueryTerm
+    internal fun getLastOutcomeForTesting(): DictionaryLookupOutcome = lastOutcome
+    internal fun getLastHandoffErrorForTesting(): String? = lastHandoffErrorMessage
 
     private fun triggerLookup() {
         lookupJob?.cancel()
+        clearHandoffError()
         val text = selectedText
         updateWordMetaRow(phonetic = null, partOfSpeech = null)
         if (text.isNullOrBlank()) {
@@ -463,17 +581,23 @@ class MeaningSelectionActivity : Activity() {
         wordHeaderView = null
         wordMetaRow = null
         meaningBodyContainer = null
+        handoffErrorBanner = null
         openFullDictionaryBtn = null
         super.onDestroy()
     }
 
     companion object {
+        private const val TAG = "MeaningSelectionActivity"
+        const val DEFAULT_HANDOFF_ERROR_MESSAGE =
+            "Could not open Full Dictionary right now. Tap Retry Full Dictionary to try again."
+
         const val TAG_SELECTED_WORD = "meaning_popup_selected_word"
         const val TAG_PHONETIC = "meaning_popup_phonetic"
         const val TAG_PART_OF_SPEECH = "meaning_popup_part_of_speech"
         const val TAG_MEANING_RESULT_CONTAINER = "meaning_popup_result_container"
         const val TAG_DEFINITION_CARD = "meaning_popup_definition_card"
         const val TAG_CONCISE_MEANING = "meaning_popup_concise_meaning"
+        const val TAG_HANDOFF_ERROR_BANNER = "meaning_popup_handoff_error_banner"
         const val TAG_OPEN_FULL_DICTIONARY_BUTTON = "meaning_popup_open_full_dictionary_button"
         const val TAG_OPEN_SETTINGS_BUTTON = "meaning_popup_open_settings_button"
 

@@ -323,5 +323,11 @@ open class DurableMiniAppStore internal constructor(context: Context) {
                 instance = null
             }
         }
+
+        internal fun setInstanceForTesting(testStore: DurableMiniAppStore?) {
+            synchronized(this) {
+                instance = testStore
+            }
+        }
     }
 }
