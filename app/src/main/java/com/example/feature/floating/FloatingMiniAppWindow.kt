@@ -267,6 +267,7 @@ class FloatingMiniAppWindow(
     private var pwaWindowController: com.example.feature.pwa.floating.FloatingPwaWindowController? = null
     private var readerInstance: com.example.feature.reader.ReaderMiniAppInstance? = null
     private var dictionaryInstance: com.example.feature.language.DictionaryMiniAppInstance? = null
+    private var htmlMhtViewerInstance: com.example.feature.htmlviewer.HtmlMhtViewerMiniAppInstance? = null
     private var isReaderFocusRequested: Boolean = false
     var currentFontSizeSp: Float = 15f
         private set
@@ -364,11 +365,21 @@ class FloatingMiniAppWindow(
 
     fun isDictionaryApp(): Boolean = (appType == com.example.feature.language.DictionaryMiniAppInstance.APP_TYPE)
 
-    fun isMainOnlyApp(): Boolean = isNoteApp() || isReaderApp() || isDictionaryApp()
+    fun isHtmlMhtViewerApp(): Boolean = (appType == com.example.feature.htmlviewer.HtmlMhtViewerMiniAppInstance.APP_TYPE)
 
-    private fun usesSystemLightDarkTheme(): Boolean = isDictionaryApp() || isNoteApp()
+    fun isMainOnlyApp(): Boolean = isNoteApp() || isReaderApp() || isDictionaryApp() || isHtmlMhtViewerApp()
+
+    private fun usesSystemLightDarkTheme(): Boolean = isDictionaryApp() || isNoteApp() || isHtmlMhtViewerApp()
 
     fun isDictionaryReady(): Boolean = isDictionaryApp() && dictionaryInstance != null
+
+    fun isHtmlMhtViewerReady(): Boolean = isHtmlMhtViewerApp() && htmlMhtViewerInstance?.isReady == true
+
+    fun releaseHtmlViewerForFold() {
+        if (isHtmlMhtViewerApp()) {
+            htmlMhtViewerInstance?.releaseWebViewForFold()
+        }
+    }
 
     fun openDictionaryQuery(query: String): Boolean {
         if (!isDictionaryApp()) return false
@@ -387,11 +398,14 @@ class FloatingMiniAppWindow(
             notePersistence.markDeletedPermanently()
         } else if (isDictionaryApp()) {
             dictionaryInstance?.releaseRuntime()
+        } else if (isHtmlMhtViewerApp()) {
+            htmlMhtViewerInstance?.destroyAndRelease(deleteTempFile = false)
         }
     }
 
     fun getReaderInstanceForTesting(): com.example.feature.reader.ReaderMiniAppInstance? = readerInstance
     fun getDictionaryInstanceForTesting(): com.example.feature.language.DictionaryMiniAppInstance? = dictionaryInstance
+    fun getHtmlMhtViewerInstanceForTesting(): com.example.feature.htmlviewer.HtmlMhtViewerMiniAppInstance? = htmlMhtViewerInstance
     internal fun getWindowTitleForTesting(): String = windowTitle
 
     fun openReaderBookById(epubBookId: Int) {
@@ -539,7 +553,7 @@ class FloatingMiniAppWindow(
         }
         layoutParams.softInputMode = WindowManager.LayoutParams.SOFT_INPUT_STATE_UNCHANGED or
             WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING
-        val saved = durableStore.loadSnapshot(instanceId)
+        val saved = if (isHtmlMhtViewerApp()) null else durableStore.loadSnapshot(instanceId)
         maximizeRestoreBounds = saved?.maximizeRestoreBounds
         normalFloatingBounds = saved?.windowBounds?.copyBounds() ?: bounds.copyBounds()
         val initialSavedText = saved?.payload?.get(TestNotesMiniAppInstance.KEY_TEXT)
@@ -558,7 +572,7 @@ class FloatingMiniAppWindow(
         saved?.payload?.get(NotePersistenceCoordinator.KEY_ACCENT_COLOR)?.takeIf { it.isNotBlank() }?.let {
             currentAccentColorHex = normalizeHexColor(it)
         } ?: run {
-            if (isDictionaryApp()) {
+            if (isDictionaryApp() || isHtmlMhtViewerApp()) {
                 currentAccentColorHex = com.example.feature.language.LanguageMiniAppUiHelper.ACCENT_DICTIONARY_HEX
             }
         }
@@ -566,6 +580,7 @@ class FloatingMiniAppWindow(
             windowTitle = when {
                 isReaderApp() -> "Reader"
                 isDictionaryApp() -> "Dictionary"
+                isHtmlMhtViewerApp() -> "Document"
                 else -> saved?.title?.takeIf { it.isNotEmpty() }
                     ?: when (appType) {
                         "test_notes", "note" -> "Note"
@@ -767,6 +782,8 @@ class FloatingMiniAppWindow(
             setupReaderContentView(context, container)
         } else if (isDictionaryApp()) {
             setupDictionaryContentView(context, container)
+        } else if (isHtmlMhtViewerApp()) {
+            setupHtmlMhtViewerContentView(context, container)
         } else {
             // Embedded Heavy Content Setup
             setupEmbeddedContent(context, container)
@@ -1858,6 +1875,34 @@ class FloatingMiniAppWindow(
         )
     }
 
+    private fun setupHtmlMhtViewerContentView(context: Context, container: FrameLayout) {
+        val session = FloatingMiniAppBridge.getInstance(context).getEphemeralHtmlViewerSession(instanceId)
+        if (session == null) {
+            contentPlaceholderView?.visibility = View.GONE
+            isContentRevealed = true
+            LogKeeper.logError(
+                context,
+                "FloatingMiniAppWindow",
+                "HTML_VIEWER_SESSION_MISSING id=$instanceId"
+            )
+            return
+        }
+        val instance = com.example.feature.htmlviewer.HtmlMhtViewerMiniAppInstance(
+            instanceId = instanceId,
+            session = session
+        )
+        htmlMhtViewerInstance = instance
+        val view = instance.createContentView(context)
+        container.addView(view)
+        contentPlaceholderView?.visibility = View.GONE
+        isContentRevealed = true
+        LogKeeper.log(
+            context,
+            "FloatingMiniAppWindow",
+            "CONTENT_CREATED id=$instanceId mode=main_ephemeral_html_viewer format=${session.formatLabel}"
+        )
+    }
+
     private fun applyFormattingToNoteEditor() {
         val editor = noteEditText ?: return
         editor.textSize = currentFontSizeSp
@@ -2402,8 +2447,8 @@ class FloatingMiniAppWindow(
         }
         topBarView = bar
 
-        // Mini-App Icon Indicator (omit blue dot for Reader; preserve accent indicator for Note & Dictionary)
-        val initialAccentInt = if (isDictionaryApp()) {
+        // Mini-App Icon Indicator (omit blue dot for Reader; preserve accent indicator for Note, Dictionary & Viewer)
+        val initialAccentInt = if (isDictionaryApp() || isHtmlMhtViewerApp()) {
             palette.accentDictionary
         } else {
             parseColorSafe(currentAccentColorHex)
@@ -3202,7 +3247,11 @@ class FloatingMiniAppWindow(
                         LogKeeper.log(context, "FloatingMiniAppWindow", "MOVE_END id=$instanceId finalBounds=$bounds")
                         // Commit normal floating bounds exclusively
                         normalFloatingBounds = bounds.copyBounds()
-                        durableStore.updateWindowBounds(instanceId, normalFloatingBounds)
+                        if (isHtmlMhtViewerApp()) {
+                            FloatingMiniAppBridge.getInstance(context).updateEphemeralHtmlViewerBounds(instanceId, normalFloatingBounds)
+                        } else {
+                            durableStore.updateWindowBounds(instanceId, normalFloatingBounds)
+                        }
                         LogKeeper.log(context, "FloatingMiniAppWindow", "WINDOW_BOUNDS_PERSISTED id=$instanceId bounds=$normalFloatingBounds source=drag")
                     }
                     true
@@ -3257,6 +3306,8 @@ class FloatingMiniAppWindow(
         val closeBtn = createStickerButton(context, "×", if (themedMode) palette.dangerText else Color.parseColor("#F38BA8")) {
             LogKeeper.log(context, "FloatingMiniAppWindow", "CONTROL_CLOSE id=$instanceId")
             FloatingMiniAppBridge.getInstance(context).closeMiniApp(instanceId, deleteDurable = true)
+        }.apply {
+            contentDescription = "Close window"
         }
         stickerCloseButtonView = closeBtn
         sticker.addView(closeBtn)
@@ -3272,6 +3323,8 @@ class FloatingMiniAppWindow(
         val sleepBtn = createStickerButton(context, "—", if (themedMode) palette.textPrimary else Color.parseColor("#CDD6F4")) {
             LogKeeper.log(context, "FloatingMiniAppWindow", "CONTROL_SLEEP id=$instanceId")
             FloatingMiniAppBridge.getInstance(context).sleepMiniApp(instanceId)
+        }.apply {
+            contentDescription = "Fold window"
         }
         stickerSleepButtonView = sleepBtn
         sticker.addView(sleepBtn)
@@ -3424,7 +3477,11 @@ class FloatingMiniAppWindow(
                     cachedSafeBounds = null
                     LogKeeper.log(context, "FloatingMiniAppWindow", "RESIZE_END id=$instanceId finalSize=(${bounds.width},${bounds.height})")
                     normalFloatingBounds = bounds.copyBounds()
-                    durableStore.updateWindowBounds(instanceId, normalFloatingBounds)
+                    if (isHtmlMhtViewerApp()) {
+                        FloatingMiniAppBridge.getInstance(context).updateEphemeralHtmlViewerBounds(instanceId, normalFloatingBounds)
+                    } else {
+                        durableStore.updateWindowBounds(instanceId, normalFloatingBounds)
+                    }
                     LogKeeper.log(context, "FloatingMiniAppWindow", "WINDOW_BOUNDS_PERSISTED id=$instanceId bounds=$normalFloatingBounds source=resize")
                     relayoutEmbeddedSurface(bounds.width, getContentViewportHeight(bounds.height))
                     true
@@ -3694,6 +3751,8 @@ class FloatingMiniAppWindow(
             }
         } else if (isDictionaryApp()) {
             dictionaryInstance?.applyThemeRefresh(context)
+        } else if (isHtmlMhtViewerApp()) {
+            htmlMhtViewerInstance?.applyThemeRefresh(context)
         }
     }
 
@@ -3712,7 +3771,9 @@ class FloatingMiniAppWindow(
             maximizeRestoreBounds = null
             isImeShifted = false
             imeShiftOffsetY = 0
-            durableStore.updateMaximizeRestoreBounds(instanceId, null)
+            if (!isHtmlMhtViewerApp()) {
+                durableStore.updateMaximizeRestoreBounds(instanceId, null)
+            }
 
             // Restore rounded card shape, normal window flags, and sticker resize handle (↘)
             applyCardCornerRadius(false)
@@ -3721,7 +3782,11 @@ class FloatingMiniAppWindow(
 
             LogKeeper.log(context, "FloatingMiniAppWindow", "RESTORE id=$instanceId target=$target")
             LogKeeper.log(context, "FloatingMiniAppWindow", "RESTORE_BOUNDS bounds=$target")
-            durableStore.updateWindowBounds(instanceId, target)
+            if (isHtmlMhtViewerApp()) {
+                FloatingMiniAppBridge.getInstance(context).updateEphemeralHtmlViewerBounds(instanceId, target)
+            } else {
+                durableStore.updateWindowBounds(instanceId, target)
+            }
         } else {
             val safeBounds = getSafeDisplayBounds(context, forceRefresh = true)
             // If IME was shifted, reset IME shift to preserve pristine normal coordinates
@@ -3732,7 +3797,9 @@ class FloatingMiniAppWindow(
             // Save current normal floating bounds before maximizing
             val normalTarget = normalFloatingBounds.copyBounds()
             maximizeRestoreBounds = normalTarget.copyBounds()
-            durableStore.updateMaximizeRestoreBounds(instanceId, maximizeRestoreBounds)
+            if (!isHtmlMhtViewerApp()) {
+                durableStore.updateMaximizeRestoreBounds(instanceId, maximizeRestoreBounds)
+            }
             LogKeeper.log(context, "FloatingMiniAppWindow", "MAXIMIZE_RESTORE_BOUNDS id=$instanceId restoreBounds=$maximizeRestoreBounds")
 
             // Fill maximum safe usable rectangle
@@ -4099,6 +4166,12 @@ class FloatingMiniAppWindow(
                         instance.getReadingViewForTesting()?.isBottomToolbarVisibleForTesting() == true
                 setReaderBottomRightStickerHidden(toolbarVisibleInReading)
             }
+        } else if (isHtmlMhtViewerApp()) {
+            if (folded) {
+                htmlMhtViewerInstance?.releaseWebViewForFold()
+            } else {
+                htmlMhtViewerInstance?.recreateWebViewAfterUnfold(context)
+            }
         }
     }
 
@@ -4114,6 +4187,8 @@ class FloatingMiniAppWindow(
                 setReaderBottomRightStickerHidden(toolbarVisibleInReading)
             } else if (isDictionaryApp()) {
                 dictionaryInstance?.onResume()
+            } else if (isHtmlMhtViewerApp()) {
+                htmlMhtViewerInstance?.onResume()
             }
             LogKeeper.log(context, "FloatingMiniAppWindow", "ON_SHOW_MAIN_ONLY id=$instanceId appType=$appType (skipping Heavy)")
             return
@@ -4169,6 +4244,8 @@ class FloatingMiniAppWindow(
                 readerInstance?.onPause()
             } else if (isDictionaryApp()) {
                 dictionaryInstance?.onPause()
+            } else if (isHtmlMhtViewerApp()) {
+                htmlMhtViewerInstance?.onPause()
             }
             LogKeeper.log(context, "FloatingMiniAppWindow", "ON_HIDE_MAIN_ONLY id=$instanceId appType=$appType (skipping Heavy)")
             return
@@ -4235,6 +4312,15 @@ class FloatingMiniAppWindow(
         } else if (isDictionaryApp()) {
             dictionaryInstance?.onDestroy()
             dictionaryInstance = null
+        } else if (isHtmlMhtViewerApp()) {
+            val bridge = FloatingMiniAppBridge.getInstance(context)
+            val session = bridge.getEphemeralHtmlViewerSession(instanceId)
+            val isFolded = session?.isFolded == true
+            htmlMhtViewerInstance?.destroyAndRelease(deleteTempFile = !isFolded)
+            htmlMhtViewerInstance = null
+            if (!isFolded) {
+                bridge.cleanupUnregisteredEphemeralHtmlSession(instanceId)
+            }
         }
         if (!isMainOnlyApp()) {
             HeavyProcessConnectionManager.getInstance(context).removeListener(connectionListener)
@@ -4401,7 +4487,11 @@ class FloatingMiniAppWindow(
         layoutParams.y = newY
         (manager ?: FloatingWindowManager.getInstance(context)).updateBounds(windowId, bounds)
         normalFloatingBounds = bounds.copyBounds()
-        durableStore.updateWindowBounds(instanceId, normalFloatingBounds)
+        if (isHtmlMhtViewerApp()) {
+            FloatingMiniAppBridge.getInstance(context).updateEphemeralHtmlViewerBounds(instanceId, normalFloatingBounds)
+        } else {
+            durableStore.updateWindowBounds(instanceId, normalFloatingBounds)
+        }
         return bounds.copyBounds()
     }
 }

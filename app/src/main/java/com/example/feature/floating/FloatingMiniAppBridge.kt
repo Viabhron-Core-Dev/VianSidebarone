@@ -28,7 +28,9 @@ class FloatingMiniAppBridge private constructor(private val context: Context) {
     private val windowManager = FloatingWindowManager.getInstance(context)
     private val durableStore = DurableMiniAppStore.getInstance(context)
     private val activeBubbles = LinkedHashMap<String, FloatingMiniAppLauncherBubble>()
+    private val ephemeralHtmlSessions = LinkedHashMap<String, com.example.feature.htmlviewer.EphemeralHtmlViewerSession>()
     private var noteStaggerIndex = 0
+    private var htmlViewerStaggerIndex = 0
     @Volatile
     private var hiddenReaderInstanceIdForExternal: String? = null
 
@@ -79,10 +81,14 @@ class FloatingMiniAppBridge private constructor(private val context: Context) {
 
     fun isDictionaryMiniApp(appType: String): Boolean = (appType == com.example.feature.language.DictionaryMiniAppInstance.APP_TYPE)
 
+    fun isHtmlMhtViewerMiniApp(appType: String): Boolean =
+        (appType == com.example.feature.htmlviewer.HtmlMhtViewerMiniAppInstance.APP_TYPE)
+
     fun isMainOnlyMiniApp(appType: String): Boolean =
         isNoteMiniApp(appType) ||
             isReaderMiniApp(appType) ||
-            isDictionaryMiniApp(appType)
+            isDictionaryMiniApp(appType) ||
+            isHtmlMhtViewerMiniApp(appType)
 
     /**
      * Opens or wakes the Main-process floating Reader window and loads the specified [epubBookId]
@@ -270,6 +276,9 @@ class FloatingMiniAppBridge private constructor(private val context: Context) {
         appType: String,
         initialBounds: WindowBounds? = null
     ): FloatingMiniAppWindow {
+        require(!isHtmlMhtViewerMiniApp(appType)) {
+            "Ephemeral html_mht_viewer must be opened via openEphemeralHtmlViewer() and never stored durably."
+        }
         val caller = Throwable().stackTrace.getOrNull(1)?.let { "${it.className}.${it.methodName}:${it.lineNumber}" } ?: "unknown"
         LogKeeper.log(
             context,
@@ -508,6 +517,150 @@ class FloatingMiniAppBridge private constructor(private val context: Context) {
         }
     }
 
+    sealed class HtmlViewerOpenResult {
+        data class Success(
+            val window: FloatingMiniAppWindow,
+            val instanceId: String
+        ) : HtmlViewerOpenResult()
+
+        data class Failure(
+            val reasonCode: String,
+            val userMessage: String,
+            val cause: Throwable? = null
+        ) : HtmlViewerOpenResult()
+    }
+
+    fun getEphemeralHtmlViewerSession(instanceId: String): com.example.feature.htmlviewer.EphemeralHtmlViewerSession? =
+        ephemeralHtmlSessions[instanceId]
+
+    fun updateEphemeralHtmlViewerBounds(instanceId: String, newBounds: WindowBounds) {
+        ephemeralHtmlSessions[instanceId]?.windowBounds = newBounds.copyBounds()
+    }
+
+    /**
+     * Removes an ephemeral HTML viewer session and deletes its temporary cache file when
+     * its window is torn down outside a fold transition (for example direct WindowManager cleanup).
+     */
+    internal fun cleanupUnregisteredEphemeralHtmlSession(instanceId: String) {
+        val current = ephemeralHtmlSessions[instanceId] ?: return
+        if (current.isFolded) return
+        ephemeralHtmlSessions.remove(instanceId)
+        dismissLauncherBubble(instanceId)
+        com.example.feature.htmlviewer.HtmlMhtCacheManager.deleteTempFile(current.tempHtmlFile)
+    }
+
+    internal fun getActiveEphemeralHtmlViewerIdsForTesting(): Set<String> = ephemeralHtmlSessions.keys.toSet()
+
+    /**
+     * Opens a strictly ephemeral Main-process floating viewer for a single local HTML/MHT document.
+     *
+     * Never writes to [DurableMiniAppStore], never starts the Heavy process, assigns a unique
+     * instance ID per opened document, and deletes [tempHtmlFile] immediately if window attachment
+     * or WebView initialization fails.
+     */
+    fun openEphemeralHtmlViewer(
+        tempHtmlFile: java.io.File,
+        displayTitle: String,
+        formatLabel: String = "HTML",
+        initialBounds: WindowBounds? = null
+    ): HtmlViewerOpenResult {
+        if (!tempHtmlFile.exists() || !tempHtmlFile.isFile) {
+            return HtmlViewerOpenResult.Failure(
+                reasonCode = "TEMP_FILE_MISSING",
+                userMessage = "Temporary document cache is missing or unreadable."
+            )
+        }
+
+        if (isOverlayPermissionDenied()) {
+            com.example.feature.htmlviewer.HtmlMhtCacheManager.deleteTempFile(tempHtmlFile)
+            LogKeeper.logError(context, TAG, "HTML_VIEWER_OPEN_FAILED reason=OVERLAY_PERMISSION_DENIED")
+            return HtmlViewerOpenResult.Failure(
+                reasonCode = "OVERLAY_PERMISSION_DENIED",
+                userMessage = "Overlay permission is required to display floating HTML/MHT documents."
+            )
+        }
+
+        val instanceId = "html_viewer_${System.currentTimeMillis()}_${UUID.randomUUID().toString().take(6)}"
+        val slot = htmlViewerStaggerIndex++
+        val bounds = initialBounds?.copyBounds()
+            ?: com.example.feature.htmlviewer.HtmlMhtViewerMiniAppInstance.computeDefaultViewerBounds(
+                context = context,
+                screenWidth = windowManager.screenWidth,
+                screenHeight = windowManager.screenHeight,
+                staggerSlot = slot
+            )
+
+        val defaultBubbleX = bounds.x.coerceAtLeast(16)
+        val defaultBubbleY = bounds.y.coerceAtLeast(96)
+        val session = com.example.feature.htmlviewer.EphemeralHtmlViewerSession(
+            instanceId = instanceId,
+            displayTitle = displayTitle,
+            tempHtmlFile = tempHtmlFile,
+            formatLabel = formatLabel,
+            windowBounds = bounds.copyBounds(),
+            buttonPosition = Pair(defaultBubbleX, defaultBubbleY),
+            isFolded = false
+        )
+        ephemeralHtmlSessions[instanceId] = session
+
+        return try {
+            val window = FloatingMiniAppWindow(
+                instanceId = instanceId,
+                context = context,
+                appType = com.example.feature.htmlviewer.HtmlMhtViewerMiniAppInstance.APP_TYPE,
+                windowTitle = displayTitle
+            )
+            window.setWindowBounds(bounds)
+            windowManager.registerWindow(window)
+            val shown = windowManager.showWindow(instanceId)
+            if (shown) {
+                windowManager.bringToFront(instanceId)
+            }
+
+            val attachedAndVisible = shown && window.isAttached && window.state == WindowState.VISIBLE
+            val ready = window.isHtmlMhtViewerReady()
+            if (!attachedAndVisible || !ready) {
+                val errCode = window.getHtmlMhtViewerInstanceForTesting()?.lastErrorCode
+                val errMsg = window.getHtmlMhtViewerInstanceForTesting()?.lastErrorMessage
+                windowManager.unregisterWindow(instanceId)
+                ephemeralHtmlSessions.remove(instanceId)
+                com.example.feature.htmlviewer.HtmlMhtCacheManager.deleteTempFile(tempHtmlFile)
+                val reason = when {
+                    isOverlayPermissionDenied() -> "OVERLAY_PERMISSION_DENIED"
+                    !attachedAndVisible -> "WINDOW_SHOW_FAILED"
+                    !errCode.isNullOrBlank() -> errCode
+                    else -> "WEBVIEW_INIT_FAILED"
+                }
+                val userMsg = errMsg ?: if (reason == "OVERLAY_PERMISSION_DENIED") {
+                    "Overlay permission is required to display floating HTML/MHT documents."
+                } else {
+                    "Could not open the floating document viewer right now."
+                }
+                LogKeeper.logError(
+                    context,
+                    TAG,
+                    "HTML_VIEWER_OPEN_FAILED id=$instanceId reason=$reason attached=${window.isAttached} state=${window.state} ready=$ready"
+                )
+                return HtmlViewerOpenResult.Failure(reason, userMsg)
+            }
+
+            LogKeeper.log(context, TAG, "HTML_VIEWER_OPENED id=$instanceId format=$formatLabel bounds=$bounds")
+            HtmlViewerOpenResult.Success(window, instanceId)
+        } catch (t: Throwable) {
+            try {
+                windowManager.unregisterWindow(instanceId)
+            } catch (_: Throwable) {}
+            ephemeralHtmlSessions.remove(instanceId)
+            com.example.feature.htmlviewer.HtmlMhtCacheManager.deleteTempFile(tempHtmlFile)
+            LogKeeper.logError(context, TAG, "HTML_VIEWER_OPEN_EXCEPTION id=$instanceId type=${t.javaClass.simpleName}", t)
+            HtmlViewerOpenResult.Failure(
+                reasonCode = "OPEN_EXCEPTION",
+                userMessage = "Could not open the floating document viewer.",
+                cause = t
+            )
+        }
+    }
+
     /**
      * Puts an active mini-app to sleep via safe transactional ordering:
      * 1. FOLD_TRANSACTION_BEGIN.
@@ -526,10 +679,36 @@ class FloatingMiniAppBridge private constructor(private val context: Context) {
         LogKeeper.log(context, TAG, "SLEEP_REQUEST id=$instanceId")
 
         val window = windowManager.getWindow(instanceId) as? FloatingMiniAppWindow
-        val editedPayload = window?.getCurrentPayload() ?: emptyMap()
+        val ephemeralSession = ephemeralHtmlSessions[instanceId]
         val appType = window?.appType
+            ?: ephemeralSession?.let { com.example.feature.htmlviewer.HtmlMhtViewerMiniAppInstance.APP_TYPE }
             ?: durableStore.loadSnapshot(instanceId)?.appType
             ?: "generic"
+
+        if (isHtmlMhtViewerMiniApp(appType) || ephemeralSession != null) {
+            if (ephemeralSession == null) {
+                LogKeeper.log(context, TAG, "FOLD_TRANSACTION_ABORTED id=$instanceId reason=ephemeral_session_missing")
+                onComplete?.invoke(false)
+                return
+            }
+            window?.let { w ->
+                val boundsToKeep = if (!w.isMaximized) {
+                    w.normalFloatingBounds.copyBounds()
+                } else {
+                    w.maximizeRestoreBounds?.copyBounds() ?: w.normalFloatingBounds.copyBounds()
+                }
+                ephemeralSession.windowBounds = boundsToKeep
+                w.releaseHtmlViewerForFold()
+            }
+            ephemeralSession.isFolded = true
+            windowManager.unregisterWindow(instanceId)
+            showEphemeralHtmlLauncherBubble(ephemeralSession)
+            LogKeeper.log(context, TAG, "FOLD_TRANSACTION_COMPLETE id=$instanceId (ephemeral html_mht_viewer)")
+            onComplete?.invoke(true)
+            return
+        }
+
+        val editedPayload = window?.getCurrentPayload() ?: emptyMap()
 
         if (isMainOnlyMiniApp(appType)) {
             LogKeeper.log(context, TAG, "SLEEP_MAIN_ONLY id=$instanceId type=$appType (skipping Heavy)")
@@ -697,6 +876,12 @@ class FloatingMiniAppBridge private constructor(private val context: Context) {
         LogKeeper.log(context, TAG, "WAKE_REQUEST id=$instanceId")
         dismissLauncherBubble(instanceId)
 
+        val ephemeralSession = ephemeralHtmlSessions[instanceId]
+        if (ephemeralSession != null) {
+            wakeEphemeralHtmlViewer(ephemeralSession)
+            return
+        }
+
         LogKeeper.log(context, TAG, "RECOVERY_LOAD_START id=$instanceId")
         val snapshot = try {
             val s = durableStore.loadSnapshot(instanceId)
@@ -735,9 +920,27 @@ class FloatingMiniAppBridge private constructor(private val context: Context) {
         LogKeeper.log(context, TAG, "CLOSE_REQUEST id=$instanceId deleteDurable=$deleteDurable")
 
         val window = windowManager.getWindow(instanceId) as? FloatingMiniAppWindow
+        val ephemeralSession = ephemeralHtmlSessions[instanceId]
         val appType = window?.appType
+            ?: ephemeralSession?.let { com.example.feature.htmlviewer.HtmlMhtViewerMiniAppInstance.APP_TYPE }
             ?: durableStore.loadSnapshot(instanceId)?.appType
             ?: "generic"
+
+        if (isHtmlMhtViewerMiniApp(appType) || ephemeralSession != null) {
+            LogKeeper.log(context, TAG, "CLOSE_EPHEMERAL_HTML_VIEWER id=$instanceId")
+            window?.prepareForPermanentDelete()
+            dismissLauncherBubble(instanceId)
+            windowManager.unregisterWindow(instanceId)
+            val removed = ephemeralHtmlSessions.remove(instanceId)
+            com.example.feature.htmlviewer.HtmlMhtCacheManager.deleteTempFile(removed?.tempHtmlFile)
+            // Ephemeral viewer must never leave a durable snapshot or launcher bubble
+            if (durableStore.loadSnapshot(instanceId) != null) {
+                durableStore.deleteSnapshot(instanceId)
+            }
+            LogKeeper.log(context, TAG, "INSTANCE_CLOSED id=$instanceId (ephemeral)")
+            onComplete?.invoke(true)
+            return
+        }
 
         if (isMainOnlyMiniApp(appType)) {
             LogKeeper.log(context, TAG, "CLOSE_MAIN_ONLY id=$instanceId type=$appType (skipping Heavy)")
@@ -828,6 +1031,10 @@ class FloatingMiniAppBridge private constructor(private val context: Context) {
      * Toggles a mini-app based on appType from Sidebar or element clicks, with optional specific targetInstanceId.
      */
     fun toggleMiniApp(appType: String, targetInstanceId: String? = null) {
+        if (isHtmlMhtViewerMiniApp(appType)) {
+            LogKeeper.log(context, TAG, "TOGGLE_SKIPPED_EPHEMERAL type=$appType")
+            return
+        }
         val caller = Throwable().stackTrace.getOrNull(1)?.let { "${it.className}.${it.methodName}:${it.lineNumber}" } ?: "unknown"
         LogKeeper.log(
             context,
@@ -879,6 +1086,61 @@ class FloatingMiniAppBridge private constructor(private val context: Context) {
         windowManager.bringToFront(bubble.windowId)
     }
 
+    private fun showEphemeralHtmlLauncherBubble(session: com.example.feature.htmlviewer.EphemeralHtmlViewerSession) {
+        dismissLauncherBubble(session.instanceId)
+        val bubble = FloatingMiniAppLauncherBubble(
+            instanceId = session.instanceId,
+            appType = com.example.feature.htmlviewer.HtmlMhtViewerMiniAppInstance.APP_TYPE,
+            context = context,
+            initialX = session.buttonPosition.first,
+            initialY = session.buttonPosition.second,
+            accentColorHex = com.example.feature.language.LanguageMiniAppUiHelper.ACCENT_DICTIONARY_HEX,
+            onPositionChanged = { newX, newY ->
+                session.buttonPosition = Pair(newX, newY)
+            },
+            onBubbleTapped = { id -> wakeMiniApp(id) }
+        )
+        activeBubbles[session.instanceId] = bubble
+        windowManager.registerWindow(bubble)
+        windowManager.showWindow(bubble.windowId)
+        windowManager.bringToFront(bubble.windowId)
+    }
+
+    private fun wakeEphemeralHtmlViewer(session: com.example.feature.htmlviewer.EphemeralHtmlViewerSession) {
+        val instanceId = session.instanceId
+        val existing = windowManager.getWindow(instanceId) as? FloatingMiniAppWindow
+        if (existing != null) {
+            if (existing.state != WindowState.VISIBLE || !existing.isAttached) {
+                windowManager.showWindow(instanceId)
+            }
+            windowManager.bringToFront(instanceId)
+            session.isFolded = false
+            LogKeeper.log(context, TAG, "WAKE_COMPLETE id=$instanceId (ephemeral reused)")
+            return
+        }
+
+        val window = FloatingMiniAppWindow(
+            instanceId = instanceId,
+            context = context,
+            appType = com.example.feature.htmlviewer.HtmlMhtViewerMiniAppInstance.APP_TYPE,
+            windowTitle = session.displayTitle
+        )
+        window.setWindowBounds(session.windowBounds.copyBounds())
+        windowManager.registerWindow(window)
+        val shown = windowManager.showWindow(instanceId)
+        if (!shown || !window.isAttached) {
+            session.isFolded = false
+            windowManager.unregisterWindow(instanceId)
+            ephemeralHtmlSessions.remove(instanceId)
+            com.example.feature.htmlviewer.HtmlMhtCacheManager.deleteTempFile(session.tempHtmlFile)
+            LogKeeper.logError(context, TAG, "WAKE_FAILED_CLEANED_UP id=$instanceId (ephemeral html_mht_viewer)")
+            return
+        }
+        windowManager.bringToFront(instanceId)
+        session.isFolded = false
+        LogKeeper.log(context, TAG, "WAKE_COMPLETE id=$instanceId (ephemeral recreated)")
+    }
+
     private fun dismissLauncherBubble(instanceId: String) {
         val bubble = activeBubbles.remove(instanceId)
         if (bubble != null) {
@@ -895,7 +1157,7 @@ class FloatingMiniAppBridge private constructor(private val context: Context) {
         val restored = mutableListOf<FloatingMiniAppWindow>()
 
         for (snapshot in snapshots) {
-            if (snapshot.appType == "translation") {
+            if (snapshot.appType == "translation" || isHtmlMhtViewerMiniApp(snapshot.appType)) {
                 continue
             }
             when (snapshot.state) {
@@ -947,6 +1209,8 @@ class FloatingMiniAppBridge private constructor(private val context: Context) {
 
         fun resetForTesting() {
             synchronized(this) {
+                instance?.ephemeralHtmlSessions?.clear()
+                instance?.activeBubbles?.clear()
                 instance = null
             }
         }

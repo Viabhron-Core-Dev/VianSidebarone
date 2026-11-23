@@ -30,6 +30,8 @@ class App : Application() {
 
         // Main Process (com.example): Resident lightweight daemon.
         // Keep strictly minimal; do not initialize heavy UI caches or databases.
+        // Clean up any abandoned ephemeral HTML/MHT viewer temp cache files left after a prior process exit.
+        com.example.feature.htmlviewer.HtmlMhtCacheManager.cleanupAbandonedCacheFiles(this)
     }
 
     private fun getProcessNameCompat(): String? {

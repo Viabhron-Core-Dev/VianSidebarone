@@ -292,6 +292,43 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".feature.htmlviewer.HtmlMhtViewerActivity"
+            android:label="Vian Sidebar"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:launchMode="standard"
+            android:theme="@style/Theme.VianSide.SelectionPopup">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="content" />
+                <data android:scheme="file" />
+                <data android:mimeType="text/html" />
+                <data android:mimeType="application/xhtml+xml" />
+                <data android:mimeType="multipart/related" />
+                <data android:mimeType="message/rfc822" />
+                <data android:mimeType="application/x-mimearchive" />
+                <data android:mimeType="application/mime" />
+                <data android:mimeType="text/mhtml" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="content" />
+                <data android:scheme="file" />
+                <data android:host="*" />
+                <data android:pathAdvancedPattern=".*\\.html" />
+                <data android:pathAdvancedPattern=".*\\.htm" />
+                <data android:pathAdvancedPattern=".*\\.mht" />
+                <data android:pathAdvancedPattern=".*\\.mhtml" />
+                <data android:pathAdvancedPattern=".*\\.HTML" />
+                <data android:pathAdvancedPattern=".*\\.HTM" />
+                <data android:pathAdvancedPattern=".*\\.MHT" />
+                <data android:pathAdvancedPattern=".*\\.MHTML" />
+            </intent-filter>
+        </activity>
+
     </application>
 
 </manifest>

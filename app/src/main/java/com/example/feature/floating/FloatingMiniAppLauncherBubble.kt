@@ -32,6 +32,7 @@ class FloatingMiniAppLauncherBubble(
     initialX: Int,
     initialY: Int,
     private val accentColorHex: String? = null,
+    private val onPositionChanged: ((Int, Int) -> Unit)? = null,
     private val onBubbleTapped: (String) -> Unit
 ) : FloatingWindow("bubble_$instanceId", context, TYPE_BUBBLE) {
 
@@ -222,9 +223,13 @@ class FloatingMiniAppLauncherBubble(
                         "FloatingMiniAppLauncherBubble",
                         "LAUNCHER_MOVE_END bounds=$bounds"
                     )
-                    // Persist ONLY buttonPosition in Main's authoritative store
-                    DurableMiniAppStore.getInstance(context)
-                        .updateButtonPosition(instanceId, bounds.x, bounds.y)
+                    if (onPositionChanged != null) {
+                        onPositionChanged.invoke(bounds.x, bounds.y)
+                    } else if (appType != com.example.feature.htmlviewer.HtmlMhtViewerMiniAppInstance.APP_TYPE) {
+                        // Persist ONLY buttonPosition in Main's authoritative store
+                        DurableMiniAppStore.getInstance(context)
+                            .updateButtonPosition(instanceId, bounds.x, bounds.y)
+                    }
                     com.example.core.LogKeeper.log(
                         context,
                         "FloatingMiniAppLauncherBubble",
@@ -307,6 +312,7 @@ class FloatingMiniAppLauncherBubble(
             "reader", "ebook_reader" -> com.example.R.drawable.ic_library_books
             "floating_pwa" -> android.R.drawable.ic_menu_view
             "dictionary" -> android.R.drawable.ic_menu_sort_alphabetically
+            com.example.feature.htmlviewer.HtmlMhtViewerMiniAppInstance.APP_TYPE -> android.R.drawable.ic_menu_view
             "test_notes", "work_notes", "note" -> android.R.drawable.ic_menu_edit
             else -> android.R.drawable.ic_menu_edit
         }
