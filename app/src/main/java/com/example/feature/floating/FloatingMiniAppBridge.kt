@@ -702,7 +702,15 @@ class FloatingMiniAppBridge private constructor(private val context: Context) {
             }
             ephemeralSession.isFolded = true
             windowManager.unregisterWindow(instanceId)
-            showEphemeralHtmlLauncherBubble(ephemeralSession)
+            val bubbleShown = showEphemeralHtmlLauncherBubble(ephemeralSession)
+            if (!bubbleShown) {
+                ephemeralSession.isFolded = false
+                ephemeralHtmlSessions.remove(instanceId)
+                com.example.feature.htmlviewer.HtmlMhtCacheManager.deleteTempFile(ephemeralSession.tempHtmlFile)
+                LogKeeper.logError(context, TAG, "FOLD_BUBBLE_ATTACH_FAILED_CLEANED_UP id=$instanceId")
+                onComplete?.invoke(false)
+                return
+            }
             LogKeeper.log(context, TAG, "FOLD_TRANSACTION_COMPLETE id=$instanceId (ephemeral html_mht_viewer)")
             onComplete?.invoke(true)
             return
@@ -1086,7 +1094,9 @@ class FloatingMiniAppBridge private constructor(private val context: Context) {
         windowManager.bringToFront(bubble.windowId)
     }
 
-    private fun showEphemeralHtmlLauncherBubble(session: com.example.feature.htmlviewer.EphemeralHtmlViewerSession) {
+    private fun showEphemeralHtmlLauncherBubble(
+        session: com.example.feature.htmlviewer.EphemeralHtmlViewerSession
+    ): Boolean {
         dismissLauncherBubble(session.instanceId)
         val bubble = FloatingMiniAppLauncherBubble(
             instanceId = session.instanceId,
@@ -1102,8 +1112,13 @@ class FloatingMiniAppBridge private constructor(private val context: Context) {
         )
         activeBubbles[session.instanceId] = bubble
         windowManager.registerWindow(bubble)
-        windowManager.showWindow(bubble.windowId)
+        val shown = windowManager.showWindow(bubble.windowId)
+        if (!shown || !bubble.isAttached) {
+            dismissLauncherBubble(session.instanceId)
+            return false
+        }
         windowManager.bringToFront(bubble.windowId)
+        return true
     }
 
     private fun wakeEphemeralHtmlViewer(session: com.example.feature.htmlviewer.EphemeralHtmlViewerSession) {

@@ -144,16 +144,21 @@ object MhtmlParser {
             )
         }
 
-        var firstEncodingError: MhtmlParseResult.Error? = null
+        val startContentId = MhtmlDecoderUtils.extractParameter(contentTypeHeader, "start")
+            ?.let { normalizeContentId(it) }
+        val orderedIndices = orderPartIndicesForStartCid(sourceBytes, partSlices, startContentId)
 
-        for (index in partSlices.indices) {
+        var firstEncodingError: MhtmlParseResult.Error? = null
+        var resolvedHtmlResult: MhtmlParseResult.Success? = null
+        var resolvedPartIndex = -1
+
+        for (index in orderedIndices) {
             val part = splitHeadersAndBody(sourceBytes, partSlices[index]) ?: continue
             val partContentType = part.headers["content-type"] ?: "text/plain"
             val partMediaType = MhtmlDecoderUtils.extractMediaType(partContentType)
             val disposition = part.headers["content-disposition"]?.lowercase(Locale.US) ?: ""
 
             if (isIgnoredNonHtmlPart(partMediaType, disposition)) {
-                ignoredCounter[0]++
                 continue
             }
 
@@ -167,21 +172,9 @@ object MhtmlParser {
                     maxHtmlBytes = maxHtmlBytes
                 )
                 if (decoded is MhtmlParseResult.Success) {
-                    // Count remaining trailing non-HTML parts (zero-copy header scan) for accurate reporting
-                    var trailingIgnored = 0
-                    for (remIdx in (index + 1) until partSlices.size) {
-                        val remPart = splitHeadersAndBody(sourceBytes, partSlices[remIdx]) ?: continue
-                        val remCt = remPart.headers["content-type"] ?: "text/plain"
-                        val remMedia = MhtmlDecoderUtils.extractMediaType(remCt)
-                        val remDisp = remPart.headers["content-disposition"]?.lowercase(Locale.US) ?: ""
-                        if (isIgnoredNonHtmlPart(remMedia, remDisp) ||
-                            (remMedia != "text/html" && remMedia != "application/xhtml+xml")
-                        ) {
-                            trailingIgnored++
-                        }
-                    }
-                    ignoredCounter[0] += trailingIgnored
-                    return decoded.copy(ignoredNonHtmlPartCount = ignoredCounter[0])
+                    resolvedHtmlResult = decoded
+                    resolvedPartIndex = index
+                    break
                 } else if (decoded is MhtmlParseResult.Error) {
                     if (decoded.code == MhtmlErrorCode.OVERSIZED_HTML) return decoded
                     if (firstEncodingError == null) firstEncodingError = decoded
@@ -197,19 +190,65 @@ object MhtmlParser {
                     maxHtmlBytes = maxHtmlBytes
                 )
                 if (nested is MhtmlParseResult.Success) {
-                    return nested
+                    resolvedHtmlResult = nested
+                    resolvedPartIndex = index
+                    break
                 } else if (nested is MhtmlParseResult.Error && nested.code == MhtmlErrorCode.OVERSIZED_HTML) {
                     return nested
                 }
-            } else {
-                ignoredCounter[0]++
             }
+        }
+
+        if (resolvedHtmlResult != null) {
+            // Count all non-HTML sibling parts (zero-copy header scan) for accurate reporting
+            var siblingIgnored = 0
+            for (idx in partSlices.indices) {
+                if (idx == resolvedPartIndex) continue
+                val sibling = splitHeadersAndBody(sourceBytes, partSlices[idx]) ?: continue
+                val siblingCt = sibling.headers["content-type"] ?: "text/plain"
+                val siblingMedia = MhtmlDecoderUtils.extractMediaType(siblingCt)
+                val siblingDisp = sibling.headers["content-disposition"]?.lowercase(Locale.US) ?: ""
+                if (isIgnoredNonHtmlPart(siblingMedia, siblingDisp) ||
+                    (siblingMedia != "text/html" && siblingMedia != "application/xhtml+xml" && !siblingMedia.startsWith("multipart/"))
+                ) {
+                    siblingIgnored++
+                }
+            }
+            ignoredCounter[0] += siblingIgnored
+            return resolvedHtmlResult.copy(ignoredNonHtmlPartCount = ignoredCounter[0])
         }
 
         return firstEncodingError ?: MhtmlParseResult.Error(
             MhtmlErrorCode.MISSING_HTML_PART,
             "No HTML document part was found in this MHT archive."
         )
+    }
+
+    private fun normalizeContentId(raw: String): String =
+        raw.trim().removePrefix("<").removeSuffix(">").trim().lowercase(Locale.US)
+
+    private fun orderPartIndicesForStartCid(
+        sourceBytes: ByteArray,
+        partSlices: List<ByteSlice>,
+        startContentId: String?
+    ): List<Int> {
+        if (startContentId.isNullOrEmpty()) return partSlices.indices.toList()
+        var preferredIdx = -1
+        for (idx in partSlices.indices) {
+            val part = splitHeadersAndBody(sourceBytes, partSlices[idx]) ?: continue
+            val cid = part.headers["content-id"]?.let { normalizeContentId(it) }
+            if (cid == startContentId) {
+                preferredIdx = idx
+                break
+            }
+        }
+        if (preferredIdx <= 0) return partSlices.indices.toList()
+        val ordered = ArrayList<Int>(partSlices.size)
+        ordered.add(preferredIdx)
+        for (idx in partSlices.indices) {
+            if (idx != preferredIdx) ordered.add(idx)
+        }
+        return ordered
     }
 
     private fun isIgnoredNonHtmlPart(partMediaType: String, disposition: String): Boolean {
@@ -268,10 +307,13 @@ object MhtmlParser {
             )
         }
 
-        val declaredCharset = MhtmlDecoderUtils.extractParameter(contentTypeHeader, "charset")
+        val bomCharset = HtmlDocumentSanitizer.detectBomCharset(decodedBytes)
+        val charset = bomCharset
+            ?: MhtmlDecoderUtils.extractParameter(contentTypeHeader, "charset")
+                ?.let { MhtmlDecoderUtils.resolveCharsetOrUtf8(it) }
             ?: MhtmlDecoderUtils.sniffMetaCharset(decodedBytes)
-            ?: "UTF-8"
-        val charset = MhtmlDecoderUtils.resolveCharsetOrUtf8(declaredCharset)
+                ?.let { MhtmlDecoderUtils.resolveCharsetOrUtf8(it) }
+            ?: Charsets.UTF_8
         val html = String(decodedBytes, charset).removePrefix("\uFEFF")
 
         return MhtmlParseResult.Success(

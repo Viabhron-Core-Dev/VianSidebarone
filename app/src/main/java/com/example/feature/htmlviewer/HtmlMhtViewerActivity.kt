@@ -26,6 +26,8 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.io.InputStream
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * Exported Android ACTION_VIEW receiver for local .html, .htm, .mht, and .mhtml files.
@@ -90,199 +92,62 @@ class HtmlMhtViewerActivity : ComponentActivity() {
 
         val intentMime = incoming.type
         activityScope.launch {
-            val prepared = withContext(Dispatchers.IO) {
-                prepareDocument(applicationContext, uri, intentMime)
-            }
-            if (isFinishing || isDestroyed) {
-                if (prepared is PrepareDocumentResult.Ready) {
-                    HtmlMhtCacheManager.deleteTempFile(prepared.tempFile)
+            val createdTempFileRef = AtomicReference<File?>(null)
+            var handedOffToBridge = false
+            try {
+                val prepared = withContext(Dispatchers.IO) {
+                    prepareDocument(applicationContext, uri, intentMime, createdTempFileRef)
                 }
-                return@launch
-            }
+                if (isFinishing || isDestroyed) {
+                    return@launch
+                }
 
-            when (prepared) {
-                is PrepareDocumentResult.Error -> {
-                    LogKeeper.logError(
-                        applicationContext,
-                        TAG,
-                        "DOCUMENT_PREPARE_FAILED reason=${prepared.reasonCode}"
-                    )
-                    showErrorCard(prepared.userMessage)
-                }
-                is PrepareDocumentResult.Ready -> {
-                    val result = FloatingMiniAppBridge.getInstance(applicationContext)
-                        .openEphemeralHtmlViewer(
-                            tempHtmlFile = prepared.tempFile,
-                            displayTitle = prepared.displayTitle,
-                            formatLabel = prepared.format.label
+                when (prepared) {
+                    is PrepareDocumentResult.Error -> {
+                        LogKeeper.logError(
+                            applicationContext,
+                            TAG,
+                            "DOCUMENT_PREPARE_FAILED reason=${prepared.reasonCode}"
                         )
-                    when (result) {
-                        is FloatingMiniAppBridge.HtmlViewerOpenResult.Success -> {
-                            LogKeeper.log(
-                                applicationContext,
-                                TAG,
-                                "DOCUMENT_OPENED id=${result.instanceId} format=${prepared.format.label}"
+                        showErrorCard(prepared.userMessage)
+                    }
+                    is PrepareDocumentResult.Ready -> {
+                        val result = FloatingMiniAppBridge.getInstance(applicationContext)
+                            .openEphemeralHtmlViewer(
+                                tempHtmlFile = prepared.tempFile,
+                                displayTitle = prepared.displayTitle,
+                                formatLabel = prepared.format.label
                             )
-                            finish()
-                        }
-                        is FloatingMiniAppBridge.HtmlViewerOpenResult.Failure -> {
-                            // Bridge already cleaned up tempFile on failure; defensive delete is idempotent
-                            HtmlMhtCacheManager.deleteTempFile(prepared.tempFile)
-                            LogKeeper.logError(
-                                applicationContext,
-                                TAG,
-                                "FLOATING_OPEN_FAILED reason=${result.reasonCode}"
-                            )
-                            showErrorCard(result.userMessage)
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    internal fun prepareDocument(
-        context: Context,
-        uri: Uri,
-        intentMimeType: String?
-    ): PrepareDocumentResult {
-        val displayName = queryDisplayName(context, uri)
-        val resolvedMime = try {
-            context.contentResolver.getType(uri)
-        } catch (_: Throwable) {
-            null
-        }
-
-        val readResult = try {
-            val stream = context.contentResolver.openInputStream(uri)
-                ?: return PrepareDocumentResult.Error(
-                    reasonCode = "URI_UNREADABLE",
-                    userMessage = "Could not read this file. The file provider did not grant read access."
-                )
-            stream.use { input ->
-                HtmlMhtFormatDetector.readBoundedBytes(
-                    inputStream = input,
-                    maxBytes = HtmlMhtFormatDetector.DEFAULT_MAX_FILE_BYTES
-                )
-            }
-        } catch (t: SecurityException) {
-            LogKeeper.logError(context, TAG, "URI_PERMISSION_DENIED type=${t.javaClass.simpleName}", t)
-            return PrepareDocumentResult.Error(
-                reasonCode = "URI_PERMISSION_DENIED",
-                userMessage = "Permission to read this file was denied or expired."
-            )
-        } catch (t: Throwable) {
-            LogKeeper.logError(context, TAG, "URI_READ_EXCEPTION type=${t.javaClass.simpleName}", t)
-            return PrepareDocumentResult.Error(
-                reasonCode = "URI_READ_FAILED",
-                userMessage = "Could not open or read the selected document."
-            )
-        }
-
-        val rawBytes = when (readResult) {
-            is BoundedReadResult.Success -> readResult.bytes
-            is BoundedReadResult.Oversized -> {
-                return PrepareDocumentResult.Error(
-                    reasonCode = "OVERSIZED_DOCUMENT",
-                    userMessage = "This file exceeds the 10 MB limit for the lightweight floating viewer."
-                )
-            }
-            is BoundedReadResult.ReadFailure -> {
-                return PrepareDocumentResult.Error(
-                    reasonCode = "URI_READ_FAILED",
-                    userMessage = "Failed while reading this file."
-                )
-            }
-        }
-
-        val detection = HtmlMhtFormatDetector.detect(
-            uriScheme = uri.scheme,
-            intentMimeType = intentMimeType,
-            resolvedMimeType = resolvedMime,
-            displayName = displayName,
-            headerBytes = rawBytes
-        )
-        val format = when (detection) {
-            is FormatDetectionResult.Supported -> detection.format
-            is FormatDetectionResult.Unsupported -> {
-                return PrepareDocumentResult.Error(detection.reasonCode, detection.userMessage)
-            }
-        }
-
-        val rawHtml: String
-        var fallbackTitle: String? = null
-        when (format) {
-            DetectedDocumentFormat.HTML -> {
-                if (rawBytes.size > MhtmlParser.DEFAULT_MAX_HTML_BYTES) {
-                    return PrepareDocumentResult.Error(
-                        reasonCode = "OVERSIZED_HTML",
-                        userMessage = "This HTML document exceeds the 5 MB rendering limit."
-                    )
-                }
-                rawHtml = HtmlDocumentSanitizer.decodeHtmlBytes(rawBytes)
-            }
-            DetectedDocumentFormat.MHT -> {
-                when (val parsed = MhtmlParser.parse(rawBytes)) {
-                    is MhtmlParseResult.Success -> {
-                        rawHtml = parsed.html
-                        fallbackTitle = parsed.subjectTitle
-                    }
-                    is MhtmlParseResult.Error -> {
-                        return PrepareDocumentResult.Error(
-                            reasonCode = parsed.code.name,
-                            userMessage = parsed.userMessage
-                        )
-                    }
-                }
-            }
-        }
-
-        val sanitizedHtml = HtmlDocumentSanitizer.prepareForOfflineViewer(rawHtml)
-        val htmlTitle = HtmlDocumentSanitizer.extractTitle(rawHtml)
-        val cleanTitle = HtmlMhtFormatDetector.sanitizeDisplayTitle(
-            displayName = displayName ?: htmlTitle ?: fallbackTitle,
-            fallback = if (format == DetectedDocumentFormat.MHT) "MHT Document" else "HTML Document"
-        )
-
-        val tempFile = when (val writeRes = HtmlMhtCacheManager.writeTempHtmlChecked(context, sanitizedHtml)) {
-            is HtmlMhtCacheManager.TempWriteResult.Success -> writeRes.file
-            is HtmlMhtCacheManager.TempWriteResult.Oversized -> {
-                return PrepareDocumentResult.Error(
-                    reasonCode = "OVERSIZED_HTML",
-                    userMessage = "This HTML document exceeds the 5 MB rendering limit after UTF-8 decoding."
-                )
-            }
-            is HtmlMhtCacheManager.TempWriteResult.Failed -> {
-                return PrepareDocumentResult.Error(
-                    reasonCode = "TEMP_STORAGE_FAILED",
-                    userMessage = "Could not create temporary cache storage for this document."
-                )
-            }
-        }
-
-        return PrepareDocumentResult.Ready(
-            tempFile = tempFile,
-            displayTitle = cleanTitle,
-            format = format
-        )
-    }
-
-    private fun queryDisplayName(context: Context, uri: Uri): String? {
-        try {
-            context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
-                ?.use { cursor ->
-                    if (cursor.moveToFirst()) {
-                        val idx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-                        if (idx >= 0) {
-                            val name = cursor.getString(idx)?.trim()
-                            if (!name.isNullOrEmpty()) return name
+                        when (result) {
+                            is FloatingMiniAppBridge.HtmlViewerOpenResult.Success -> {
+                                handedOffToBridge = true
+                                LogKeeper.log(
+                                    applicationContext,
+                                    TAG,
+                                    "DOCUMENT_OPENED id=${result.instanceId} format=${prepared.format.label}"
+                                )
+                                finish()
+                            }
+                            is FloatingMiniAppBridge.HtmlViewerOpenResult.Failure -> {
+                                // Bridge already cleaned up tempFile on failure; finally delete is idempotent
+                                LogKeeper.logError(
+                                    applicationContext,
+                                    TAG,
+                                    "FLOATING_OPEN_FAILED reason=${result.reasonCode}"
+                                )
+                                showErrorCard(result.userMessage)
+                            }
                         }
                     }
                 }
-        } catch (_: Throwable) {
-            // Fall back safely to URI lastPathSegment
+            } finally {
+                if (!handedOffToBridge) {
+                    createdTempFileRef.getAndSet(null)?.let { orphan ->
+                        HtmlMhtCacheManager.deleteTempFile(orphan)
+                    }
+                }
+            }
         }
-        return uri.lastPathSegment?.substringAfterLast('/')?.takeIf { it.isNotBlank() }
     }
 
     private fun isOverlayPermissionDenied(context: Context): Boolean {
@@ -378,5 +243,179 @@ class HtmlMhtViewerActivity : ComponentActivity() {
 
     companion object {
         private const val TAG = "HtmlMhtViewerActivity"
+
+        internal fun prepareDocument(
+            context: Context,
+            uri: Uri,
+            intentMimeType: String?,
+            createdTempFileRef: AtomicReference<File?>? = null
+        ): PrepareDocumentResult {
+            val displayName = queryDisplayName(context, uri)
+            val resolvedMime = try {
+                context.contentResolver.getType(uri)
+            } catch (_: Throwable) {
+                null
+            }
+            return prepareDocumentInternal(
+                context = context,
+                uriScheme = uri.scheme,
+                intentMimeType = intentMimeType,
+                displayName = displayName,
+                resolvedMime = resolvedMime,
+                createdTempFileRef = createdTempFileRef,
+                streamOpener = { context.contentResolver.openInputStream(uri) }
+            )
+        }
+
+        internal fun prepareDocumentInternal(
+            context: Context,
+            uriScheme: String?,
+            intentMimeType: String?,
+            displayName: String?,
+            resolvedMime: String?,
+            createdTempFileRef: AtomicReference<File?>? = null,
+            streamOpener: () -> InputStream?
+        ): PrepareDocumentResult {
+            val readResult = try {
+                val stream = streamOpener()
+                    ?: return PrepareDocumentResult.Error(
+                        reasonCode = "URI_UNREADABLE",
+                        userMessage = "Could not read this file. The file provider did not grant read access."
+                    )
+                stream.use { input ->
+                    HtmlMhtFormatDetector.readBoundedBytes(
+                        inputStream = input,
+                        maxBytes = HtmlMhtFormatDetector.DEFAULT_MAX_FILE_BYTES
+                    )
+                }
+            } catch (t: SecurityException) {
+                LogKeeper.logError(context, TAG, "URI_PERMISSION_DENIED type=${t.javaClass.simpleName}", t)
+                return PrepareDocumentResult.Error(
+                    reasonCode = "URI_PERMISSION_DENIED",
+                    userMessage = "Permission to read this file was denied or expired."
+                )
+            } catch (t: Throwable) {
+                LogKeeper.logError(context, TAG, "URI_READ_EXCEPTION type=${t.javaClass.simpleName}", t)
+                return PrepareDocumentResult.Error(
+                    reasonCode = "URI_READ_FAILED",
+                    userMessage = "Could not open or read the selected document."
+                )
+            }
+
+            val rawBytes = when (readResult) {
+                is BoundedReadResult.Success -> readResult.bytes
+                is BoundedReadResult.Oversized -> {
+                    return PrepareDocumentResult.Error(
+                        reasonCode = "OVERSIZED_DOCUMENT",
+                        userMessage = "This file exceeds the 10 MB limit for the lightweight floating viewer."
+                    )
+                }
+                is BoundedReadResult.ReadFailure -> {
+                    return PrepareDocumentResult.Error(
+                        reasonCode = "URI_READ_FAILED",
+                        userMessage = "Failed while reading this file."
+                    )
+                }
+            }
+
+            val detection = HtmlMhtFormatDetector.detect(
+                uriScheme = uriScheme,
+                intentMimeType = intentMimeType,
+                resolvedMimeType = resolvedMime,
+                displayName = displayName,
+                headerBytes = rawBytes
+            )
+            val format = when (detection) {
+                is FormatDetectionResult.Supported -> detection.format
+                is FormatDetectionResult.Unsupported -> {
+                    return PrepareDocumentResult.Error(detection.reasonCode, detection.userMessage)
+                }
+            }
+
+            val rawHtml: String
+            var fallbackTitle: String? = null
+            when (format) {
+                DetectedDocumentFormat.HTML -> {
+                    if (rawBytes.size > MhtmlParser.DEFAULT_MAX_HTML_BYTES) {
+                        return PrepareDocumentResult.Error(
+                            reasonCode = "OVERSIZED_HTML",
+                            userMessage = "This HTML document exceeds the 5 MB rendering limit."
+                        )
+                    }
+                    rawHtml = HtmlDocumentSanitizer.decodeHtmlBytes(rawBytes)
+                }
+                DetectedDocumentFormat.MHT -> {
+                    when (val parsed = MhtmlParser.parse(rawBytes)) {
+                        is MhtmlParseResult.Success -> {
+                            rawHtml = parsed.html
+                            fallbackTitle = parsed.subjectTitle
+                        }
+                        is MhtmlParseResult.Error -> {
+                            return PrepareDocumentResult.Error(
+                                reasonCode = parsed.code.name,
+                                userMessage = parsed.userMessage
+                            )
+                        }
+                    }
+                }
+            }
+
+            val sanitizedHtml = HtmlDocumentSanitizer.prepareForOfflineViewer(rawHtml)
+            val htmlTitle = HtmlDocumentSanitizer.extractTitle(rawHtml)
+            val cleanTitle = HtmlMhtFormatDetector.sanitizeDisplayTitle(
+                displayName = displayName ?: htmlTitle ?: fallbackTitle,
+                fallback = if (format == DetectedDocumentFormat.MHT) "MHT Document" else "HTML Document"
+            )
+
+            val tempFile = when (val writeRes = HtmlMhtCacheManager.writeTempHtmlChecked(context, sanitizedHtml)) {
+                is HtmlMhtCacheManager.TempWriteResult.Success -> {
+                    createdTempFileRef?.set(writeRes.file)
+                    writeRes.file
+                }
+                is HtmlMhtCacheManager.TempWriteResult.Oversized -> {
+                    return PrepareDocumentResult.Error(
+                        reasonCode = "OVERSIZED_HTML",
+                        userMessage = "This HTML document exceeds the 5 MB rendering limit after UTF-8 decoding."
+                    )
+                }
+                is HtmlMhtCacheManager.TempWriteResult.Failed -> {
+                    return PrepareDocumentResult.Error(
+                        reasonCode = "TEMP_STORAGE_FAILED",
+                        userMessage = "Could not create temporary cache storage for this document."
+                    )
+                }
+            }
+
+            return PrepareDocumentResult.Ready(
+                tempFile = tempFile,
+                displayTitle = cleanTitle,
+                format = format
+            )
+        }
+
+        private fun queryDisplayName(context: Context, uri: Uri): String? {
+            try {
+                context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+                    ?.use { cursor ->
+                        if (cursor.moveToFirst()) {
+                            val idx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                            if (idx >= 0) {
+                                val name = cursor.getString(idx)?.trim()
+                                if (!name.isNullOrEmpty()) return name
+                            }
+                        }
+                    }
+            } catch (_: Throwable) {
+                // Fall back safely to URI lastPathSegment
+            }
+            return extractFallbackDisplayName(uri.lastPathSegment)
+        }
+
+        internal fun extractFallbackDisplayName(lastPathSegment: String?): String? {
+            return lastPathSegment
+                ?.substringAfterLast('/')
+                ?.substringAfterLast(':')
+                ?.takeIf { it.isNotBlank() }
+        }
     }
 }

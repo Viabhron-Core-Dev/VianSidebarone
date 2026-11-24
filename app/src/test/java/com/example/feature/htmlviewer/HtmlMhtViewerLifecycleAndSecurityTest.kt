@@ -28,8 +28,11 @@ import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
+import java.io.ByteArrayInputStream
 import java.io.File
+import java.io.IOException
 import java.lang.reflect.Proxy
+import java.util.concurrent.atomic.AtomicReference
 
 class HtmlMhtViewerLifecycleAndSecurityTest {
 
@@ -595,5 +598,172 @@ class HtmlMhtViewerLifecycleAndSecurityTest {
         assertFalse("Meta refresh redirects must be stripped", prepared.contains("http-equiv=\"refresh\"", ignoreCase = true))
         assertFalse("Style block CSS url() loads must be scrubbed", prepared.contains("example.com/bg.jpg"))
         assertFalse("Inline style attribute CSS url() loads must be scrubbed", prepared.contains("example.com/inline.png"))
+    }
+
+    @Test
+    fun testSanitizerStripsRestrictiveDocumentViewportSoPinchZoomRemainsEnabled() {
+        val raw = """
+            <!DOCTYPE html>
+            <html>
+            <head>
+              <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+              <title>Locked Mobile Page</title>
+            </head>
+            <body><p>Zoomable text</p></body>
+            </html>
+        """.trimIndent()
+
+        val prepared = HtmlDocumentSanitizer.prepareForOfflineViewer(raw)
+        assertFalse("Restrictive user-scalable=no viewport must be stripped", prepared.contains("user-scalable=no"))
+        assertFalse("Restrictive maximum-scale=1.0 viewport must be stripped", prepared.contains("maximum-scale=1.0"))
+        assertEquals(
+            "Exactly one injected zoom-capable viewport tag should remain",
+            1,
+            Regex("<meta\\b[^>]*name\\s*=\\s*\"viewport\"", RegexOption.IGNORE_CASE).findAll(prepared).count()
+        )
+    }
+
+    @Test
+    fun testPrepareDocumentHandlesPermissionDeniedUnreadableIoErrorOversizedAndTracksTempFile() {
+        assertEquals("report.v2.html", HtmlMhtViewerActivity.extractFallbackDisplayName("primary:Download/report.v2.html"))
+        assertEquals("saved.mht", HtmlMhtViewerActivity.extractFallbackDisplayName("msf:saved.mht"))
+
+        // 1. SecurityException -> URI_PERMISSION_DENIED
+        val permRef = AtomicReference<File?>(null)
+        val permRes = HtmlMhtViewerActivity.prepareDocumentInternal(
+            context = context,
+            uriScheme = "content",
+            intentMimeType = "text/html",
+            displayName = "report.v2.html",
+            resolvedMime = "text/html",
+            createdTempFileRef = permRef,
+            streamOpener = { throw SecurityException("Permission revoked") }
+        )
+        assertTrue(permRes is HtmlMhtViewerActivity.PrepareDocumentResult.Error)
+        assertEquals("URI_PERMISSION_DENIED", (permRes as HtmlMhtViewerActivity.PrepareDocumentResult.Error).reasonCode)
+        assertNull(permRef.get())
+
+        // 2. Null stream -> URI_UNREADABLE
+        val nullRes = HtmlMhtViewerActivity.prepareDocumentInternal(
+            context = context,
+            uriScheme = "content",
+            intentMimeType = "text/html",
+            displayName = "report.v2.html",
+            resolvedMime = "text/html",
+            streamOpener = { null }
+        )
+        assertTrue(nullRes is HtmlMhtViewerActivity.PrepareDocumentResult.Error)
+        assertEquals("URI_UNREADABLE", (nullRes as HtmlMhtViewerActivity.PrepareDocumentResult.Error).reasonCode)
+
+        // 3. IOException -> URI_READ_FAILED
+        val ioRes = HtmlMhtViewerActivity.prepareDocumentInternal(
+            context = context,
+            uriScheme = "content",
+            intentMimeType = "text/html",
+            displayName = "report.v2.html",
+            resolvedMime = "text/html",
+            streamOpener = { throw IOException("Deleted while opening") }
+        )
+        assertTrue(ioRes is HtmlMhtViewerActivity.PrepareDocumentResult.Error)
+        assertEquals("URI_READ_FAILED", (ioRes as HtmlMhtViewerActivity.PrepareDocumentResult.Error).reasonCode)
+
+        // 4. Oversized HTML (> 5 MiB) -> OVERSIZED_HTML & no temp file written
+        val oversizedHtml = ("<html><body>" + "X".repeat(MhtmlParser.DEFAULT_MAX_HTML_BYTES + 128) + "</body></html>")
+            .toByteArray(Charsets.UTF_8)
+        val bigRes = HtmlMhtViewerActivity.prepareDocumentInternal(
+            context = context,
+            uriScheme = "content",
+            intentMimeType = "text/html",
+            displayName = "huge.html",
+            resolvedMime = "text/html",
+            streamOpener = { ByteArrayInputStream(oversizedHtml) }
+        )
+        assertTrue(bigRes is HtmlMhtViewerActivity.PrepareDocumentResult.Error)
+        assertEquals("OVERSIZED_HTML", (bigRes as HtmlMhtViewerActivity.PrepareDocumentResult.Error).reasonCode)
+
+        // 5. Valid HTML -> Ready, temp file tracked in AtomicReference inside codeCacheDir
+        val validRef = AtomicReference<File?>(null)
+        val validHtml = "<!DOCTYPE html><html><body><h1>Prepared</h1></body></html>".toByteArray(Charsets.UTF_8)
+        val okRes = HtmlMhtViewerActivity.prepareDocumentInternal(
+            context = context,
+            uriScheme = "content",
+            intentMimeType = "application/octet-stream",
+            displayName = HtmlMhtViewerActivity.extractFallbackDisplayName("primary:Download/report.v2.html"),
+            resolvedMime = "application/octet-stream",
+            createdTempFileRef = validRef,
+            streamOpener = { ByteArrayInputStream(validHtml) }
+        )
+        assertTrue(okRes is HtmlMhtViewerActivity.PrepareDocumentResult.Ready)
+        val ready = okRes as HtmlMhtViewerActivity.PrepareDocumentResult.Ready
+        assertEquals("report.v2.html", ready.displayTitle)
+        assertEquals(DetectedDocumentFormat.HTML, ready.format)
+        assertEquals("Temp file must be recorded in createdTempFileRef for cancellation cleanup", ready.tempFile, validRef.get())
+        assertTrue(ready.tempFile.exists())
+        HtmlMhtCacheManager.deleteTempFile(ready.tempFile)
+        assertFalse(ready.tempFile.exists())
+    }
+
+    @Test
+    fun testCloseWhileFoldedDeletesTempFileRemovesBubbleAndLeavesZeroSnapshots() {
+        val tempFile = writePreparedTempHtml("<html><body><p>Fold then close</p></body></html>")
+        val opened = bridge.openEphemeralHtmlViewer(tempFile, "folded_close.html", "HTML")
+            as FloatingMiniAppBridge.HtmlViewerOpenResult.Success
+        val id = opened.instanceId
+
+        bridge.sleepMiniApp(id)
+        assertNotNull(windowManager.getWindow("bubble_$id"))
+        assertTrue(tempFile.exists())
+
+        var closeDone = false
+        bridge.closeMiniApp(id, deleteDurable = false) { ok -> closeDone = ok }
+        assertTrue(closeDone)
+        assertNull("Folded bubble must be destroyed on close", windowManager.getWindow("bubble_$id"))
+        assertNull("Window must remain absent", windowManager.getWindow(id))
+        assertNull("Ephemeral session must be removed", bridge.getEphemeralHtmlViewerSession(id))
+        assertFalse("Temp cache file must be deleted when closing while folded", tempFile.exists())
+        assertTrue(store.getAllSnapshots().isEmpty())
+    }
+
+    @Test
+    fun testFoldBubbleAttachFailureCleansUpSessionAndDeletesTempFile() {
+        val tempFile = writePreparedTempHtml("<html><body><p>Fold bubble fail</p></body></html>")
+        val opened = bridge.openEphemeralHtmlViewer(tempFile, "foldfail.html", "HTML")
+            as FloatingMiniAppBridge.HtmlViewerOpenResult.Success
+        val id = opened.instanceId
+
+        // Revoke overlay addView right before folding so bubble attach fails
+        context.failWindowAddView = true
+        var foldResult: Boolean? = null
+        bridge.sleepMiniApp(id) { ok -> foldResult = ok }
+
+        assertEquals(false, foldResult)
+        assertNull("No orphaned bubble may remain", windowManager.getWindow("bubble_$id"))
+        assertNull("Orphaned ephemeral session must be removed on fold bubble failure", bridge.getEphemeralHtmlViewerSession(id))
+        assertFalse("Temp cache file must be deleted on fold bubble failure", tempFile.exists())
+        assertEquals(0, createdHandles.count { !it.isDestroyed })
+    }
+
+    @Test
+    fun testSequentialDocumentOpensAndLiveThemeRefreshWorkCleanly() {
+        val file1 = writePreparedTempHtml("<html><body><h1>First</h1></body></html>")
+        val open1 = bridge.openEphemeralHtmlViewer(file1, "first.html", "HTML")
+            as FloatingMiniAppBridge.HtmlViewerOpenResult.Success
+        // Live system theme refresh on active viewer must not throw or create durable state
+        open1.window.refreshSystemThemeIfApplicable()
+        assertTrue(store.getAllSnapshots().isEmpty())
+
+        bridge.closeMiniApp(open1.instanceId, deleteDurable = true)
+        assertFalse(file1.exists())
+
+        val file2 = writePreparedTempHtml("<html><body><h1>Second</h1></body></html>")
+        val open2 = bridge.openEphemeralHtmlViewer(file2, "second.mht", "MHT")
+            as FloatingMiniAppBridge.HtmlViewerOpenResult.Success
+        assertNotEquals(open1.instanceId, open2.instanceId)
+        assertEquals("second.mht", open2.window.getWindowTitleForTesting())
+        assertTrue(createdHandles.last().loadedHtml!!.contains("<h1>Second</h1>"))
+
+        bridge.closeMiniApp(open2.instanceId, deleteDurable = true)
+        assertFalse(file2.exists())
+        assertTrue(bridge.getActiveEphemeralHtmlViewerIdsForTesting().isEmpty())
     }
 }

@@ -324,6 +324,121 @@ class HtmlMhtParserAndFormatTest {
         assertEquals(MhtmlErrorCode.UNSUPPORTED_ENCODING, (encRes as MhtmlParseResult.Error).code)
     }
 
+    @Test
+    fun testMultiDotAndUppercaseExtensionsAndSpacedBoundaryMhtmlSniffing() {
+        val htmlBytes = "<!DOCTYPE html><html><body><p>Multi-dot doc</p></body></html>".toByteArray(Charsets.UTF_8)
+        for (name in listOf("report.v2.final.html", "ARCHIVE.PAGE.2026.HTML", "notes.2026.11.HTM")) {
+            val res = HtmlMhtFormatDetector.detect(
+                uriScheme = "content",
+                intentMimeType = "application/octet-stream",
+                resolvedMimeType = null,
+                displayName = name,
+                headerBytes = htmlBytes
+            )
+            assertTrue("Expected HTML support for $name", res is FormatDetectionResult.Supported)
+            assertEquals(DetectedDocumentFormat.HTML, (res as FormatDetectionResult.Supported).format)
+        }
+
+        // Leading blank line + spaced "boundary = ..." in MIME header
+        val spacedMhtBytes = (
+            "\r\nFrom: <Saved by Blink>\r\n" +
+                "MIME-Version: 1.0\r\n" +
+                "Content-Type: multipart/related; boundary = \"----=_Spaced_1\"\r\n\r\n" +
+                "------=_Spaced_1\r\n" +
+                "Content-Type: text/html; charset=utf-8\r\n\r\n" +
+                "<html><body>Spaced boundary</body></html>\r\n" +
+                "------=_Spaced_1--"
+            ).toByteArray(Charsets.UTF_8)
+
+        for (name in listOf("saved.page.2026.mht", "SNAPSHOT.V3.MHTML")) {
+            val res = HtmlMhtFormatDetector.detect(
+                uriScheme = "content",
+                intentMimeType = "application/octet-stream",
+                resolvedMimeType = null,
+                displayName = name,
+                headerBytes = spacedMhtBytes
+            )
+            assertTrue("Expected MHT support for $name", res is FormatDetectionResult.Supported)
+            assertEquals(DetectedDocumentFormat.MHT, (res as FormatDetectionResult.Supported).format)
+        }
+    }
+
+    @Test
+    fun testMhtmlUtf16LeBomPartWithoutDeclaredCharsetDecodesCleanly() {
+        val utf16Html = byteArrayOf(0xFF.toByte(), 0xFE.toByte()) +
+            "<html><body><h1>UTF16 MHT</h1></body></html>".toByteArray(Charsets.UTF_16LE)
+        val encoded = Base64.getEncoder().encodeToString(utf16Html)
+
+        val archive = (
+            "MIME-Version: 1.0\r\n" +
+                "Content-Type: multipart/related; boundary=\"BOM_PART\"\r\n\r\n" +
+                "--BOM_PART\r\n" +
+                "Content-Type: text/html\r\n" +
+                "Content-Transfer-Encoding: base64\r\n\r\n" +
+                "$encoded\r\n" +
+                "--BOM_PART--\r\n"
+            ).toByteArray(Charsets.ISO_8859_1)
+
+        val result = MhtmlParser.parse(archive)
+        assertTrue("UTF-16LE BOM MHT part should parse cleanly", result is MhtmlParseResult.Success)
+        val success = result as MhtmlParseResult.Success
+        assertTrue(success.html.contains("<h1>UTF16 MHT</h1>"))
+        assertEquals("UTF-16LE", success.charsetName)
+    }
+
+    @Test
+    fun testMhtmlPrefersRfc2387StartContentIdOverEarlierHtmlSubpart() {
+        val archive = (
+            "MIME-Version: 1.0\r\n" +
+                "Content-Type: multipart/related; type=\"text/html\"; start=\"<main-article@local>\"; boundary=\"START_TEST\"\r\n\r\n" +
+                "--START_TEST\r\n" +
+                "Content-Type: text/html; charset=utf-8\r\n" +
+                "Content-ID: <ad-iframe@local>\r\n\r\n" +
+                "<html><body><p>Secondary iframe fragment</p></body></html>\r\n" +
+                "--START_TEST\r\n" +
+                "Content-Type: image/png\r\n" +
+                "Content-Transfer-Encoding: base64\r\n\r\n" +
+                "AAAA\r\n" +
+                "--START_TEST\r\n" +
+                "Content-Type: text/html; charset=utf-8\r\n" +
+                "Content-ID: <main-article@local>\r\n\r\n" +
+                "<html><body><h1>Primary Start Article</h1></body></html>\r\n" +
+                "--START_TEST\r\n" +
+                "Content-Type: text/css\r\n\r\n" +
+                "body { color: #000; }\r\n" +
+                "--START_TEST--\r\n"
+            ).toByteArray(Charsets.UTF_8)
+
+        val result = MhtmlParser.parse(archive)
+        assertTrue(result is MhtmlParseResult.Success)
+        val success = result as MhtmlParseResult.Success
+        assertTrue("Must select RFC 2387 start HTML part", success.html.contains("<h1>Primary Start Article</h1>"))
+        assertFalse("Must not select earlier iframe HTML part", success.html.contains("Secondary iframe fragment"))
+        assertEquals("Must count ignored non-HTML sibling parts (image + css)", 2, success.ignoredNonHtmlPartCount)
+    }
+
+    @Test
+    fun testMalformedAndLongHtmlDocumentsPrepareSafely() {
+        val malformed = "<p>Unclosed paragraph <div><span>Broken nesting <img src=\"x.png\" alt=\"a > b\"><script>bad()"
+        val preparedMalformed = HtmlDocumentSanitizer.prepareForOfflineViewer(malformed)
+        assertTrue(preparedMalformed.startsWith("<!DOCTYPE html><html><head>"))
+        assertTrue(preparedMalformed.contains("Unclosed paragraph"))
+        assertFalse(preparedMalformed.contains("<img", ignoreCase = true))
+        assertFalse(preparedMalformed.contains("<script", ignoreCase = true))
+
+        val longHtml = buildString {
+            append("<!DOCTYPE html><html><head><title>Long Doc</title></head><body>")
+            repeat(1500) { idx ->
+                append("<section><h2>Section $idx</h2><p>Paragraph content for scrolling check #$idx.</p></section>")
+            }
+            append("</body></html>")
+        }
+        val preparedLong = HtmlDocumentSanitizer.prepareForOfflineViewer(longHtml)
+        assertTrue(preparedLong.contains("Section 0"))
+        assertTrue(preparedLong.contains("Section 1499"))
+        assertTrue(preparedLong.contains("Content-Security-Policy"))
+    }
+
     // -------------------------------------------------------------------------
     // 3. Manifest Registration, Multi-Dot Matching & Add Elements Exclusion Tests
     // -------------------------------------------------------------------------
@@ -348,9 +463,37 @@ class HtmlMhtParserAndFormatTest {
         assertTrue(activityBlock.contains("android:mimeType=\"multipart/related\""))
         assertTrue(activityBlock.contains("android:mimeType=\"message/rfc822\""))
         assertTrue(activityBlock.contains("android:mimeType=\"application/x-mimearchive\""))
+        assertFalse(
+            "Must NOT use API 31+ pathAdvancedPattern on minSdk 26 (silently ignored on Android 8-11)",
+            activityBlock.contains("pathAdvancedPattern")
+        )
         assertTrue(
-            "Fallback extension filter must use pathAdvancedPattern for multi-dot filenames",
-            activityBlock.contains("android:pathAdvancedPattern=\".*\\\\.html\"")
+            "Extension filter must use API-26-compatible pathPattern for .html",
+            activityBlock.contains("android:pathPattern=\".*\\\\.html\"")
+        )
+        assertTrue(
+            "Extension filter must include multi-dot pathPattern tiers for non-backtracking glob matching",
+            activityBlock.contains("android:pathPattern=\".*\\\\..*\\\\.html\"") &&
+                activityBlock.contains("android:pathPattern=\".*\\\\..*\\\\..*\\\\.mhtml\"")
+        )
+        assertTrue(
+            "Extension filter must cover uppercase extensions such as .MHTML",
+            activityBlock.contains("android:pathPattern=\".*\\\\.MHTML\"")
+        )
+        val filterBlocks = Regex("<intent-filter>[\\s\\S]*?</intent-filter>")
+            .findAll(activityBlock)
+            .map { it.value }
+            .toList()
+        val octetStreamFilters = filterBlocks.filter { it.contains("android:mimeType=\"application/octet-stream\"") }
+        assertEquals(
+            "Exactly one intent-filter should handle application/octet-stream strictly scoped by HTML/MHT pathPattern",
+            1,
+            octetStreamFilters.size
+        )
+        assertTrue(
+            "application/octet-stream filter MUST be scoped with explicit HTML/MHT pathPattern entries",
+            octetStreamFilters.single().contains("android:pathPattern=\".*\\\\.mht\"") &&
+                octetStreamFilters.single().contains("android:pathPattern=\".*\\\\.html\"")
         )
         assertFalse("Viewer must NOT run in :heavy process", activityBlock.contains("android:process=\":heavy\""))
         assertFalse("Viewer must NOT register unrestricted */* MIME filter", activityBlock.contains("*/*"))

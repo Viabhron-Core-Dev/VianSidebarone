@@ -238,11 +238,12 @@ object HtmlMhtFormatDetector {
     }
 
     internal fun looksLikeMhtmlHeader(sniffText: String): Boolean {
-        val headerBlock = sniffText.substringBefore("\r\n\r\n").substringBefore("\n\n")
+        val trimmedStart = sniffText.trimStart('\uFEFF', '\r', '\n')
+        val headerBlock = trimmedStart.substringBefore("\r\n\r\n").substringBefore("\n\n")
         val lower = headerBlock.lowercase(Locale.US)
         val hasMimeVersion = Regex("(?m)^mime-version\\s*:").containsMatchIn(lower)
         val hasMultipartContentType = Regex("(?m)^content-type\\s*:\\s*multipart/").containsMatchIn(lower)
-        val hasBoundaryParam = lower.contains("boundary=")
+        val hasBoundaryParam = Regex("\\bboundary\\s*=").containsMatchIn(lower)
         val hasSnapshotHeader = Regex("(?m)^(from|snapshot-content-location|content-location)\\s*:").containsMatchIn(lower)
         return (hasMimeVersion && (hasMultipartContentType || hasBoundaryParam || hasSnapshotHeader)) ||
             (hasMultipartContentType && hasBoundaryParam)

@@ -43,6 +43,10 @@ object HtmlDocumentSanitizer {
         "<meta\\b$ATTR_CHARS\\bhttp-equiv\\s*=\\s*[\"']?refresh[\"']?$ATTR_CHARS>",
         RegexOption.IGNORE_CASE
     )
+    private val META_VIEWPORT_REGEX = Regex(
+        "<meta\\b$ATTR_CHARS\\bname\\s*=\\s*[\"']?viewport[\"']?$ATTR_CHARS>",
+        RegexOption.IGNORE_CASE
+    )
     private val EXTERNAL_LINK_REGEX = Regex("<link\\b$ATTR_CHARS/?>", RegexOption.IGNORE_CASE)
     private val BASE_TAG_REGEX = Regex("<base\\b$ATTR_CHARS/?>", RegexOption.IGNORE_CASE)
 
@@ -95,6 +99,7 @@ object HtmlDocumentSanitizer {
         cleaned = MEDIA_BLOCK_REGEX.replace(cleaned, "")
         cleaned = IMG_TAG_REGEX.replace(cleaned, "")
         cleaned = META_REFRESH_REGEX.replace(cleaned, "")
+        cleaned = META_VIEWPORT_REGEX.replace(cleaned, "")
         cleaned = EXTERNAL_LINK_REGEX.replace(cleaned, "")
         cleaned = BASE_TAG_REGEX.replace(cleaned, "")
 

@@ -3711,7 +3711,11 @@ class FloatingMiniAppWindow(
         if (!usesSystemLightDarkTheme()) return
         val density = context.resources.displayMetrics.density
         val palette = com.example.feature.language.LanguageMiniAppUiHelper.resolvePalette(context)
-        val accentRaw = if (isDictionaryApp()) palette.accentDictionary else parseColorSafe(currentAccentColorHex)
+        val accentRaw = if (isDictionaryApp() || isHtmlMhtViewerApp()) {
+            palette.accentDictionary
+        } else {
+            parseColorSafe(currentAccentColorHex)
+        }
         val displayAccent = com.example.feature.language.LanguageMiniAppUiHelper.adaptAccentForSurface(accentRaw, palette.isDark)
 
         rootCardBackground?.setColor(palette.surfaceBg)
